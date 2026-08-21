@@ -69,9 +69,11 @@ public class ConfigLoaderTests
     }
 
     /// <summary>
-    /// The settings `intest init` does not write and no command reads — `producer`, `name`,
-    /// `intestVersion` — must stay optional, and unknown keys must not be rejected: §5's config
-    /// grows by addition, and a config written by a newer patch release still has to load.
+    /// `producer` and `name` are settings `intest init` writes but no command reads, and
+    /// `intestVersion` is a setting `init` writes that <see cref="ConfigLoader"/> does read
+    /// (surfaced on <see cref="LoadedConfig.IntestVersion"/>) but does not require — all three,
+    /// plus any wholly unknown key, must not be rejected: §5's config grows by addition, and a
+    /// config written by a newer patch release still has to load.
     /// </summary>
     [TestMethod]
     public void IgnoresSettingsItDoesNotRead()
@@ -463,5 +465,49 @@ public class ConfigLoaderTests
 
         reason.ShouldContain("schemaVersion");
         reason.ShouldNotContain("rootNamespace");
+    }
+
+    // ---- intestVersion ---------------------------------------------------------------------
+    // [read-what-init-wrote]: intestVersion joins ConfigLoader because that is where the whole
+    // document is available, but it stays optional — unlike schemaVersion, which governs how
+    // every other setting is interpreted and so must always be declared. Deciding what a
+    // version *means* (comparing it against the running CLI) is `generate --check`'s job, not
+    // this loader's; this only reads and validates the shape of what is written.
+
+    [TestMethod]
+    public void SurfacesAPresentAndWellFormedIntestVersion()
+    {
+        WriteConfig("""
+        { "schemaVersion": 1, "intestVersion": "0.1.0", "spec": { "source": "orders.json" },
+          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+        """);
+
+        ConfigLoader.Load(_root).IntestVersion.ShouldBe("0.1.0");
+    }
+
+    /// <summary>
+    /// The field `init` writes but a config predating it — or one hand-edited without it — does
+    /// not have. It must load, and the absence must be visible to the caller as null rather than
+    /// silently defaulted to some version string, which would let `--check` compare the running
+    /// CLI against a value nobody actually declared.
+    /// </summary>
+    [TestMethod]
+    public void SurfacesNullIntestVersionWhenTheSettingIsMissing()
+    {
+        WriteConfig(Valid);
+
+        ConfigLoader.Load(_root).IntestVersion.ShouldBeNull();
+    }
+
+    [TestMethod]
+    public void ExplainsAnIntestVersionThatIsUnparseable()
+    {
+        var reason = ReasonFor("""
+        { "schemaVersion": 1, "intestVersion": "not-a-version", "spec": { "source": "orders.json" },
+          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+        """);
+
+        reason.ShouldContain("intestVersion");
+        reason.ShouldContain("not-a-version");
     }
 }

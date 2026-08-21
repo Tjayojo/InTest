@@ -100,6 +100,7 @@ public static class ConfigLoader
         }
 
         RequireSupportedSchemaVersion(root);
+        var intestVersion = ReadOptionalIntestVersion(root);
 
         var spec = RequireSection(root, "spec", SpecSectionRule);
         var specSource = RequireString(spec, "spec.source", "source", SpecSourceRule);
@@ -151,8 +152,60 @@ public static class ConfigLoader
                 $"{baseClassReason} Change project.testBaseClass in {FileName} — for example \"Orders.ApiTests.OrdersTestBase\".");
         }
 
-        return new LoadedConfig(specSource, rootNamespace, testBaseClass);
+        return new LoadedConfig(specSource, rootNamespace, testBaseClass, intestVersion);
     }
+
+    /// <summary>
+    /// <c>intestVersion</c> joins <see cref="ConfigLoader"/> because that is where the whole
+    /// document is available (<c>CONTRIBUTING.md</c>'s "Where validation lives" rule), but unlike
+    /// <see cref="RequireSupportedSchemaVersion"/> it stays optional: §5's config grows by
+    /// addition, and a config written by a newer patch release — or predating this field, or
+    /// hand-edited without it — still has to load. Absence is surfaced as null, not defaulted to
+    /// some version string, so a caller can tell "no claim made" from "claimed and matched".
+    /// <para>
+    /// Only the shape is checked here — that it is a string of the same form
+    /// <see cref="CliVersion.Current"/> takes, three dot-separated whole numbers. What the version
+    /// <i>means</i> — whether it matches the running CLI — is <c>generate --check</c>'s job, not
+    /// this loader's.
+    /// </para>
+    /// </summary>
+    private static string? ReadOptionalIntestVersion(JsonElement root)
+    {
+        if (!root.TryGetProperty("intestVersion", out var declared))
+        {
+            return null;
+        }
+
+        var rule = "It must be the intest version that generated this config, as three " +
+                   "dot-separated whole numbers — for example \"0.1.0\".";
+
+        if (declared.ValueKind != JsonValueKind.String)
+        {
+            var written = declared.ValueKind == JsonValueKind.Null ? "null" : Quote(declared);
+            throw new ConfigLoadException(
+                $"intestVersion in {FileName} is {Describe(declared.ValueKind)}, not a string: " +
+                $"{written}. {rule}");
+        }
+
+        var text = declared.GetString()!;
+        if (!IsWellFormedVersion(text))
+        {
+            throw new ConfigLoadException(
+                $"intestVersion in {FileName} is {Quote(declared)}, which is not a version. {rule}");
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// Exactly three dot-separated whole numbers — the shape <see cref="CliVersion.Current"/>
+    /// always takes, since it already strips SourceLink's <c>+&lt;sha&gt;</c> suffix.
+    /// <see cref="Version.TryParse(string?, out Version?)"/> alone is too lenient: it also accepts
+    /// two components ("1.0") and four ("1.0.0.0"), neither of which this CLI ever writes.
+    /// </summary>
+    private static bool IsWellFormedVersion(string text) =>
+        text.Split('.') is [_, _, _] parts &&
+        Array.TrueForAll(parts, part => part.Length > 0 && Array.TrueForAll(part.ToCharArray(), char.IsAsciiDigit));
 
     /// <summary>
     /// Checked before every setting it governs. §5: <c>schemaVersion</c> "moves only on a major —
