@@ -54,10 +54,13 @@ public static class ExitCode
 
     /// <summary>
     /// <c>intest.json</c>'s <c>intestVersion</c> does not match the running tool's own version —
-    /// <c>generate --check</c> only, and only when the config declares a version at all (§5's
-    /// <c>[read-what-init-wrote]</c>: absent means no claim made, not a mismatch). Kept apart
-    /// from <see cref="WorkOutstanding"/> deliberately, per §8: "so CI can distinguish it from a
-    /// genuine diff" — a version drift and a real spec change call for different remedies
+    /// <c>generate --check</c> only, and only when the config declares a version at all (absent
+    /// means no claim made, not a mismatch — the <c>[read-what-init-wrote]</c> decision in
+    /// <c>docs/superpowers/plans/2026-08-21-intest-v1e-check-and-upgrade.md</c>; that slug is a
+    /// plan section, not a spec one, and §5 records no absent-version rule of its own). Kept
+    /// apart from <see cref="WorkOutstanding"/> deliberately, per §5's exit-code table (the
+    /// <c>4</c> row): "so CI can distinguish it from a genuine diff" — a version drift and a real
+    /// spec change call for different remedies
     /// (<c>intest upgrade</c> vs. reviewing what the spec changed), and folding both into <c>1</c>
     /// would make a CI failure unable to say which one happened. Checked, and returned, before
     /// any output comparison runs — §8 requires the version mismatch to pre-empt a diff, not

@@ -1,3 +1,4 @@
+using System.Text;
 using InTest.Cli;
 using InTest.Cli.Commands;
 using Shouldly;
@@ -125,24 +126,22 @@ public class GenerateCheckCommandTests
         return (exitCode, report.ToString());
     }
 
-    /// <summary>Every file `generate` owns, with its current bytes — used to prove --check left
-    /// all of them exactly as they were, not merely that the same file names still exist.</summary>
+    /// <summary>
+    /// Every file under the whole project root, with its current bytes — used to prove --check
+    /// left all of them exactly as they were, not merely that the same file names still exist.
+    /// Walks the whole tree, not just <c>Generated/</c> and <c>coverage-report.json</c>: a stray
+    /// file written anywhere else in the project — <c>&lt;projectRoot&gt;/intest-check-scratch.tmp</c>
+    /// is [no-write]'s own example of "the most likely accidental form" — is just as much a
+    /// [no-write] violation as one written under <c>Generated/</c>, and a narrower snapshot
+    /// cannot see it. The config, spec, and scaffolded files under the root are all stable across
+    /// a --check run, so no exclusions are needed.
+    /// </summary>
     private Dictionary<string, string> SnapshotOwnedFiles()
     {
         var snapshot = new Dictionary<string, string>(StringComparer.Ordinal);
-        var generatedDir = Path.Combine(_root, "Generated");
-        if (Directory.Exists(generatedDir))
+        foreach (var file in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories))
         {
-            foreach (var file in Directory.EnumerateFiles(generatedDir, "*", SearchOption.AllDirectories))
-            {
-                snapshot[file] = File.ReadAllText(file);
-            }
-        }
-
-        var coverageReport = Path.Combine(_root, "coverage-report.json");
-        if (File.Exists(coverageReport))
-        {
-            snapshot[coverageReport] = File.ReadAllText(coverageReport);
+            snapshot[file] = File.ReadAllText(file);
         }
 
         return snapshot;
@@ -150,11 +149,15 @@ public class GenerateCheckCommandTests
 
     /// <summary>
     /// The plan's "wrote nothing" assertion, factored out because every test that reports a
-    /// difference under --check needs it: file **set** unchanged (catches a stray file --check
-    /// might have written inside the project, which a bytes-only comparison of already-known
-    /// files cannot see) and every previously-existing file's bytes unchanged (catches a
-    /// write-then-restore implementation, which a file-set check alone cannot see, since the
-    /// restored file's name and final bytes are correct — only a mid-run write ever happened).
+    /// difference under --check needs it. What it proves: the file **set** under the whole
+    /// project root is unchanged (no file created, deleted, or renamed anywhere in the project,
+    /// per <see cref="SnapshotOwnedFiles"/>) and every previously-existing file's bytes are
+    /// unchanged. What it does NOT prove, and cannot: it cannot distinguish "never wrote" from
+    /// "wrote and restored to the exact original name and bytes" — a before/after snapshot has no
+    /// way to observe a write that happens in between and leaves no trace, which is what "restore
+    /// exactly" means. Only a mid-run observer (a FileSystemWatcher, a read-only ACL) could catch
+    /// that shape; see the [no-write] seam comment above <c>GenerateCommand.BuildOutputs</c> for
+    /// why that shape is instead ruled out by construction rather than by this assertion.
     /// </summary>
     private void AssertOwnedFilesUntouched(Dictionary<string, string> before)
     {
@@ -207,17 +210,68 @@ public class GenerateCheckCommandTests
 
     // ---- 1: any file differs ---------------------------------------------------------------
 
+    /// <summary>
+    /// Finding 1: the comparison must be bytes, not text. File.ReadAllTextAsync performs
+    /// BOM-based encoding detection, so prepending a UTF-8 BOM to a committed file decodes back
+    /// to a string equal to a fresh render's — a text-based compare reports "match" (exit 0) for
+    /// a file `generate` would rewrite without the BOM. Before this fix that was exactly what
+    /// happened; File.ReadAllBytesAsync sees the extra three bytes and reports differs (exit 1).
+    /// </summary>
+    [TestMethod]
+    public async Task ReturnsWorkOutstandingWhenAGeneratedFileGainsAUtf8Bom()
+    {
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var path = Path.Combine(_root, "Generated", "OrdersTests.g.cs");
+        var originalBytes = File.ReadAllBytes(path);
+        var bom = new byte[] { 0xEF, 0xBB, 0xBF };
+        File.WriteAllBytes(path, bom.Concat(originalBytes).ToArray());
+
+        var (exitCode, report) = await CheckAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.WorkOutstanding);
+        report.ShouldContain("Generated/OrdersTests.g.cs");
+        report.ShouldContain("differs from a fresh render");
+    }
+
+    /// <summary>
+    /// Finding 1's second shape: re-encoding a committed file as UTF-16LE produces a file that is
+    /// byte-for-byte unrecognisable (roughly double the size) yet still decodes, via
+    /// File.ReadAllTextAsync's BOM sniffing, to a string equal to a fresh render's — the same
+    /// silently-permissive gap as the BOM case, reached by a different route. Bytes catch it;
+    /// text does not.
+    /// </summary>
+    [TestMethod]
+    public async Task ReturnsWorkOutstandingWhenAGeneratedFileIsReencodedAsUtf16()
+    {
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var path = Path.Combine(_root, "Generated", "OrdersTests.g.cs");
+        var originalText = File.ReadAllText(path);
+        File.WriteAllText(path, originalText, Encoding.Unicode);
+
+        var (exitCode, report) = await CheckAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.WorkOutstanding);
+        report.ShouldContain("Generated/OrdersTests.g.cs");
+        report.ShouldContain("differs from a fresh render");
+    }
+
     [TestMethod]
     public async Task ReturnsWorkOutstandingWhenCoverageReportDiffers()
     {
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
-        var before = SnapshotOwnedFiles();
 
         // info.title flows only into coverage-report.json's "title" field (CoverageReport.cs) —
         // every Generated/*.g.cs file is unaffected, so this isolates "coverage-report.json is
         // compared" from "Generated/ is compared" instead of changing both at once.
         WriteSpec(Spec.Replace("\"title\": \"Orders\"", "\"title\": \"Orders v2\""));
 
+        // Snapshotted after the test's own WriteSpec, not before: SnapshotOwnedFiles now walks
+        // the whole project root (finding 2), which includes orders.json itself — snapshotting
+        // beforehand would capture the pre-edit spec and then flag this test's own deliberate
+        // mutation as if --check had made it.
+        var before = SnapshotOwnedFiles();
         var (exitCode, report) = await CheckAsync(_root);
 
         exitCode.ShouldBe(ExitCode.WorkOutstanding);
@@ -232,11 +286,13 @@ public class GenerateCheckCommandTests
     public async Task ReturnsWorkOutstandingWhenAGeneratedClassDiffers()
     {
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
-        var before = SnapshotOwnedFiles();
 
         // A different operationId changes the rendered method name in OrdersTests.g.cs.
         WriteSpec(Spec.Replace("getOrderById", "fetchOrderById"));
 
+        // See the comment in ReturnsWorkOutstandingWhenCoverageReportDiffers: snapshotted after
+        // this test's own WriteSpec, now that SnapshotOwnedFiles walks the whole project root.
+        var before = SnapshotOwnedFiles();
         var (exitCode, report) = await CheckAsync(_root);
 
         exitCode.ShouldBe(ExitCode.WorkOutstanding);
@@ -285,6 +341,105 @@ public class GenerateCheckCommandTests
             customMessage: "OrdersTests.g.cs is byte-identical between TwoTagSpec and OneTagSpec " +
                            "and must not be reported as differing just because a sibling was orphaned");
         AssertOwnedFilesUntouched(before);
+    }
+
+    /// <summary>
+    /// [paired]: the orphan sweep above exists only because plain `generate` clears an orphan by
+    /// deleting Generated/ wholesale rather than reconciling file-by-file — a documented gate
+    /// whose only prescribed fix is `intest generate`. Nothing before this test proved that fix
+    /// actually works: removing GenerateCommand's <c>Directory.Delete(generated, recursive:
+    /// true)</c> entirely still passes all four suites, because no test ran `generate` on a
+    /// project --check had just flagged as orphaned. This one does both halves: reproduce the
+    /// orphan, then run `generate` and assert it is gone and --check reports clean afterward. If
+    /// the wholesale delete were removed or narrowed to skip files a fresh render doesn't
+    /// reproduce, CustomersTests.g.cs would still exist after `generate` runs and this test would
+    /// fail — the shape [paired] exists to prevent: a documented gate with an unreachable fix.
+    /// </summary>
+    [TestMethod]
+    public async Task GenerateClearsTheOrphanThatCheckReported()
+    {
+        WriteSpec(TwoTagSpec);
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+        WriteSpec(OneTagSpec);
+        (await CheckAsync(_root)).ExitCode.ShouldBe(ExitCode.WorkOutstanding);
+
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        File.Exists(Path.Combine(_root, "Generated", "CustomersTests.g.cs")).ShouldBeFalse(
+            "generate's wholesale delete of Generated/ is what clears an orphan --check reported");
+        (await CheckAsync(_root)).ExitCode.ShouldBe(ExitCode.Ok);
+    }
+
+    /// <summary>
+    /// Pins <c>SearchOption.AllDirectories</c> in the orphan sweep (<c>GenerateCommand.
+    /// RunCheckAsync</c>): a stray file nested under a subdirectory of Generated/ is exactly as
+    /// much an orphan as one sitting directly in Generated/, and every artefact BuildOutputs
+    /// renders today happens to be flat, so nothing else in this suite would notice
+    /// <c>TopDirectoryOnly</c> silently skipping a nested file. Mutating the sweep to
+    /// TopDirectoryOnly makes this test fail (exit 0 instead of 1, no mention of the nested
+    /// file) while every other test in this class still passes.
+    /// </summary>
+    [TestMethod]
+    public async Task ReturnsWorkOutstandingForAStrayFileInASubdirectoryOfGenerated()
+    {
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var nestedDir = Path.Combine(_root, "Generated", "nested");
+        Directory.CreateDirectory(nestedDir);
+        File.WriteAllText(Path.Combine(nestedDir, "stray.g.cs"), "// stray");
+
+        var (exitCode, report) = await CheckAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.WorkOutstanding);
+        report.ShouldContain("Generated/nested/stray.g.cs");
+        report.ShouldContain("a fresh render does not produce it");
+    }
+
+    /// <summary>
+    /// The half-message case: <see cref="File.Exists"/> matches case-insensitively on Windows, so
+    /// renaming OrdersTests.g.cs to only change its casing still passes the content-compare loop
+    /// (it opens the same file) and is caught by the orphan sweep instead — but the sweep only
+    /// ever had the on-disk (wrong) casing to report until this fix, so the message named a file
+    /// that "does not exist" without ever saying what name was expected. Pins that the message
+    /// now names both.
+    /// </summary>
+    [TestMethod]
+    public async Task NamesTheExpectedCasingWhenOnlyCasingDiffersFromAFreshRender()
+    {
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+        File.Move(
+            Path.Combine(_root, "Generated", "OrdersTests.g.cs"),
+            Path.Combine(_root, "Generated", "orderstests.g.cs"));
+
+        var (exitCode, report) = await CheckAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.WorkOutstanding);
+        // Shouldly's ShouldContain(string) is case-insensitive by default, which would make this
+        // assertion pass whether or not the expected casing is actually named — Case.Sensitive is
+        // required here, or a mutation that deletes the fix silently keeps this test green.
+        report.ShouldContain("orderstests.g.cs", Case.Sensitive);
+        report.ShouldContain("OrdersTests.g.cs", Case.Sensitive,
+            customMessage: "the message must name the expected casing, not just flag the wrong one");
+    }
+
+    /// <summary>
+    /// Finding 2's mutation proof: before SnapshotOwnedFiles walked the whole project root, a
+    /// stray file written directly under the project root — [no-write]'s own example of "the
+    /// most likely accidental form" — was invisible to AssertOwnedFilesUntouched, because the
+    /// snapshot only ever covered Generated/ and coverage-report.json. This test simulates that
+    /// shape directly (rather than requiring a buggy RunCheckAsync to exist) by writing the stray
+    /// file itself and asserting the guard now notices. Reverting SnapshotOwnedFiles to its old
+    /// Generated/-only scope makes this test fail to throw.
+    /// </summary>
+    [TestMethod]
+    public async Task AssertOwnedFilesUntouchedCatchesAStrayFileAnywhereInTheProject()
+    {
+        (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
+        var before = SnapshotOwnedFiles();
+
+        File.WriteAllText(Path.Combine(_root, "intest-check-scratch.tmp"), "stray");
+
+        Should.Throw<ShouldAssertException>(() => AssertOwnedFilesUntouched(before));
     }
 
     // ---- 1: fixture drift, decided to share --check's exit 1 with a different message ------
@@ -397,14 +552,11 @@ public class GenerateCheckCommandTests
     }
 
     /// <summary>
-    /// CliVersion.FallbackVersion ("0.0.0") means the running binary has no embedded version at
-    /// all — a build problem, not a legitimate version to adopt. §8's remedy ("run
-    /// `intest upgrade`") is actively wrong advice here: upgrade would write "0.0.0" into
-    /// intestVersion, which would then match this same broken binary forever and this warning
-    /// would never fire again — hiding the defect instead of fixing it. Exercised by calling the
-    /// internal seam directly with runningVersion: CliVersion.FallbackVersion, since a normal
-    /// test build always carries a real informational version (Directory.Build.props pins one)
-    /// and cannot produce "0.0.0" from CliVersion.Current itself.
+    /// The build-problem branch of <c>GenerateCommand.ReportVersionMismatch</c> — see
+    /// <c>CliVersion.FallbackVersion</c>'s own doc comment for why that value needs one. Exercised
+    /// by calling the internal seam directly with runningVersion: CliVersion.FallbackVersion,
+    /// since a normal test build always carries a real informational version (Directory.Build.props
+    /// pins one) and cannot produce "0.0.0" from CliVersion.Current itself.
     /// </summary>
     [TestMethod]
     public void ReportVersionMismatchNamesABuildProblemWhenTheRunningToolHasNoVersion()

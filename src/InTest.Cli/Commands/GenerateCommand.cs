@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Nodes;
 using InTest.Cli.Configuration;
 using InTest.Cli.Coverage;
@@ -51,34 +52,46 @@ public static class GenerateCommand
     // `--check` must compare without writing. The plan calls out two shapes that both look like
     // "nothing was written" and are not the same guarantee:
     //
-    //   (a) write, then diff against a backup, then restore — observable if the process dies
-    //       mid-run, and the enforcement test below (the "wrote nothing" tests in
-    //       GenerateCheckCommandTests) DOES catch this shape, because it inspects the project's
-    //       files immediately after RunAsync returns, backup or no backup.
-    //   (b) render to a temp directory and diff directory-to-directory — passes that same test
-    //       trivially, because nothing under the project ever changes. This is the shape
+    //   (a) write, then diff against a backup, then restore exactly — observable if the process
+    //       dies mid-run, but NOT observable by any test that only inspects the project's files
+    //       after RunAsync returns: a before/after byte snapshot cannot tell "never wrote" apart
+    //       from "wrote and restored exactly", because that is what "restore exactly" means.
+    //       Only a mid-run observer (a FileSystemWatcher, a read-only ACL) could see it happen.
+    //       An earlier version of this comment claimed the enforcement test below (the "wrote
+    //       nothing" tests in GenerateCheckCommandTests) caught this shape "backup or no
+    //       backup" — it does not, and a literal write-fresh-content-then-restore-original
+    //       mutation at the top of RunCheckAsync proves it: every test in
+    //       GenerateCheckCommandTests still passes with that mutation in place.
+    //   (b) render to a temp directory and diff directory-to-directory — also invisible to that
+    //       same snapshot, because nothing under the project ever changes. This is the shape
     //       [no-write]'s own text warns cannot be caught mechanically: "nothing under the project
     //       changes in that case."
     //
-    // The seam chosen here is neither: BuildOutputs (below) renders every artefact `generate`
-    // owns into an in-memory `IReadOnlyDictionary<string, string>` — project-relative path to
-    // file content — from (document, plan, config) alone, with no filesystem access at all. Write
-    // mode and check mode then branch on that same map:
+    // Neither shape, then, is ruled out by anything a mutation test can observe — they are ruled
+    // out by construction. The seam chosen here: BuildOutputs (below) renders every artefact
+    // `generate` owns into an in-memory `IReadOnlyDictionary<string, string>` — project-relative
+    // path to file content — from (document, plan, config) alone, with no filesystem access at
+    // all. Write mode and check mode then branch on that same map:
     //
     //   * write mode deletes Generated/ wholesale and writes every map entry to disk, exactly as
     //     `generate` always has;
-    //   * check mode never calls File.WriteAllText, Directory.CreateDirectory, Directory.Delete,
-    //     or any other mutating filesystem call — it only *reads* whatever already exists on disk
-    //     and compares it against the map's content, plus a separate directory walk of the
-    //     existing Generated/ tree to catch a file the map does not mention at all (the orphan
-    //     case: an operation dropped from the spec leaves its old .g.cs behind, and a rendered
-    //     file that was never dirtied by this run's write path could not report on because it
-    //     never runs one).
+    //   * check mode never calls File.WriteAllText/Bytes, Directory.CreateDirectory,
+    //     Directory.Delete, Path.GetTempFileName/GetTempPath, or any other mutating or temp-path
+    //     API — it only *reads* whatever already exists on disk (File.Exists,
+    //     File.ReadAllBytesAsync) and compares it against the map's content, plus a directory
+    //     walk of the existing Generated/ tree to catch a file the map does not mention at all
+    //     (the orphan case: an operation dropped from the spec leaves its old .g.cs behind, and a
+    //     rendered file that was never dirtied by this run's write path could not report on
+    //     because it never runs one).
     //
-    // That last property — check mode contains no call that mutates the filesystem, not "check
-    // mode's mutations happen to cancel out" — is what makes shape (b) unreachable by
-    // construction rather than merely untested: there is no temp directory anywhere in this file
-    // for a stray write to land in.
+    // RunCheckAsync's own doc comment enumerates its full reachable call graph. That graph
+    // containing no write and no temp-path call — not "check mode's mutations happen to cancel
+    // out" — is what makes both (a) and (b) unreachable by construction rather than merely
+    // untested. The GenerateCheckCommandTests "wrote nothing" assertions are real and
+    // mutation-verified, but for a narrower claim than either shape above: they prove *outcome*
+    // (the files present before a --check run are present, byte-identical, after it), which
+    // catches a stray extra file or a modified existing file. They cannot and do not prove
+    // *shape* — that no write-then-restore or temp-directory render happened along the way.
     private static IReadOnlyDictionary<string, string> BuildOutputs(
         OpenApiDocument document, Planning.TestPlan plan, LoadedConfig config)
     {
@@ -240,14 +253,11 @@ public static class GenerateCommand
 
     /// <summary>
     /// §8's worked message, verbatim, with one addition: when the running tool's own version is
-    /// <see cref="CliVersion.FallbackVersion"/>, that is a build problem wearing the clothes of a
-    /// version-drift problem (see <see cref="CliVersion.FallbackVersion"/>'s own doc comment),
-    /// and §8's remedy — "run `intest upgrade`" — is actively wrong advice for it: `upgrade`
-    /// would write "0.0.0" into <c>intestVersion</c>, a value that will match this same broken
-    /// binary forever and never again produce this warning, permanently hiding the real defect
-    /// instead of fixing it. So that case gets its own sentence and does not mention `upgrade` at
-    /// all. Both cases return <see cref="ExitCode.VersionMismatch"/> — the CI-facing contract
-    /// ("this is not a real diff") is identical either way; only the human-facing remedy differs.
+    /// <see cref="CliVersion.FallbackVersion"/>, that case gets its own sentence and does not
+    /// mention `upgrade` at all — see <see cref="CliVersion.FallbackVersion"/>'s own doc comment
+    /// for why §8's usual remedy is actively wrong advice there. Both cases return
+    /// <see cref="ExitCode.VersionMismatch"/> — the CI-facing contract ("this is not a real
+    /// diff") is identical either way; only the human-facing remedy differs.
     /// <para>
     /// <paramref name="runningVersion"/> is passed in rather than read from
     /// <see cref="CliVersion.Current"/> directly, so <c>GenerateCheckCommandTests</c> can exercise
@@ -280,11 +290,12 @@ public static class GenerateCommand
 
     /// <summary>
     /// The compare half of [no-write]. Every call here is a read: <see cref="File.Exists"/>,
-    /// <see cref="File.ReadAllTextAsync(string, CancellationToken)"/>, and
+    /// <see cref="File.ReadAllBytesAsync(string, CancellationToken)"/>, and
     /// <see cref="Directory.EnumerateFiles(string, string, SearchOption)"/> for the orphan sweep.
-    /// Nothing in this method's call graph can create, delete, or modify a file — see the
-    /// [no-write] seam comment above <see cref="BuildOutputs"/> for why that property, not merely
-    /// "and then nothing changed", is the actual guarantee.
+    /// That is this method's complete reachable call graph — no write, no
+    /// <see cref="Path.GetTempFileName"/>/<see cref="Path.GetTempPath"/>, nothing that creates,
+    /// deletes, or modifies a file. See the [no-write] seam comment above
+    /// <see cref="BuildOutputs"/> for what that property does and does not let a test prove.
     /// </summary>
     private static async Task<int> RunCheckAsync(
         string projectRoot, IReadOnlyDictionary<string, string> outputs, TextWriter report,
@@ -301,8 +312,16 @@ public static class GenerateCommand
                 continue;
             }
 
-            var actualContent = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
-            if (!string.Equals(actualContent, expectedContent, StringComparison.Ordinal))
+            // Bytes, not text: File.ReadAllTextAsync performs BOM-based encoding detection, so a
+            // committed file re-encoded as UTF-16LE, or one with a stray UTF-8 BOM prepended,
+            // decodes back to a string equal to `expectedContent` and this check would report
+            // "match" for a file `generate` would rewrite byte-for-byte differently. The artefact
+            // `generate` owns is a specific sequence of bytes (BuildOutputs always renders plain
+            // UTF-8, no BOM, via File.WriteAllTextAsync's default encoding), so the comparison
+            // has to say so directly rather than routing through a decoder that guesses.
+            var actualBytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
+            var expectedBytes = Encoding.UTF8.GetBytes(expectedContent);
+            if (!actualBytes.AsSpan().SequenceEqual(expectedBytes))
             {
                 differences.Add($"{relativePath} differs from a fresh render.");
             }
@@ -325,13 +344,27 @@ public static class GenerateCommand
             // AllDirectories, not TopDirectoryOnly: every artefact BuildOutputs produces today is
             // flat under Generated/, but a stray file written by a bug (or by hand) has no reason
             // to respect that, and this sweep is the only thing standing between such a file and
-            // a --check run that reports 0 while something sits there unaccounted for.
+            // a --check run that reports 0 while something sits there unaccounted for. Pinned by
+            // GenerateCheckCommandTests.ReturnsWorkOutstandingForAStrayFileInASubdirectoryOfGenerated
+            // — switching this to TopDirectoryOnly fails that test.
             foreach (var file in Directory.EnumerateFiles(generatedDir, "*", SearchOption.AllDirectories))
             {
                 var relativePath = "Generated/" + Path.GetRelativePath(generatedDir, file).Replace('\\', '/');
                 if (!expected.Contains(relativePath))
                 {
-                    differences.Add($"{relativePath} exists on disk but a fresh render does not produce it.");
+                    // File.Exists above matches case-insensitively on Windows, so a file that
+                    // differs from an expected one only by case passes that check silently and
+                    // is caught here instead — but by then all this sweep has is the on-disk
+                    // name, which is the *wrong* one. Naming the expected casing too (when a
+                    // case-insensitive match exists) turns "orderstests.g.cs exists on disk but
+                    // a fresh render does not produce it" — true, but reads as an unrelated
+                    // stray file — into a message that says what actually happened: a rename.
+                    var expectedCasing = expected.FirstOrDefault(
+                        e => string.Equals(e, relativePath, StringComparison.OrdinalIgnoreCase));
+                    differences.Add(expectedCasing is null
+                        ? $"{relativePath} exists on disk but a fresh render does not produce it."
+                        : $"{relativePath} exists on disk but a fresh render names it " +
+                          $"{expectedCasing} instead (case differs).");
                 }
             }
         }
