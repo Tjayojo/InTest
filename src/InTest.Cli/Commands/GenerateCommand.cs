@@ -114,9 +114,13 @@ public static class GenerateCommand
             // The prefix every operation path shares, if any. TestHost uses it to detect a
             // base URL that repeats it; otherwise every request 404s and nothing says why.
             var pathManifest = new JsonObject { ["operationPathPrefix"] = CommonPathPrefix(plan) };
+            // NewLine = "\n" pins the interior line endings to LF (System.Text.Json otherwise
+            // uses Environment.NewLine, CRLF on Windows); the trailing "+ \"\\n\"" is the final
+            // newline after the closing brace, which WriteIndented never emits on its own. Same
+            // fix, same reasoning, as CoverageReport.ToJson and FixtureDocument's writer.
             await File.WriteAllTextAsync(
                 Path.Combine(generated, "spec-paths.json"),
-                pathManifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n",
+                pathManifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" }) + "\n",
                 cancellationToken).ConfigureAwait(false);
 
             await File.WriteAllTextAsync(Path.Combine(projectRoot, "coverage-report.json"),

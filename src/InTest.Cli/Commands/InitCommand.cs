@@ -204,6 +204,30 @@ public static class InitCommand
         dotnet_diagnostic.CA1707.severity = none
         """);
 
+        // Modeled on this repository's own .gitattributes, which pins the identical case
+        // (*.g.cs.txt golden files, *.scriban templates) for the identical reason. Every path
+        // pinned here is InTest-owned: `generate` deletes and rewrites Generated/ wholesale and
+        // writes coverage-report.json, `fixtures repair` writes fixtures/*.json, and both now
+        // emit pure-LF content (TemplateRenderer.Normalize for the .g.cs classes,
+        // JsonSerializerOptions.NewLine = "\n" for the JSON writers). Without this file, a clone
+        // with core.autocrlf=true — the Git-for-Windows default — rewrites every one of them to
+        // CRLF on checkout, because nothing else tells git these particular paths must stay LF;
+        // `* text=auto` alone lets git pick the platform's native ending. That checkout-time
+        // rewrite is invisible to `fixtures repair` (FixtureDrift.Compare works on parsed
+        // FixtureDocument objects, not bytes) but not to a future byte-for-byte comparison such
+        // as `generate --check`.
+        Write(projectRoot, ".gitattributes", """
+        # Normalize to LF in the repository; let git decide the working-tree ending by platform.
+        * text=auto
+
+        # InTest writes these with LF interior line endings. A clone with core.autocrlf=true
+        # (the Git-for-Windows default) would otherwise rewrite them to CRLF on checkout, with
+        # nothing on disk to show why — see the comment above this scaffold's own write.
+        Generated/** text eol=lf
+        coverage-report.json text eol=lf
+        fixtures/*.json text eol=lf
+        """);
+
         Write(projectRoot, "TestStartup.cs", $$"""
         using InTest.Runtime;
         using Microsoft.Extensions.Configuration;

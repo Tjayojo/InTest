@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -36,13 +37,126 @@ public class InitCommandTests
 
         foreach (var file in new[]
         {
-            "intest.json", "Orders.ApiTests.csproj", ".editorconfig", "AssemblyInfo.cs",
+            "intest.json", "Orders.ApiTests.csproj", ".editorconfig", ".gitattributes", "AssemblyInfo.cs",
             "TestStartup.cs", "OrdersTestBase.cs", "appsettings.json", "Orders.ApiTests.runsettings",
             ".config/dotnet-tools.json"
         })
         {
             File.Exists(Path.Combine(_root, file)).ShouldBeTrue($"{file} was not scaffolded.");
         }
+    }
+
+    // The spec used by GitattributesSurvivesAnAutocrlfTrueCheckout: `getOrderById`'s path
+    // parameter needs no fixture to generate successfully (mirrors GenerateCommandTests.Spec —
+    // duplicated here rather than shared, matching how each test file in this project already
+    // keeps its own local Spec constant), which keeps that test to one `generate` call with no
+    // `fixtures repair` step in between.
+    private const string SpecNeedingNoFixture = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+        "responses": { "200": { "description": "ok", "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// Proves the scaffolded .gitattributes actually does its job, rather than merely existing.
+    /// "The file on disk contains LF" would pass on Linux, or with core.autocrlf left at its
+    /// non-Windows default, regardless of whether .gitattributes covers the right paths — or
+    /// exists at all. This instead reproduces Step 1 of the v1-e line-endings task's manual
+    /// measurement as an automated round trip: commit a real `init` + `generate` scaffold with
+    /// core.autocrlf=true (the Git-for-Windows default) set on the source, then materialize a
+    /// second working copy with the same setting forced on the destination — the two-step path a
+    /// Windows adopter's own clone goes through — and diff the bytes. Every one of InTest's own
+    /// generated artefacts (Generated/**, coverage-report.json, fixtures/*.json) must come back
+    /// byte-identical; without .gitattributes pinning them, git's own autocrlf translation would
+    /// rewrite every LF to CRLF on the second checkout, exactly as the manual experiment showed.
+    /// </summary>
+    [TestMethod]
+    public async Task GitattributesSurvivesAnAutocrlfTrueCheckout()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
+        File.WriteAllText(Path.Combine(_root, "orders.json"), SpecNeedingNoFixture);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(ExitCode.Ok);
+
+        // `generate` alone never writes fixtures/ (only `fixtures repair` does), so write one by
+        // hand — pure LF, matching what FixtureDocument's writer now produces — to exercise the
+        // fixtures/*.json pattern too, not just Generated/** and coverage-report.json.
+        Directory.CreateDirectory(Path.Combine(_root, "fixtures"));
+        File.WriteAllText(Path.Combine(_root, "fixtures", "sample.json"), "{\n  \"sample\": true\n}\n");
+
+        var tracked = new[]
+        {
+            Path.Combine("Generated", "OrdersTests.g.cs"),
+            Path.Combine("Generated", "spec-schemas.json"),
+            Path.Combine("Generated", "spec-paths.json"),
+            "coverage-report.json",
+            Path.Combine("fixtures", "sample.json"),
+        };
+        var beforeCheckout = tracked.ToDictionary(f => f, f => File.ReadAllBytes(Path.Combine(_root, f)));
+
+        RunGit(_root, "init -q");
+        RunGit(_root, "config core.autocrlf true");
+        RunGit(_root, "config user.email test@example.com");
+        RunGit(_root, "config user.name Test");
+        RunGit(_root, "add -A");
+        RunGit(_root, "commit -q -m snapshot");
+
+        var clone = Path.Combine(Path.GetTempPath(), "intest-clone-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            // --no-checkout, then set core.autocrlf, then checkout: a plain `clone` applies the
+            // destination's config too late for a `-c` override to be trustworthy across git
+            // versions (confirmed by direct experiment while measuring Step 1 — a `-c
+            // core.autocrlf=true clone` converted the files correctly but did not persist the
+            // setting into the clone's own .git/config, which this test does not want to depend
+            // on). Splitting the two steps makes the setting unambiguously in effect for the
+            // checkout that follows.
+            RunGit(Path.GetTempPath(), $"clone -q --no-checkout \"{_root}\" \"{clone}\"");
+            RunGit(clone, "config core.autocrlf true");
+            RunGit(clone, "checkout -q HEAD -- .");
+
+            foreach (var file in tracked)
+            {
+                File.ReadAllBytes(Path.Combine(clone, file)).ShouldBe(beforeCheckout[file],
+                    $"{file} changed bytes across a core.autocrlf=true checkout — .gitattributes did not pin it to LF.");
+            }
+        }
+        finally
+        {
+            ForceDeleteDirectory(clone);
+        }
+    }
+
+    private static void RunGit(string workingDirectory, string arguments)
+    {
+        using var process = Process.Start(new ProcessStartInfo("git", arguments)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        })!;
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        process.ExitCode.ShouldBe(0, $"git {arguments} failed: {stdout}{stderr}");
+    }
+
+    private static void ForceDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+        foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+        Directory.Delete(path, recursive: true);
     }
 
     [TestMethod]
