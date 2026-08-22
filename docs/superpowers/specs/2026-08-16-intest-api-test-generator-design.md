@@ -466,17 +466,28 @@ right — it protects hand-written partials — but the AzDO-history argument is
 Rev 2 and earlier drafts of rev 3 scattered commands across seven sections, and introduced
 `intest upgrade` (§8) without ever defining it. The full v1 surface:
 
-| Command | Writes | Never writes | Exit |
-|---|---|---|---|
-| `intest init` | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs`, `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings`, `.config/dotnet-tools.json`, `.gitattributes` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused, or the scaffold failed · 3 already initialised |
-| `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, or spec unparseable |
-| `intest generate --check` | Nothing | Everything | 0 identical · 1 `Generated/` or `coverage-report.json` differs, or a fixture has drifted (same code as plain `generate`'s exit 1, §5's exit-1 row already lists both as one code) · 2 tool error · 4 tool-version mismatch, checked before any output comparison and only when `intestVersion` is declared (absent means no claim made, not a mismatch) |
-| `intest generate --emit-plan` | `TestPlan` JSON to stdout | Everything | 0 ok |
-| `intest fixtures repair` | `fixtures/` — **creates missing fixtures** by tier precedence, adds `TODO:` sentinels for newly-required properties, flags removed ones. Never overwrites an existing value | `Generated/`, team-owned files | 0 ok, including nothing to repair · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a committed fixture that cannot be read |
-| `intest fixtures promote` | Nothing — prints a paste-ready snippet and names the target file | Everything, `spec.source` especially (§10) | 0 ok |
-| `intest survey <spec-glob\|url>` | Nothing — prints a spec-population report (§17) | Everything | 0 ok · 2 no spec matched or unparseable |
-| `intest upgrade` | Regenerates first — delegates to `generate`, writing `Generated/` and `coverage-report.json` exactly as `generate` does — then, only once that succeeds, bumps `intestVersion` in `intest.json` and the version in `.config/dotnet-tools.json` together; also writes `.gitattributes` **if the project does not already have one** | `fixtures/`, team-owned files — `.gitattributes` is the one narrow exception, written only when absent, never overwritten | 0 ok · 1 fixture drift (delegated `generate` reports it exactly as plain `generate` would — same meaning, same code, not a second condition) · 2 tool error |
-| `intest assertions add <name>` | Appends to `project.assertions`, then re-runs `generate` | Existing assertions in hand-written or generated code | 0 ok · 3 already present |
+**Ships today** marks what actually runs, added by the v1-e acceptance run (Task 6) after that
+run found this table gave no way to tell — the "full v1 surface" framing above is a design
+statement, correct on its own terms, but §5 doubles as the exit-code contract, and a reader of a
+contract needs to know what is reachable. This follows a pattern the table two sections up
+already uses (the frozen-axes table's "n/a in v1" row), rather than introducing a new one. The
+authoritative, actively-maintained version of this same distinction is
+[`CONTRIBUTING.md`](../../../CONTRIBUTING.md)'s opening paragraph and
+[`CLAUDE.md`](../../../CLAUDE.md)'s "What this is" section; this column is a pointer at that fact
+inline, not a second copy that must be kept in step by discipline — if it drifts, trust those two
+files over this column.
+
+| Command | Writes | Never writes | Exit | Ships today |
+|---|---|---|---|---|
+| `intest init` | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs`, `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings`, `.config/dotnet-tools.json`, `.gitattributes` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused, or the scaffold failed · 3 already initialised | Yes |
+| `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, or spec unparseable | Yes |
+| `intest generate --check` | Nothing | Everything | 0 identical · 1 `Generated/` or `coverage-report.json` differs, or a fixture has drifted (same code as plain `generate`'s exit 1, §5's exit-1 row already lists both as one code) · 2 tool error · 4 tool-version mismatch, checked before any output comparison and only when `intestVersion` is declared (absent means no claim made, not a mismatch) | Yes |
+| `intest generate --emit-plan` | `TestPlan` JSON to stdout | Everything | 0 ok | Not yet |
+| `intest fixtures repair` | `fixtures/` — **creates missing fixtures** by tier precedence, adds `TODO:` sentinels for newly-required properties, flags removed ones. Never overwrites an existing value | `Generated/`, team-owned files | 0 ok, including nothing to repair · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a committed fixture that cannot be read | Yes |
+| `intest fixtures promote` | Nothing — prints a paste-ready snippet and names the target file | Everything, `spec.source` especially (§10) | 0 ok | Not yet |
+| `intest survey <spec-glob\|url>` | Nothing — prints a spec-population report (§17) | Everything | 0 ok · 2 no spec matched or unparseable | Not yet |
+| `intest upgrade` | Regenerates first — delegates to `generate`, writing `Generated/` and `coverage-report.json` exactly as `generate` does — then, only once that succeeds, bumps `intestVersion` in `intest.json` and the version in `.config/dotnet-tools.json` together; also writes `.gitattributes` **if the project does not already have one** | `fixtures/`, team-owned files — `.gitattributes` is the one narrow exception, written only when absent, never overwritten | 0 ok · 1 fixture drift (delegated `generate` reports it exactly as plain `generate` would — same meaning, same code, not a second condition) · 2 tool error | Yes |
+| `intest assertions add <name>` | Appends to `project.assertions`, then re-runs `generate` | Existing assertions in hand-written or generated code | 0 ok · 3 already present | Not yet |
 
 **Argument refusals.** The `init` row above read `0 ok · 2 --name is not a valid C# name · 3
 already initialised` until this was measured. It was not merely incomplete about `--project` and

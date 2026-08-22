@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c and the F11 phase
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase and v1-e Task 6
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -11,6 +11,7 @@ forward" list at the end is always the current one.
 | v1-b | 2026-08-19 (UTC) | `f07ce4c` + this commit | Catalog **9 of 9 twice, sequentially** (not concurrently — §11), a negative control reproducing F7 on the same suite/database with the fixture unregistered, and a drain-isolation run proving cleanup, not a test, deletes the seeded row. **F7 closed** |
 | v1-c | 2026-08-19 (UTC) | `f09f2d5` + this commit | Orders live against a real Duende identity server: 401s real, write-scope 403s real (**F8 closed for real**), a dead identity server fails by name, not as a readiness timeout (**F10 closed for real**). Two new findings the live run — not the unit suite — exposed: 4 of 7 wrong-scope 403 tests cannot pass against the sample's only identity pair, because read operations need no scope the read-only identity lacks (**F11**); a mis-scoped write request 415s, not the 400 Task 8 Step 3 predicted (**F12**). Catalog **13 of 13 twice**, Inventory **9 of 9 twice**, neither gains an auth test — v1-b's guarantee survives |
 | F11 | 2026-08-21 | `0cf649a` | Orders live against a real Duende identity server, correctly scoped: **20 passed, 0 failed, 4 skipped**, all 4 skips bottoming out in `RequireSecondaryIdentityLacks` with a stated reason, the 3 write-scope 403s running and passing (**F11 closed**). Independently reproduced from scratch by a second agent with its own suite, provider, fixtures and ports — both runs agree exactly. A negative control (declared `Scopes` set to `null`) reproduces the original F11 failure on demand: 4 failed, not skipped. Catalog **13 of 13 twice**, Inventory **9 of 9 twice**, neither gains an auth test |
+| v1-e Task 6 | 2026-08-22 | `cc43714` + this commit | The verdict run for `generate --check` and `intest upgrade`. `dotnet tool restore` — Phase 8's first line, never exercised before this run because every earlier acceptance run substituted `dotnet run --project` or a `ProjectReference` — made to work for real via a temporary local NuGet feed, not substituted around; a stale `InTest.Runtime 0.1.0` in the global package cache (built one commit behind HEAD) was found and cleared, not packed over. All 5 steps ran against live `samples/Orders.Api` + `samples/Identity.Server`: spec-edit drift (exit 1), a true orphaned-file case built by removing every `/api/customers` operation (exit 1, extra file named, sibling class byte-identical), a contrived version mismatch pre-empting a simultaneous diff (exit 4, §8's exact message), `intest upgrade` resolving it and the suite passing again (20/0/4), and a real `core.autocrlf=true` cross-platform checkout — proved both ways: `.gitattributes` present keeps every byte LF and `--check` clean, absent it every generated file corrupts to CRLF and fails on every line, and `upgrade`'s migration path (scaffold `.gitattributes` if absent) fixes it live. One new finding: bare `intest …`, as shown in every code block in `getting-started.md`, does not run against a locally-restored tool — needs `dotnet intest …` (**F13**) |
 
 ---
 
@@ -1207,7 +1208,9 @@ Still open, stated rather than glossed:
 - **`survey`, YAML input, and variation tests** are unbuilt, so nothing about them was exercised.
 - **`generate --check` and `upgrade`** were built after this acceptance run (v1-e). No run
   recorded in this document exercises either one — this file predates both and has not yet been
-  extended to cover them.
+  extended to cover them. ~~Closed~~ — see "v1-e Task 6 acceptance run" below: both commands ran
+  against live Orders, five scenarios each, all passing, plus a genuine cross-platform proof
+  (`core.autocrlf=true`) neither this run nor any earlier one had exercised.
 - **One sample was measured per producer.** The corpus is deliberate but small; nothing here
   says how the composer behaves on a large real-world document.
 - **Cleanup was confirmed for the delete case, not the crash case.** §14 and getting-started
@@ -1735,3 +1738,371 @@ leaves open, none exercised here:
 | 3 | The OR/AND union across multiple `security` requirements is stricter than OpenAPI's OR semantics | next phase revisiting `TestPlanBuilder`'s auth-case generation | Open — recorded above, not fixed here |
 | 4 | Nothing verifies a declared `ITestTokenProvider.Identities.Scopes` is true; an over-declaring provider silently converts a provable 403 into a silent skip | inherent to the declared-capability design; recorded as residual risk | Open — recorded above, not fixed here |
 | 5 | `.trx` `<Counters>` under-reports skips (`notExecuted="0"` while per-result `outcome="NotExecuted"` entries exist) | next phase touching acceptance-run tooling or docs | Open — recorded above, not fixed here |
+
+---
+
+# v1-e Task 6 acceptance run — `generate --check` and `intest upgrade`
+
+**Date:** 2026-08-22 (UTC) · **Commit:** `cc43714` + this commit
+**Task:** v1-e plan Task 6 — the verdict task for
+`docs/superpowers/plans/2026-08-21-intest-v1e-check-and-upgrade.md`. Tasks 1–5 (`ConfigLoader`
+surfacing `intestVersion`, LF normalization and the scaffolded `.gitattributes`, `generate
+--check`, `intest upgrade`, and the documentation catch-up) were all green in isolation before
+this run started. Per the plan's own framing: *"This task is the verdict."* It is not a checklist
+— it is the run that decides whether these two commands work for a team that adopts them.
+
+Unit suite before the run: **652 passing, 0 failing** — Architecture 2, Cli 410, Runtime 205,
+Golden 35, measured directly rather than assumed. Unchanged after — this run generates and
+executes suites outside the repository, touching only the two documentation files this commit
+changes.
+
+## Step 1 — Phase 8's first line, and what it actually took to run it for real
+
+`getting-started.md` Phase 8 opens with `dotnet tool restore`. The plan warned this in advance:
+nothing is published to NuGet and the repository ships no `nuget.config` or local feed, so the
+restore fails on its first line — and the trap is not the failure, it is quietly substituting
+`dotnet run --project src/InTest.Cli` for it, recording a pass, and reproducing inside this
+verdict the exact defect the plan exists to close.
+
+**Neither substitute was used.** `dotnet tool restore` was made to work for real:
+
+```bash
+dotnet pack src/InTest.Cli/InTest.Cli.csproj -c Release -o <scratch>/feed
+dotnet pack src/InTest.Runtime/InTest.Runtime.csproj -c Release -o <scratch>/feed
+```
+
+with a temporary `nuget.config` in the scaffolded project pointing at that feed plus `nuget.org`
+for the transitive packages (`MSTest.*`, `Shouldly`, `Microsoft.Extensions.*`). Run against a
+scaffolded `Orders.ApiTests` project:
+
+```
+Tool 'intest.cli' (version '0.1.0') was restored. Available commands: intest
+
+Restore was successful.
+```
+
+**This is real evidence the mechanism works, not evidence the repository is CI-ready today.**
+Nothing in the checked-in repository provides the feed or the config — a completely fresh clone
+still cannot run Phase 8 verbatim, because nothing is published. What this run proves is that the
+`dotnet tool restore` → pinned-version → `generate --check` chain functions correctly once that
+one piece of infrastructure exists, which is the actual question §8's design rests on. That gap
+— publishing, or an equivalent documented local-feed setup for contributors — is recorded as
+still open below, not closed by this run.
+
+**Second trap, found during Task 5 and confirmed here.** `~/.nuget/packages/intest.runtime/0.1.0`
+already held a package before this run started — built from commit `c3899b8`, one commit behind
+this run's `cc43714`, per its own embedded `<repository commit="…">` metadata:
+
+```
+<repository type="git" commit="c3899b8a3d46d82ae88ec15ffceb7cc327e89803" />
+```
+
+A scaffolded project's `PackageReference Include="InTest.Runtime" Version="0.1.0"` resolves
+against whatever is in the global package cache for that exact version **before** it looks at any
+feed — NuGet's cache lookup is keyed on package id and version, not on which feed most recently
+published that version, so a newly-packed `0.1.0` sitting in the local feed is invisible as long
+as a same-numbered `0.1.0` already sits in the cache. **Cleared, not packed over**:
+
+```bash
+rm -rf ~/.nuget/packages/intest.runtime ~/.nuget/packages/intest.cli
+```
+
+confirmed empty before restoring. **What this means for a real adopter, stated plainly**: the
+moment `InTest.Runtime` is actually published at a version number someone has already built
+locally from source at that same number — which `CONTRIBUTING.md`'s "building from source" path
+actively encourages while nothing is published — that person's next `dotnet restore` silently
+keeps using their stale local build, with no error, no warning, and no visible reason for the
+mismatch. This is worth a documented warning (in `CONTRIBUTING.md`'s "Releases" section or
+alongside the local-build instructions) that anyone who has packed `InTest.Runtime` locally
+should run `dotnet nuget locals global-packages --clear` — or clear just that package's cache
+folder — before trusting a newly published version with the same number. **Not fixed here**;
+recorded as an action below.
+
+**With both traps cleared, the rest of Phase 8's block ran exactly as documented, using the real
+packaged tool throughout** — `dotnet intest generate`, `dotnet intest generate --check`,
+`dotnet intest upgrade`, invoked via the actual `PackAsTool` package, not `dotnet run`. This is
+also the first acceptance run in this project's history to do that: v1-a through the F11 phase
+all substituted `dotnet run --project src/InTest.Cli` or swapped the scaffolded `PackageReference`
+for a `ProjectReference`, because nothing was ever packed before. Because it wasn't substituted
+this time, this run found something those earlier runs structurally could not have found — see
+F13 below.
+
+### The Orders spec, verified rather than trusted
+
+The plan states `CustomersTests.g.cs` has 3 operations (all under `/api/customers`) and
+`OrdersTests.g.cs` has 4 (all under `/api/orders`). Verified against the actual spec before
+relying on it:
+
+```
+Method Path                Tags      OpId
+------ ----                ----      ----
+GET    /api/customers      Customers
+POST   /api/customers      Customers
+GET    /api/customers/{id} Customers
+GET    /api/orders         Orders
+POST   /api/orders         Orders
+GET    /api/orders/{id}    Orders
+DELETE /api/orders/{id}    Orders
+
+Total ops: 7   Customers: 3   Orders: 4
+```
+
+Matches the plan exactly.
+
+### The ordinary run
+
+Scaffolded fresh (`intest init`, bootstrapped via `dotnet run --project src/InTest.Cli` since no
+tool exists yet at that point — the one place `dotnet run` is legitimate, because Phase 8 assumes
+`.config/dotnet-tools.json` is already committed, not that it springs into existence). `intest
+generate` reported drift for all 5 operations needing a fixture (`delete_api_orders_id`,
+`get_api_customers_id`, `get_api_orders_id`, `post_api_customers`, `post_api_orders`), exit `1`.
+`intest fixtures repair` created 5 fixtures, exit `0`. Sentinels filled with values read from the
+live seed data (`GET /api/customers`, `GET /api/orders` against a valid client-credentials token),
+respecting real constraints found in the controllers' `DataAnnotations` (`Reference` `MaxLength(20)`
+ruled out `{{runId}}`, which is 50+ characters — a fixed literal was used instead, and the
+database reset between runs rather than relying on run-scoped uniqueness, since idempotence across
+runs is v1-b/F7's concern, not this task's). One live-data correction needed: the first
+`delete_api_orders_id` target (`ORD-0002`) was already `Shipped`, and `OrdersController` correctly
+refuses to cancel a shipped order (`409`, `"Order in status 'Shipped' cannot be cancelled."`) — not
+a defect, a business rule the fixture had to respect, same as the general fixture-workload lesson
+from v1-a. Swapped to `ORD-0001` (status `Placed`), which cancels cleanly.
+
+`intest generate` (real fixtures): `Generated 24 test(s) across 2 class(es).`, exit `0`. Base URL
+configured to the origin (`http://localhost:5082/`, not the `/api/` prefix — the same F3 trap the
+v0 run found), an `OrdersTokenProvider` written per the Phase 3 worked example (two identities,
+`orders-client` full access and `orders-readonly` read-only, both real client-credentials tokens
+from `samples/Identity.Server`). Full Phase 8 PR block, run for real:
+
+```
+=== dotnet tool restore ===
+Tool 'intest.cli' (version '0.1.0') was restored. Available commands: intest
+=== dotnet intest generate --check ===
+Generated/ and coverage-report.json match a fresh render.
+=== dotnet test ===
+Test Run Successful.
+Total tests: 24
+     Passed: 20
+    Skipped: 4
+```
+
+The 4 skips are the same `RequireSecondaryIdentityLacks` cases the F11 phase run established
+(read-only identity holds `orders.read`, so those 403s cannot be provable) — this run did not
+re-litigate F11, it inherited the same live identity pair and got the same shape.
+
+## Step 2 — spec drift, not regenerated
+
+`samples/Orders.Api/Orders.Api.json`'s `info.title` edited by hand, **not** followed by
+`intest generate`. `intest generate --check`:
+
+```
+exit 1
+coverage-report.json differs from a fresh render.
+Run 'intest generate' to update.
+```
+
+**No-write held, checked precisely, not assumed**: `Generated/` and `coverage-report.json` on
+disk were byte-identical and mtime-unchanged against a snapshot taken immediately after the Step 1
+run — this is the assertion `[no-write]`'s own test exists to make mechanical, exercised here
+against the real binary rather than only the unit test. Spec restored via a saved backup; `--check`
+returned to exit `0` afterward, confirming the restore was exact.
+
+## Step 3 — orphaning a file, the way that actually exercises the case
+
+Deleting one path does not orphan a file when classes are per-tag — a multi-operation tag with one
+operation removed keeps the same filename with different content, which is Step 2's case, not this
+one. **All three `/api/customers` operations were removed** (both path items,
+`"/api/customers"` and `"/api/customers/{id}"`), so the `Customers` tag disappears from a fresh
+render entirely. Verified as valid JSON before running (`ConvertFrom-Json` round-trip). `intest
+generate --check`:
+
+```
+exit 1
+Generated/CustomersTests.g.cs exists on disk but a fresh render does not produce it.
+Generated/spec-paths.json differs from a fresh render.
+Generated/spec-schemas.json differs from a fresh render.
+coverage-report.json differs from a fresh render.
+Run 'intest generate' to update.
+```
+
+The stale-file row fired exactly as designed — this is the "silently-permissive" case the plan
+called out, where a naive per-rendered-file comparison would report nothing wrong. `OrdersTests.g.cs`
+was confirmed **byte-identical** to the Step 1 snapshot (`diff -q`, zero output), isolating this
+case cleanly from Step 2's, per the plan's own instruction. `[no-write]` held here too: `Generated/`
+and `coverage-report.json` on disk unchanged from the Step 1 snapshot, including `CustomersTests.g.cs`
+itself — the file `--check` reports as an orphan is not touched by `--check`, only reported. Spec
+restored; `--check` returned to exit `0`.
+
+## Step 4 — version mismatch pre-empting a real diff
+
+`intest.json`'s `intestVersion` hand-edited to `9.9.9` (running tool is `0.1.0`) **and** the spec's
+`info.title` edited simultaneously, specifically to test the plan's ordering claim — a version
+mismatch and a diff must yield `4`, not `1`, and the version check must run before any output
+comparison. `intest generate --check`:
+
+```
+exit 4
+intest.json was generated by intest 9.9.9; running tool is 0.1.0.
+Regenerate with the pinned version, or run `intest upgrade` to adopt 0.1.0 deliberately.
+```
+
+Exact §8 wording, and **no mention of the diff that was also present** — confirms the ordering.
+`[no-write]` held under this combined case too. `intest upgrade`:
+
+```
+exit 0
+Generated 24 test(s) across 2 class(es).
+Upgraded intest.json and .config/dotnet-tools.json to intest 0.1.0.
+```
+
+`intestVersion` and the `.config/dotnet-tools.json` pin both moved to `0.1.0` together, in one
+command. `intest generate --check` afterward: exit `0`. **"The workflow passes again" was checked
+past the gate, not just at it** — the live database was reset and `dotnet test` re-run against the
+post-upgrade `Generated/`: `Total tests: 24, Passed: 20, Skipped: 4`, identical to Step 1. Spec
+restored to its pre-Step-2 state; `git status` confirmed clean before continuing.
+
+## Step 5 — cross-platform, proved both ways
+
+No Linux host was available, so this used the plan's explicitly sanctioned alternative:
+`core.autocrlf=true`, the Git-for-Windows default rev 1's pre-flight could not see because it
+never varied autocrlf at all.
+
+**Positive proof.** The Step 1 scaffold (clean, `Generated/` and `.gitattributes` both present)
+committed to a throwaway git repository with `core.autocrlf=false`, then **cloned** into a fresh
+directory with `-c core.autocrlf=true` — the actual git mechanism a checkout uses, not a
+hand-simulated substitute. Byte-checked every committed generated/fixture file after checkout:
+
+```
+Generated\CustomersTests.g.cs : CR=0 LF=205
+Generated\OrdersTests.g.cs    : CR=0 LF=279
+Generated\spec-paths.json     : CR=0 LF=3
+Generated\spec-schemas.json   : CR=0 LF=314
+coverage-report.json          : CR=0 LF=22
+fixtures\post_api_orders.json : CR=0 LF=17
+```
+
+Zero `\r` bytes anywhere, despite `autocrlf=true`. `intest generate --check` in the clone (`dotnet
+tool restore` against the same local feed, run there too): exit `0`, `Generated/ and
+coverage-report.json match a fresh render.`
+
+**Negative control — the same clone, minus `.gitattributes` only.** An identical scaffold with
+`.gitattributes` deleted before the commit, same clone-with-`autocrlf=true` treatment:
+
+```
+Generated\CustomersTests.g.cs : CR=205 LF=205
+coverage-report.json          : CR=22  LF=22
+```
+
+Every line ending converted. `intest generate --check`:
+
+```
+exit 1
+Generated/CustomersTests.g.cs differs from a fresh render.
+Generated/OrdersTests.g.cs differs from a fresh render.
+Generated/spec-paths.json differs from a fresh render.
+Generated/spec-schemas.json differs from a fresh render.
+coverage-report.json differs from a fresh render.
+Run 'intest generate' to update.
+```
+
+Every generated artifact, on every line — precisely the "diff nobody can act on" `[lf-everywhere]`
+was written to prevent, reproduced on demand rather than only reasoned about.
+
+**The migration path, exercised on the broken clone, not merely described.** `intest upgrade` in
+that same corrupted checkout:
+
+```
+exit 0
+Generated 24 test(s) across 2 class(es).
+Upgraded intest.json and .config/dotnet-tools.json to intest 0.1.0. Also scaffolded
+.gitattributes, which this project did not have yet — see InitCommand.GitattributesContent
+for what it pins and why.
+```
+
+`.gitattributes` now present with the exact content this repository's own file uses as its model.
+`generate`'s own write (not git) restored every generated artifact to pure LF in place — `--check`
+immediately after: exit `0`. This closes the loop Task 2 Step 3 opened: a project scaffolded
+before `[lf-everywhere]` shipped has exactly one remedy, and it works.
+
+## F13 — bare `intest …`, as shown in every code block in `getting-started.md`, does not run
+
+Every Phase in `getting-started.md` — 1 through 8 — shows commands as bare `intest init …`,
+`intest generate`, `intest generate --check`, `intest upgrade`. After a real `dotnet tool restore`
+(this run's whole point, per Step 1), none of them run that way:
+
+```
+$ intest --help
+bash: intest: command not found
+```
+
+```
+PS> intest --help
+The term 'intest' is not recognized as a name of a cmdlet, function, script file, or executable
+program. Check the spelling of the name, or if a path was included, verify that the path is
+correct and try again.
+```
+
+Confirmed cross-shell (Git Bash and PowerShell), so this is not a shell-specific artifact. The
+correct invocation is `dotnet intest …` (the SDK's local-tool short form, available without
+`dotnet tool run` since .NET 7) or `dotnet tool run intest …`; both work:
+
+```
+$ dotnet intest --version
+0.1.0+cc437140d8425ab9aac468540f4e182d96077f48
+```
+
+`Program.cs` sets `<ToolCommandName>intest</ToolCommandName>` and Phase 2 scaffolds
+`.config/dotnet-tools.json`, both of which signal a **local** tool via manifest, not a global
+install — `dotnet tool restore` never adds anything to `PATH` for a local tool, unlike a global
+install's shim directory. **No prior acceptance run could have found this**: v0 through the F11
+phase all invoked InTest via `dotnet run --project src/InTest.Cli` or a swapped
+`ProjectReference`, never through the packaged `PackAsTool` output — this is the first run in the
+project's history to install and invoke the real tool, which is a direct consequence of Step 1's
+refusal to substitute around the restore. Not fixed here — a documentation change (`dotnet
+intest …` throughout, or a stated PATH-setup step) belongs to whoever next touches
+`getting-started.md`; recorded as an action below.
+
+## What v1-e Task 6 did not cover — stated rather than glossed
+
+- **A fresh, zero-setup clone still cannot run Phase 8 verbatim.** This run built a temporary
+  local feed and `nuget.config` by hand; neither is checked into the repository. Until `InTest.Cli`
+  and `InTest.Runtime` are actually published, or the repository documents an equivalent
+  contributor-facing local-feed setup, Phase 8's first line remains unrunnable from a bare clone —
+  this run proves the *mechanism* works, not that the *repository* is ready to hand to CI today.
+- **The stale-global-cache trap is not yet guarded against anywhere in the docs.** Recorded above
+  as an action, not fixed.
+- **F13 is not fixed**, only found and documented — `getting-started.md` still shows bare `intest`
+  throughout.
+- **No CI pipeline ran any of this.** Every step above ran on one local machine, against real
+  processes, but "in a real pipeline" — the same gap v0's own acceptance criterion named and this
+  document has carried open ever since — remains unmet for `--check` and `upgrade` specifically,
+  same as it does for everything else in this file.
+- **Only Orders was used.** Catalog and Inventory declare no `security` and were not part of this
+  run — `--check` and `upgrade`'s own logic does not depend on auth, so this is a reasonable
+  scope choice, not an oversight, but it means neither command has been exercised against a spec
+  producer other than Swashbuckle in this run.
+- **Partial containment, the OR/AND union gap, and the other F11-phase residual gaps are
+  unaffected and unexercised here** — this run reused the same identity pair and did not attempt
+  to close them; see the F11 phase section above.
+
+## §5's marker column
+
+While reading §5 for this run's Step 4/5 evidence, its own command-surface table lists 9 commands
+under the framing "the full v1 surface" with no way to tell which of them actually run today —
+`generate --emit-plan`, `fixtures promote`, `survey` and `assertions add` do not exist, and
+nothing in the table said so. **Decided: add a marker column** (`Ships today`), directly in
+`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`. Two reasons, not one:
+first, §5 is explicitly the exit-code contract as well as a design description, and a reader
+relying on it as a contract needs to know what is reachable; second, the same section already
+uses this exact pattern two tables up (the frozen-axes table's `n/a in v1` row for the HTTP pack),
+so this is consistency with an existing convention, not a new one. The column points at
+`CONTRIBUTING.md` and `CLAUDE.md` as the actively-maintained source of the same fact rather than
+duplicating it a third time, per this repository's "one canonical explanation" rule.
+
+## v1-e Task 6 actions
+
+| # | Action | Owner phase | Status |
+|---|---|---|---|
+| 1 | Document the stale-global-package-cache trap (`dotnet nuget locals global-packages --clear`, or clear just the affected package, before trusting a freshly published version number that was ever built locally under the same number) | `CONTRIBUTING.md`'s "Releases" section, or wherever local-build instructions live | Open — recorded above, not fixed here |
+| 2 | F13 — `getting-started.md` shows bare `intest …` throughout; every invocation needs `dotnet intest …` or `dotnet tool run intest …` against a local-tool manifest | next phase touching `getting-started.md` | Open — recorded above, not fixed here |
+| 3 | Publish `InTest.Cli`/`InTest.Runtime`, or document a contributor-facing local-feed setup, so Phase 8 is runnable from a bare clone without the scaffolding this run built by hand | pre-v1 release readiness | Open — recorded above, not fixed here |
+| 4 | §5's command-surface table gave no way to distinguish shipped commands from designed-only ones | v1-e Task 6 | **Closed** — `Ships today` column added, see above |
