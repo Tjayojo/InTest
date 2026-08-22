@@ -1,3 +1,4 @@
+using System.Text;
 using InTest.Cli;
 using InTest.Cli.Commands;
 using Shouldly;
@@ -93,6 +94,24 @@ public class UpgradeCommandTests
         return (exitCode, report.ToString());
     }
 
+    /// <summary>Runs `upgrade` with stderr captured, so a test can assert what the adopter is
+    /// told — the same idiom GenerateCommandTests, FixturesRepairCommandTests and
+    /// InitCommandTests already use for their own refusal messages.</summary>
+    private static async Task<(int ExitCode, string Error)> UpgradeCapturingErrorAsync(string root)
+    {
+        var originalError = Console.Error;
+        var capturedError = new StringWriter();
+        Console.SetError(capturedError);
+        try
+        {
+            return (await UpgradeCommand.RunAsync(root, CancellationToken.None), capturedError.ToString());
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
     private string ReadIntestJson() => File.ReadAllText(Path.Combine(_root, "intest.json"));
     private string ReadDotnetTools() => File.ReadAllText(Path.Combine(_root, ".config", "dotnet-tools.json"));
 
@@ -150,6 +169,14 @@ public class UpgradeCommandTests
     /// — every one of those bytes must survive untouched. A parse-and-rewrite through JsonNode or
     /// JsonDocument would satisfy "the new version is present" while failing this test, because
     /// reserializing normalizes indentation and typically reorders or at least reformats content.
+    /// <para>
+    /// The unknown key deliberately nests a same-named <c>"intestVersion"</c> — CRITICAL 1's fix,
+    /// applied here too: a first review round found this test could not have caught the
+    /// unanchored-regex defect (nested-key corruption) because its unknown key contained no text
+    /// the old match could confuse with the real one. It now does, and
+    /// <c>DoesNotCorruptANestedKeyNamedIntestVersion</c> pins the same claim directly against
+    /// SetIntestVersion for a case where the colliding key sits <i>before</i> the real one instead.
+    /// </para>
     /// </summary>
     [TestMethod]
     public async Task PreservesUnusualFormattingKeyOrderAndUnknownKeysInIntestJson()
@@ -160,7 +187,7 @@ public class UpgradeCommandTests
         var handWritten =
             "{\"project\":{\"rootNamespace\":\"Orders.ApiTests\",\"testBaseClass\":\"Orders.ApiTests.OrdersTestBase\"}," +
             "\"intestVersion\":\"0.0.1\",\"schemaVersion\":1,\"spec\":{\"source\":\"orders.json\"}," +
-            "\"somethingFromALaterRelease\":{\"nested\":true}}";
+            "\"somethingFromALaterRelease\":{\"nested\":true,\"intestVersion\":\"pinned-by-a-later-release\"}}";
         File.WriteAllText(Path.Combine(_root, "intest.json"), handWritten);
 
         var expectedAfter = handWritten.Replace(
@@ -169,8 +196,9 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         ReadIntestJson().ShouldBe(expectedAfter,
-            customMessage: "every byte outside the intestVersion value must be untouched — " +
-                            "key order, spacing, and the unrecognised key alike");
+            customMessage: "every byte outside the top-level intestVersion value must be " +
+                            "untouched — key order, spacing, the unrecognised key, and the nested " +
+                            "same-named key inside it alike");
     }
 
     /// <summary>
@@ -202,28 +230,153 @@ public class UpgradeCommandTests
     }
 
     /// <summary>
-    /// SetIntestVersion exercised directly against the exact shape the plan's "unusual key order"
-    /// hazard names — schemaVersion with no trailing comma before whatever follows it starts on
-    /// the same line — without needing a whole project scaffold for a one-function claim.
+    /// Item 4, exercised through the full command rather than just SetIntestVersion directly: the
+    /// insert path (no existing intestVersion key — exactly InsertsIntestVersionWhenAbsent's case
+    /// above) must derive its newline from the file it is editing rather than hard-coding "\n".
+    /// Reachable in practice because the scaffolded .gitattributes pins Generated/**,
+    /// coverage-report.json and fixtures/**/*.json to LF but not intest.json itself, so a config
+    /// predating Task 1 — this insert path's whole reason to exist — stays CRLF on a
+    /// core.autocrlf=true clone.
+    /// </summary>
+    [TestMethod]
+    public async Task InsertsIntestVersionUsingTheConfigsOwnCrlfLineEnding()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
+        File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
+        File.WriteAllText(Path.Combine(_root, "intest.json"),
+            "{\r\n  \"schemaVersion\": 1,\r\n  \"spec\": { \"source\": \"orders.json\" },\r\n  " +
+            "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", " +
+            "\"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\" }\r\n}");
+
+        (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var after = ReadIntestJson();
+        after.ShouldContain(
+            $"\"schemaVersion\": 1,\r\n  \"intestVersion\": \"{CliVersion.Current}\",\r\n  \"spec\"",
+            Case.Sensitive,
+            customMessage: "the inserted line must use this file's own CRLF, not a bare LF");
+        after.ShouldNotContain("1,\n  \"intestVersion", Case.Sensitive,
+            customMessage: "a lone LF here would mean the insertion ignored the file's line ending");
+    }
+
+    /// <summary>
+    /// Item 3: falsifies the type doc's central claim if it regresses. File.ReadAllTextAsync
+    /// silently consumes a leading UTF-8 BOM and File.WriteAllTextAsync never re-emits one, so a
+    /// targeted edit that round-trips intest.json through text (rather than bytes) drops the BOM
+    /// even though nothing in the matched span asked for that — measured directly: first byte 0xEF
+    /// before upgrade, 0x7B (a bare '{') after, exit 0. UpgradeCommand now round-trips through
+    /// bytes precisely so a BOM sits outside every matched span and survives like any other byte
+    /// outside it.
+    /// </summary>
+    [TestMethod]
+    public async Task PreservesALeadingUtf8BomInIntestJson()
+    {
+        InitProject(Spec);
+        var intestJsonPath = Path.Combine(_root, "intest.json");
+        var withBom = new byte[] { 0xEF, 0xBB, 0xBF }.Concat(await File.ReadAllBytesAsync(intestJsonPath)).ToArray();
+        await File.WriteAllBytesAsync(intestJsonPath, withBom);
+
+        (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var afterBytes = await File.ReadAllBytesAsync(intestJsonPath);
+        afterBytes.Take(3).ShouldBe(new byte[] { 0xEF, 0xBB, 0xBF },
+            customMessage: "the BOM sits outside intestVersion's matched span and must survive untouched");
+        Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"");
+    }
+
+    /// <summary>The dotnet-tools.json twin of the test above — the same byte-preservation claim
+    /// applies to both adopter-owned files this command edits.</summary>
+    [TestMethod]
+    public async Task PreservesALeadingUtf8BomInDotnetToolsJson()
+    {
+        InitProject(Spec);
+        var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
+        var withBom = new byte[] { 0xEF, 0xBB, 0xBF }.Concat(await File.ReadAllBytesAsync(dotnetToolsPath)).ToArray();
+        await File.WriteAllBytesAsync(dotnetToolsPath, withBom);
+
+        (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var afterBytes = await File.ReadAllBytesAsync(dotnetToolsPath);
+        afterBytes.Take(3).ShouldBe(new byte[] { 0xEF, 0xBB, 0xBF });
+        Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"version\": \"{CliVersion.Current}\"");
+    }
+
+    private static byte[] Utf8(string text) => Encoding.UTF8.GetBytes(text);
+
+    /// <summary>
+    /// SetIntestVersion exercised directly against the shape the plan's "unusual key order"
+    /// hazard names — schemaVersion immediately followed by another property on the same line,
+    /// comma included — without needing a whole project scaffold for a one-function claim. This is
+    /// the has-comma branch of the insert path; <see cref="SetIntestVersionInsertsAfterSchemaVersionWithNoTrailingComma"/>
+    /// is its sibling, and the two are only distinguishable from each other, not from this test
+    /// alone: forcing the has-comma form unconditionally (deleting the ternary in SetIntestVersion
+    /// and always taking the comma-first branch) leaves this test green and only breaks the
+    /// no-comma sibling.
     /// </summary>
     [TestMethod]
     public void SetIntestVersionInsertsAfterSchemaVersionMatchingItsIndentation()
     {
-        var before = "{\n  \"schemaVersion\": 1,\n  \"spec\": { \"source\": \"orders.json\" } }";
+        var before = Utf8("{\n  \"schemaVersion\": 1,\n  \"spec\": { \"source\": \"orders.json\" } }");
 
         var after = UpgradeCommand.SetIntestVersion(before, "1.2.3");
 
-        after.ShouldBe("{\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\",\n  \"spec\": { \"source\": \"orders.json\" } }");
+        Encoding.UTF8.GetString(after).ShouldBe(
+            "{\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\",\n  \"spec\": { \"source\": \"orders.json\" } }");
+    }
+
+    /// <summary>
+    /// The no-comma sibling: schemaVersion is the last property before the object closes, so
+    /// nothing follows it on the same line. A hand-edited config predating Task 1 can plausibly
+    /// look like this if schemaVersion was appended last. Mutation check: forcing the has-comma
+    /// branch unconditionally leaves a spurious comma directly after the number — this test fails,
+    /// where <see cref="SetIntestVersionInsertsAfterSchemaVersionMatchingItsIndentation"/> alone
+    /// could not tell the two branches apart, since its input always has a comma.
+    /// </summary>
+    [TestMethod]
+    public void SetIntestVersionInsertsAfterSchemaVersionWithNoTrailingComma()
+    {
+        var before = Utf8("{\n  \"spec\": { \"source\": \"orders.json\" },\n  \"schemaVersion\": 1\n}");
+
+        var after = UpgradeCommand.SetIntestVersion(before, "1.2.3");
+
+        Encoding.UTF8.GetString(after).ShouldBe(
+            "{\n  \"spec\": { \"source\": \"orders.json\" },\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\"\n}");
     }
 
     [TestMethod]
     public void SetIntestVersionReplacesOnlyTheExistingValue()
     {
-        var before = "{ \"schemaVersion\": 1, \"intestVersion\":   \"0.1.0\"  , \"spec\": {} }";
+        var before = Utf8("{ \"schemaVersion\": 1, \"intestVersion\":   \"0.1.0\"  , \"spec\": {} }");
 
         var after = UpgradeCommand.SetIntestVersion(before, "9.9.9");
 
-        after.ShouldBe("{ \"schemaVersion\": 1, \"intestVersion\":   \"9.9.9\"  , \"spec\": {} }");
+        Encoding.UTF8.GetString(after).ShouldBe("{ \"schemaVersion\": 1, \"intestVersion\":   \"9.9.9\"  , \"spec\": {} }");
+    }
+
+    /// <summary>
+    /// CRITICAL 1's proof, exercised at the unit level: a nested key named exactly
+    /// <c>intestVersion</c>, sitting <i>before</i> the real top-level one and containing no text
+    /// the old regex-based match could tell apart from the real key. Measured against the previous
+    /// implementation: it rewrote the nested value and left the top-level one untouched, exit 0 —
+    /// the exact "corrupts an unrelated adopter key and never bumps the real field" defect a first
+    /// review round reported. SetIntestVersion's underlying scanner must only ever consider a
+    /// property that is a direct child of the document's root object.
+    /// </summary>
+    [TestMethod]
+    public void DoesNotCorruptANestedKeyNamedIntestVersion()
+    {
+        var before = Utf8(
+            "{ \"schemaVersion\": 1, \"vendorNotes\": { \"intestVersion\": \"pinned-by-us\" }, " +
+            "\"intestVersion\": \"0.0.1\" }");
+
+        var after = UpgradeCommand.SetIntestVersion(before, "9.9.9");
+
+        var afterText = Encoding.UTF8.GetString(after);
+        afterText.ShouldBe(
+            "{ \"schemaVersion\": 1, \"vendorNotes\": { \"intestVersion\": \"pinned-by-us\" }, " +
+            "\"intestVersion\": \"9.9.9\" }",
+            customMessage: "the nested vendorNotes.intestVersion must survive untouched and only " +
+                            "the root-level key may change");
     }
 
     // ---- comments and trailing commas never reach upgrade's editing code ----------------------
@@ -344,6 +497,79 @@ public class UpgradeCommandTests
         after.ShouldContain($"\"intest.cli\": {{ \"version\": \"{CliVersion.Current}\"");
     }
 
+    /// <summary>
+    /// Item 11 / part of CRITICAL 1's proof at the dotnet-tools.json side: the previous
+    /// implementation matched <c>"intest.cli": { ... }</c> with a regex body class of
+    /// <c>[^{}]*</c>, which cannot contain a brace at all — so an <c>intest.cli</c> entry with any
+    /// nested object inside it (here, an unrelated <c>"metadata"</c> object) made the whole regex
+    /// fail to match, and the command refused with "does not pin intest.cli under tools" even
+    /// though the pin was right there. The JSON-aware scanner must walk past the nested object
+    /// rather than refusing at the first unmatched brace.
+    /// </summary>
+    [TestMethod]
+    public async Task BumpsTheVersionEvenWhenIntestCliCarriesANestedObject()
+    {
+        InitProject(Spec);
+        var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
+        File.WriteAllText(dotnetToolsPath, """
+        {
+          "version": 1,
+          "isRoot": true,
+          "tools": {
+            "intest.cli": {
+              "commands": ["intest"],
+              "metadata": { "notes": "pinned deliberately" },
+              "version": "0.0.1"
+            }
+          }
+        }
+        """);
+
+        (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
+
+        var after = ReadDotnetTools();
+        after.ShouldContain($"\"version\": \"{CliVersion.Current}\"");
+        after.ShouldContain("\"metadata\": { \"notes\": \"pinned deliberately\" }",
+            customMessage: "the unrelated nested object must survive untouched");
+    }
+
+    /// <summary>
+    /// CRITICAL 1's proof at the dotnet-tools.json side: an <c>"intest.cli"</c> key nested inside
+    /// some unrelated object elsewhere in the manifest — not under <c>"tools"</c> at all — must
+    /// never be found or bumped, even though the previous regex-based <c>IntestCliToolBlock</c>
+    /// would have matched it anywhere in the file. Its own refusal message asserted the pin was
+    /// "under tools"; this proves the scanner now actually enforces that rather than just saying
+    /// it.
+    /// </summary>
+    [TestMethod]
+    public async Task DoesNotBumpAnIntestCliKeyNestedOutsideTools()
+    {
+        InitProject(Spec);
+        var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
+        var before = """
+        {
+          "version": 1,
+          "isRoot": true,
+          "vendorNotes": { "intest.cli": { "version": "pinned-by-us" } },
+          "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } }
+        }
+        """;
+        File.WriteAllText(dotnetToolsPath, before);
+
+        (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
+
+        ReadDotnetTools().ShouldBe(before,
+            customMessage: "a same-named key outside \"tools\" must never be touched");
+    }
+
+    /// <summary>
+    /// CRITICAL 2's proof: this exact refusal used to run <i>after</i> GenerateCommand.RunAsync had
+    /// already rewritten Generated/ and coverage-report.json wholesale — measured by deleting
+    /// .config/dotnet-tools.json and running `upgrade`, which exited 2 with fresh output already on
+    /// disk. All four manifest checks (this one, the missing-pin case below, the missing-version-
+    /// field case, and an unreadable intest.json) are now pure reads hoisted above the regenerate
+    /// call, so none of them can ever observe Generated/ having been created.
+    /// </summary>
     [TestMethod]
     public async Task RefusesWhenDotnetToolsJsonDoesNotExist()
     {
@@ -355,6 +581,8 @@ public class UpgradeCommandTests
 
         ReadIntestJson().ShouldBe(intestJsonBefore,
             customMessage: "intest.json must not be rewritten when the tools pin cannot be bumped");
+        Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
+            "CRITICAL 2: a missing manifest must be caught before regeneration ever runs");
     }
 
     [TestMethod]
@@ -370,20 +598,83 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
 
         ReadIntestJson().ShouldBe(intestJsonBefore);
+        Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
+            "CRITICAL 2: a manifest missing the intest.cli pin must be caught before regeneration ever runs");
+    }
+
+    /// <summary>
+    /// The third of the four CRITICAL 2 causes: an intest.cli entry present but missing its
+    /// "version" field. Also item 7's proof — the refusal must prescribe a fix like its two
+    /// siblings (missing manifest, missing pin) do, not just diagnose.
+    /// </summary>
+    [TestMethod]
+    public async Task RefusesWhenIntestCliPinHasNoVersionField()
+    {
+        InitProject(Spec);
+        var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
+        File.WriteAllText(dotnetToolsPath, """
+        { "version": 1, "isRoot": true, "tools": { "intest.cli": { "commands": ["intest"] } } }
+        """);
+        var intestJsonBefore = ReadIntestJson();
+
+        var (exitCode, error) = await UpgradeCapturingErrorAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.ToolError);
+        error.ShouldContain("no \"version\" field",
+            customMessage: "the refusal must diagnose the actual problem");
+        error.ShouldContain("add one by hand", Case.Insensitive,
+            customMessage: "the refusal must prescribe a fix, matching its two siblings " +
+                            "(missing manifest, missing pin), not just diagnose");
+        ReadIntestJson().ShouldBe(intestJsonBefore);
+        Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
+            "CRITICAL 2: an intest.cli pin with no version field must be caught before regeneration ever runs");
+    }
+
+    /// <summary>
+    /// The fourth CRITICAL 2 cause: intest.json itself unreadable. Locking the file open for
+    /// exclusive access is the only reliable, portable way to make a subsequent
+    /// File.ReadAllBytesAsync throw IOException without deleting the file outright (deleting it
+    /// would instead exercise ConfigLoader's own "No intest.json found" refusal, a different code
+    /// path already covered elsewhere).
+    /// </summary>
+    [TestMethod]
+    public async Task RefusesWhenIntestJsonIsUnreadable()
+    {
+        InitProject(Spec);
+        var intestJsonPath = Path.Combine(_root, "intest.json");
+        var dotnetToolsBefore = ReadDotnetTools();
+
+        await using (new FileStream(intestJsonPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
+        }
+
+        ReadDotnetTools().ShouldBe(dotnetToolsBefore,
+            customMessage: "CRITICAL 2: an unreadable intest.json must be caught before " +
+                            "regeneration — and before the tools pin is bumped — ever runs");
+        Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
     }
 
     // ---- .gitattributes: write if absent, never overwrite --------------------------------------
 
+    /// <summary>
+    /// Item 6: `upgrade` is the first InTest command ever to create a team-owned file, and that
+    /// narrowness was documented only in a code comment, not in the output a developer actually
+    /// sees. The report line must say so when it happens.
+    /// </summary>
     [TestMethod]
     public async Task ScaffoldsGitattributesWhenAbsent()
     {
         InitProject(Spec);
         File.Delete(Path.Combine(_root, ".gitattributes"));
 
-        (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
+        var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
+        exitCode.ShouldBe(ExitCode.Ok);
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue();
         File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=lf");
+        report.ShouldContain(".gitattributes",
+            customMessage: "the report must say a team-owned file was created, not just the two configs");
     }
 
     [TestMethod]
@@ -394,9 +685,13 @@ public class UpgradeCommandTests
         File.WriteAllText(gitattributesPath, "# adopter customised this file\n*.custom text eol=lf\n");
         var before = File.ReadAllText(gitattributesPath);
 
-        (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
+        var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
+        exitCode.ShouldBe(ExitCode.Ok);
         File.ReadAllText(gitattributesPath).ShouldBe(before);
+        report.ShouldNotContain(".gitattributes",
+            customMessage: "an already-present .gitattributes was not created by this run, so the " +
+                            "report must not claim it was");
     }
 
     // ---- fixtures/ and every other team-owned file: never touched, except the named exception --

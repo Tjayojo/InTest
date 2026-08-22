@@ -43,7 +43,7 @@ repair.SetAction((parseResult, cancellationToken) =>
 fixtures.Subcommands.Add(repair);
 
 var upgrade = new Command("upgrade",
-    "Adopt the running intest version: bump intestVersion and the .config/dotnet-tools.json pin, then regenerate.");
+    "Adopt the running intest version: regenerate against it, then bump intestVersion and the .config/dotnet-tools.json pin.");
 upgrade.Options.Add(projectOption);
 upgrade.SetAction((parseResult, cancellationToken) =>
     UpgradeCommand.RunAsync(parseResult.GetValue(projectOption)!, cancellationToken));

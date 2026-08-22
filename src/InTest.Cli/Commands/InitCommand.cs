@@ -68,6 +68,25 @@ public static class InitCommand
     """;
 
     /// <summary>
+    /// The exact shape `init` scaffolds at <c>.config/dotnet-tools.json</c>, parameterised only by
+    /// the pinned version — hoisted to a single method, internal rather than private, so
+    /// <c>UpgradeCommand</c>'s "no manifest found" remedy message can show an adopter this literal
+    /// shape instead of a second hand-typed copy that could silently drift from what `init`
+    /// actually writes. The same rule this repository already applies to
+    /// <see cref="GitattributesContent"/> (a review of the v1-e upgrade work applied it here too,
+    /// after finding <c>UpgradeCommand</c> had re-typed this exact JSON by hand).
+    /// </summary>
+    internal static string DotnetToolsJsonContent(string version) => $$"""
+    {
+      "version": 1,
+      "isRoot": true,
+      "tools": {
+        "intest.cli": { "version": "{{version}}", "commands": ["intest"] }
+      }
+    }
+    """;
+
+    /// <summary>
     /// Every refusal below runs before the first write, and none of them catches: an exception
     /// this command does not anticipate is §5's exit 2 by way of <c>Program</c>'s crash floor,
     /// which covers every command rather than only the three that remembered to catch. This was
@@ -363,15 +382,7 @@ public static class InitCommand
         </RunSettings>
         """);
 
-        Write(projectRoot, Path.Combine(".config", "dotnet-tools.json"), $$"""
-        {
-          "version": 1,
-          "isRoot": true,
-          "tools": {
-            "intest.cli": { "version": "{{CliVersion.Current}}", "commands": ["intest"] }
-          }
-        }
-        """);
+        Write(projectRoot, Path.Combine(".config", "dotnet-tools.json"), DotnetToolsJsonContent(CliVersion.Current));
 
         Console.WriteLine($"Initialised {projectName}. Next: `intest generate`.");
         return ExitCode.Ok;

@@ -322,4 +322,52 @@ public class CliExitCodeTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    /// <summary>
+    /// v1-e Task 4, item 5 of a review round on it. `[paired]`'s whole argument is that a refusal
+    /// must never name a remedy command that does not exist — <c>generate --check</c>'s exit-4
+    /// version-mismatch message names `intest upgrade` on exactly that promise. Nothing had ever
+    /// pinned that <c>upgrade</c> is actually reachable from a real command line rather than only
+    /// from <c>UpgradeCommand.RunAsync</c> called in-process: every test in
+    /// <c>InTest.Cli.Tests.UpgradeCommandTests</c> calls that method directly, which skips
+    /// <c>Program.cs</c>'s subcommand wiring entirely, the same gap this class exists to close for
+    /// every other command (see the type doc comment). Measured before this test existed: commenting
+    /// out <c>root.Subcommands.Add(upgrade)</c> in <c>Program.cs</c> left every test in
+    /// <c>InTest.Cli.Tests</c> green, because none of them go through the parser — `intest upgrade
+    /// ...` would instead fail System.CommandLine's own "unrecognized command" parse, exit 2, and
+    /// never reach <c>UpgradeCommand</c> at all.
+    /// </summary>
+    [TestMethod]
+    public async Task UpgradeIsWiredAsARealSubcommand()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "intest-upgradewiring-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "orders.json"), """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Orders", "version": "1.0" },
+              "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+                "responses": { "200": { "description": "ok" } } } } }
+            }
+            """);
+
+            var init = await RunCliAsync($"init --project \"{root}\" --name Orders.ApiTests --spec orders.json");
+            init.ExitCode.ShouldBe(ExitCode.Ok, init.Output);
+
+            var upgrade = await RunCliAsync($"upgrade --project \"{root}\"");
+
+            upgrade.ExitCode.ShouldBe(ExitCode.Ok,
+                $"`upgrade` must be reachable as a real subcommand, not just as a method " +
+                $"InTest.Cli.Tests can call directly:{Environment.NewLine}{upgrade.Output}");
+            upgrade.Output.ShouldNotContain("Unrecognized command or argument",
+                customMessage: "if this appears, `upgrade` fell through to the parser's default " +
+                                "\"no such command\" refusal instead of running");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
