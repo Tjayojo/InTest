@@ -46,7 +46,7 @@ public class TokenResolverTests
             () => resolver.Resolve("{{secret:Orders:Missing}}", "create-order.json"));
 
         ex.Message.ShouldNotContain("super-secret-value");
-        ex.Message.ShouldContain("Orders:Missing");
+        ex.Message.ShouldContain("Orders:Missing", Case.Sensitive);
     }
 
     [TestMethod]
@@ -98,13 +98,13 @@ public class TokenResolverTests
             () => resolver.Resolve("{{bogus}}", "create-order.json"));
 
         ex.Message.ShouldContain("bogus");
-        ex.Message.ShouldContain("config:");
-        ex.Message.ShouldContain("secret:");
-        ex.Message.ShouldContain("runId");
-        ex.Message.ShouldContain("utcNow");
+        ex.Message.ShouldContain("config:", Case.Sensitive);
+        ex.Message.ShouldContain("secret:", Case.Sensitive);
+        ex.Message.ShouldContain("runId", Case.Sensitive);
+        ex.Message.ShouldContain("utcNow", Case.Sensitive);
         // SupportedTokens once omitted {{fixture:...}}; left unfixed, the "Unknown token" message
         // would keep recommending a list missing the token that now works.
-        ex.Message.ShouldContain("{{fixture:");
+        ex.Message.ShouldContain("{{fixture:", Case.Sensitive);
     }
 
     [TestMethod]
@@ -123,7 +123,7 @@ public class TokenResolverTests
         var ex = Should.Throw<FixtureResolutionException>(
             () => resolver.Resolve("{{fixture:seededCustomer.id}}", "create-order.json"));
 
-        ex.Message.ShouldContain("seededCustomer.id");
+        ex.Message.ShouldContain("seededCustomer.id", Case.Sensitive);
         ex.Message.ShouldNotContain("v1-b");
     }
 
@@ -157,9 +157,9 @@ public class TokenResolverTests
 
         // §10 specifies both halves. Naming only the missing key leaves the reader guessing at
         // the spelling of the one they meant.
-        ex.Message.ShouldContain("seededTenant.id");
-        ex.Message.ShouldContain("seededCustomer.id");
-        ex.Message.ShouldContain("seededRegion.code");
+        ex.Message.ShouldContain("seededTenant.id", Case.Sensitive);
+        ex.Message.ShouldContain("seededCustomer.id", Case.Sensitive);
+        ex.Message.ShouldContain("seededRegion.code", Case.Sensitive);
 
         // This file already pins "no published *value* leaks into a resolution-error message"
         // for {{secret:}} (SecretValuesNeverAppearInAnErrorMessage above). Published fixture
@@ -200,7 +200,7 @@ public class TokenResolverTests
         var ex = Should.Throw<FixtureResolutionException>(
             () => resolver.Resolve("{{fixture:seededCustomer.id}}", "create-order.json"));
 
-        ex.Message.ShouldContain("seededCustomer.id");
+        ex.Message.ShouldContain("seededCustomer.id", Case.Sensitive);
         ex.Message.ShouldNotContain("v1-b");
         // "(none)" is TokenResolver's own design choice for an empty published set (as opposed
         // to, say, a trailing "Published keys: ." with nothing listed) — pin it explicitly so an
@@ -271,7 +271,7 @@ public class TokenResolverTests
         var ex = Should.Throw<FixtureResolutionException>(
             () => resolver.Resolve("{{config:Orders:ApiKey}}", "create-order.json"));
 
-        ex.Message.ShouldContain("Orders:ApiKey");
+        ex.Message.ShouldContain("Orders:ApiKey", Case.Sensitive);
     }
 
     [TestMethod]
@@ -289,6 +289,6 @@ public class TokenResolverTests
 
         Should.Throw<FixtureResolutionException>(
             () => resolver.Resolve("{{config:Missing:Key}}", "update-order.json"))
-              .Message.ShouldContain("update-order.json");
+              .Message.ShouldContain("update-order.json", Case.Sensitive);
     }
 }

@@ -153,7 +153,7 @@ public class GenerateCommandTests
 
         exitCode.ShouldBe(2);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
-        capturedError.ToString().ShouldContain("rootNamespace");
+        capturedError.ToString().ShouldContain("rootNamespace", Case.Sensitive);
     }
 
     [TestMethod]
@@ -179,7 +179,7 @@ public class GenerateCommandTests
 
         exitCode.ShouldBe(2);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
-        capturedError.ToString().ShouldContain("testBaseClass");
+        capturedError.ToString().ShouldContain("testBaseClass", Case.Sensitive);
     }
 
     [TestMethod]
@@ -235,7 +235,7 @@ public class GenerateCommandTests
         var error = await ExpectExplainedConfigErrorAsync(
             """{ "schemaVersion": 1, "spec": { "source": "orders.json" } }""");
 
-        error.ShouldContain("project");
+        error.ShouldContain("project", Case.Sensitive);
         error.ShouldNotContain("KeyNotFoundException");
     }
 
@@ -252,7 +252,7 @@ public class GenerateCommandTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        error.ShouldContain("spec.source");
+        error.ShouldContain("spec.source", Case.Sensitive);
         error.ShouldNotContain("InvalidOperationException");
     }
 
@@ -270,7 +270,7 @@ public class GenerateCommandTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        error.ShouldContain("spec.source");
+        error.ShouldContain("spec.source", Case.Sensitive);
         error.ShouldNotContain("ArgumentNullException");
     }
 
@@ -280,7 +280,7 @@ public class GenerateCommandTests
         var error = await ExpectExplainedConfigErrorAsync(
             """{ "schemaVersion": 1, "spec": { "source": "orders.json" } """);
 
-        error.ShouldContain("intest.json");
+        error.ShouldContain("intest.json", Case.Sensitive);
         error.ShouldContain("not valid JSON");
         error.ShouldNotContain("JsonReaderException");
     }
@@ -297,7 +297,7 @@ public class GenerateCommandTests
           "project": { "rootNamespace": 7, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        error.ShouldContain("project.rootNamespace");
+        error.ShouldContain("project.rootNamespace", Case.Sensitive);
     }
 
     /// <summary>
@@ -316,7 +316,7 @@ public class GenerateCommandTests
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldNotContain("unexpected failure",
             customMessage: "an argument the adopter got wrong is refused, not reported as a crash");
-        error.ShouldStartWith("--project",
+        error.ShouldStartWith("--project", Case.Sensitive,
             customMessage: "a refusal names the flag the adopter typed, not the parameter it bound to");
         error.ShouldContain("is empty");
         error.ShouldContain("for example");

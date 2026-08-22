@@ -104,7 +104,7 @@ public class FixturesRepairCommandTests
         // property nobody meant to keep survives three refactors.
         FixtureDocument.Parse(File.ReadAllText(FixturePath)).Body!["legacyRef"].ShouldNotBeNull(
             "never silently deleted — it may be deliberate");
-        report.ToString().ShouldContain("legacyRef");
+        report.ToString().ShouldContain("legacyRef", Case.Sensitive);
         report.ToString().ShouldContain("no longer in schema");
     }
 
@@ -226,7 +226,7 @@ public class FixturesRepairCommandTests
         FixtureDocument.Parse(File.ReadAllText(widgetPath)).Body!["color"]!.GetValue<string>()
             .ShouldBe("TODO:color", "the unrelated, legitimate repair must still be applied");
         // The report should say which operation's fixture could not be read.
-        report.ToString().ShouldContain("createProduct");
+        report.ToString().ShouldContain("createProduct", Case.Sensitive);
     }
 
     // ---- intest.json is one document, so it is valid or it is not ---------------------------
@@ -279,7 +279,7 @@ public class FixturesRepairCommandTests
         var error = await ExpectExplainedConfigErrorAsync(
             """{ "schemaVersion": 1, "spec": { "source": "spec.json" } }""");
 
-        error.ShouldContain("project");
+        error.ShouldContain("project", Case.Sensitive);
         error.ShouldNotContain("KeyNotFoundException");
     }
 
@@ -291,7 +291,7 @@ public class FixturesRepairCommandTests
           "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
         """);
 
-        error.ShouldContain("spec.source");
+        error.ShouldContain("spec.source", Case.Sensitive);
         error.ShouldNotContain("InvalidOperationException");
     }
 
@@ -311,7 +311,7 @@ public class FixturesRepairCommandTests
                        "testBaseClass": "T.ApiTests.TTestBase" } }
         """);
 
-        error.ShouldContain("project.rootNamespace");
+        error.ShouldContain("project.rootNamespace", Case.Sensitive);
     }
 
     [TestMethod]
@@ -322,7 +322,7 @@ public class FixturesRepairCommandTests
           "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
         """);
 
-        error.ShouldContain("schemaVersion");
+        error.ShouldContain("schemaVersion", Case.Sensitive);
         error.ShouldNotContain("upgrade");
     }
 
@@ -354,7 +354,7 @@ public class FixturesRepairCommandTests
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldNotContain("unexpected failure",
             customMessage: "an argument the adopter got wrong is refused, not reported as a crash");
-        error.ShouldStartWith("--project",
+        error.ShouldStartWith("--project", Case.Sensitive,
             customMessage: "a refusal names the flag the adopter typed, not the parameter it bound to");
         error.ShouldContain("is empty");
         error.ShouldContain("for example");

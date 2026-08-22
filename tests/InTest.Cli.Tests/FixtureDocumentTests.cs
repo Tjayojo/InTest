@@ -21,7 +21,7 @@ public class FixtureDocumentTests
         reloaded.Meta.Tier.ShouldBe(2);
         reloaded.Meta.OperationId.ShouldBe("post_api_products");
         reloaded.Parameters["id"].ShouldBe("7");
-        reloaded.Body!.ToJsonString().ShouldContain("WGT-0001");
+        reloaded.Body!.ToJsonString().ShouldContain("WGT-0001", Case.Sensitive);
     }
 
     [TestMethod]
@@ -73,7 +73,7 @@ public class FixtureDocumentTests
         // abandon the document, and an unhandled crash is the worst version of abandoning it.
         var exception = Should.Throw<FixtureFormatException>(() => FixtureDocument.Parse(json));
 
-        exception.Message.ShouldContain(fieldFragment);
+        exception.Message.ShouldContain(fieldFragment, Case.Sensitive);
         exception.InnerException.ShouldNotBeNull("the framework exception explaining the real cause must not be discarded");
     }
 
@@ -92,7 +92,7 @@ public class FixtureDocumentTests
         // the request goes out malformed. That is the one outcome this class exists to prevent,
         // and '$meta' three lines above already rejects a wrong container shape.
         Should.Throw<FixtureFormatException>(() => FixtureDocument.Parse(json))
-              .Message.ShouldContain("$parameters");
+              .Message.ShouldContain("$parameters", Case.Sensitive);
     }
 
     [TestMethod]
@@ -115,7 +115,7 @@ public class FixtureDocumentTests
         // needs it to tell "missing, needs fixing" from "present and correct", and it cannot if
         // Parse quietly turns an absent value into "".
         var exception = Should.Throw<FixtureFormatException>(() => FixtureDocument.Parse(json));
-        exception.Message.ShouldContain("operationId");
+        exception.Message.ShouldContain("operationId", Case.Sensitive);
     }
 
     [TestMethod]
@@ -139,9 +139,11 @@ public class FixtureDocumentTests
         // skip and continues — see Task 2a.
         FixtureDocument.TryValidateOperationKey(key, out var reason).ShouldBeFalse();
 
-        reason.ShouldContain(key);
+        reason.ShouldContain(key, Case.Sensitive);
+        // No Case.Sensitive on `offending`: every row supplies a punctuation mark, which has no
+        // casing for the annotation to pin. It would read as a claim and check nothing.
         reason.ShouldContain(offending);
-        reason.ShouldContain("operationId");
+        reason.ShouldContain("operationId", Case.Sensitive);
     }
 
     [TestMethod]
@@ -167,7 +169,7 @@ public class FixtureDocumentTests
         // — the same gap already hardened for separators, closed the same way.
         FixtureDocument.TryValidateOperationKey("Orders\tCreate", out var reason).ShouldBeFalse();
 
-        reason.ShouldContain("operationId");
+        reason.ShouldContain("operationId", Case.Sensitive);
     }
 
     [TestMethod]

@@ -125,6 +125,41 @@ what the test would still pass under.
 emit valid, equivalent JSON for the same input, so any test that round-trips and compares is blind
 to which one ran. It was pinned only once a test asserted on the raw file text instead.
 
+**The assertion's own default can be the blind spot.** Shouldly's `ShouldContain`,
+`ShouldNotContain`, `ShouldStartWith`, `ShouldNotStartWith`, `ShouldEndWith` and
+`ShouldNotEndWith` all take `Case caseSensitivity = Case.Insensitive` on their string overloads,
+so `reason.ShouldContain("project.rootNamespace")` passes against a message that says
+`Project.RootNamespace`.
+
+When writing one, ask whether anything else matches that string ordinally. Setting paths,
+`schemaVersion`, `intestVersion`, token names like `{{runId}}`, fixture keys, `operationId`, paths
+under `Generated/`, CLI flags, filenames, the `intest fixtures repair` command line — all are, by
+`JsonElement.TryGetProperty`, by `StringComparer.Ordinal`, by git, or by a shell. Naming one in the
+wrong case sends the adopter to an edit that cannot work, so the assertion has to say
+`Case.Sensitive`. A literal that only describes a condition — "is empty", "not valid JSON", "an
+object" — is not such a name: leave it, and write `Case.Insensitive` explicitly wherever a reader
+would otherwise wonder which was meant. Nor is a literal with no letters in it — a separator, a
+punctuation mark, a line ending — which has no casing to be sensitive about, so annotating one
+states a claim it cannot check. The annotation is the only thing distinguishing an
+assertion that depends on casing from one that does not, which is why annotating everything would
+be worse than annotating nothing.
+
+Negatives run the other way, which is worth knowing before "fixing" one: a case-insensitive
+`ShouldNotContain` rejects *more* than it says, not less, so it fails spuriously rather than
+passing vacuously. The suite's are deliberately left un-annotated.
+
+The cost of the default was measured, not assumed. Rewriting `spec.source` to `Spec.Source`,
+`schemaVersion` to `SchemaVersion`, `operationId` to `OperationId`, `--spec` to `--Spec`,
+`` `intest fixtures repair` `` to `` `InTest Fixtures Repair` ``, `U+{c:X4}` to `U+{c:x4}`, the
+`generate --check` report's paths to lowercase and the published-key listings to lowercase — eight
+regressions any reviewer would catch on sight — left 614 of the 615 `InTest.Cli.Tests` and
+`InTest.Runtime.Tests` cases green. The one that failed,
+`TokenResolverTests.TheAvailableKeyListIsOrdinalSortedRegardlessOfPublishOrder`, is the one that
+does not use Shouldly's string helpers at all: it compares with
+`IndexOf(..., StringComparison.Ordinal)`. Annotating the 126 sites where casing is the claim takes
+that to 67 failures. `ShouldlyStringDefaultsTests` pins the six defaults themselves, because every
+one of those annotations stops being load-bearing the moment Shouldly changes them.
+
 **A proof living outside the repository is indistinguishable, to everyone downstream, from a
 proof that was never run.** Running the real check once, by hand, and reporting the result in a
 message is genuine evidence in the moment — but it leaves nothing anyone else can find, re-run,

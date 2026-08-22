@@ -17,9 +17,9 @@ public class PrefixDuplicationTests
         var ex = Should.Throw<InvalidOperationException>(() =>
             InTestUrl.EnsureNoPrefixDuplication(new Uri("http://localhost:5081/api/"), "/api"));
 
-        ex.Message.ShouldContain("/api/api/");
-        ex.Message.ShouldContain("servers[0].url");
-        ex.Message.ShouldContain("http://localhost:5081/");
+        ex.Message.ShouldContain("/api/api/", Case.Sensitive);
+        ex.Message.ShouldContain("servers[0].url", Case.Sensitive);
+        ex.Message.ShouldContain("http://localhost:5081/", Case.Sensitive);
     }
 
     [TestMethod]

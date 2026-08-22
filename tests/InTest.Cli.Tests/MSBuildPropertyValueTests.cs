@@ -166,8 +166,8 @@ public class MSBuildPropertyValueTests
 
         MSBuildPropertyValue.TryEscape(value, "project.spec", out _, out var reason).ShouldBeFalse();
 
-        reason.ShouldContain("project.spec");
-        reason.ShouldContain($"U+{codePoint:X4}");
+        reason.ShouldContain("project.spec", Case.Sensitive);
+        reason.ShouldContain($"U+{codePoint:X4}", Case.Sensitive);
         // The point of Display(): the offending character must be named by code point, never
         // pasted into the message raw. Asserting only ShouldContain("U+...") above would pass
         // even if Display() were deleted, since that substring comes from the message template
@@ -182,8 +182,8 @@ public class MSBuildPropertyValueTests
 
         MSBuildPropertyValue.TryEscape(value, "project.spec", out _, out var reason).ShouldBeFalse();
 
-        reason.ShouldContain("project.spec");
-        reason.ShouldContain("U+D800");
+        reason.ShouldContain("project.spec", Case.Sensitive);
+        reason.ShouldContain("U+D800", Case.Sensitive);
         reason.ShouldNotContain(((char)0xD800).ToString());
     }
 
@@ -194,8 +194,8 @@ public class MSBuildPropertyValueTests
 
         MSBuildPropertyValue.TryEscape(value, "project.spec", out _, out var reason).ShouldBeFalse();
 
-        reason.ShouldContain("project.spec");
-        reason.ShouldContain("U+DC00");
+        reason.ShouldContain("project.spec", Case.Sensitive);
+        reason.ShouldContain("U+DC00", Case.Sensitive);
         reason.ShouldNotContain(((char)0xDC00).ToString());
     }
 

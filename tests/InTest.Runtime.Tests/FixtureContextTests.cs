@@ -24,7 +24,7 @@ public class FixtureContextTests
         // A silent overwrite would make {{fixture:…}} depend on which fixture ran last, which is
         // precisely the non-determinism topological ordering exists to remove.
         Should.Throw<FixtureLifecycleException>(() => context.Publish("seededTenant.id", "b"))
-              .Message.ShouldContain("seededTenant.id");
+              .Message.ShouldContain("seededTenant.id", Case.Sensitive);
     }
 
     [TestMethod]
@@ -50,8 +50,8 @@ public class FixtureContextTests
         // every published key, independent of the machine's locale. Mirrors the courtesy
         // TokenResolver's own {{fixture:...}} lookup gives a miss.
         var ex = Should.Throw<FixtureLifecycleException>(() => context.Get("seededTenant.id"));
-        ex.Message.ShouldContain("seededTenant.id");
-        ex.Message.ShouldContain("Middle.id, apple.id, zebra.id");
+        ex.Message.ShouldContain("seededTenant.id", Case.Sensitive);
+        ex.Message.ShouldContain("Middle.id, apple.id, zebra.id", Case.Sensitive);
     }
 
     [TestMethod]

@@ -55,7 +55,7 @@ public class FixtureStoreTests
 
         store.Count.ShouldBe(0);
         Should.Throw<FixtureNotFoundException>(() => store.Get("anything"))
-              .Message.ShouldContain("intest fixtures repair");
+              .Message.ShouldContain("intest fixtures repair", Case.Sensitive);
     }
 
     [TestMethod]
@@ -109,7 +109,7 @@ public class FixtureStoreTests
         WriteOverlay("qa", "orphan", """{"$meta":{"tier":1,"operationId":"orphan","generatedBy":"t"},"body":{"x":1}}""");
 
         Should.Throw<FixtureFormatException>(() => FixtureStore.Load(_root, "qa"))
-              .Message.ShouldContain("orphan.json");
+              .Message.ShouldContain("orphan.json", Case.Sensitive);
     }
 
     [TestMethod]
@@ -118,7 +118,7 @@ public class FixtureStoreTests
         WriteBase("broken", "{ not valid json");
 
         Should.Throw<FixtureFormatException>(() => FixtureStore.Load(_root, profile: null))
-              .Message.ShouldContain("broken.json");
+              .Message.ShouldContain("broken.json", Case.Sensitive);
     }
 
     // --- ResolvedBody -------------------------------------------------------------------

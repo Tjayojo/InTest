@@ -369,7 +369,7 @@ public class InitCommandTests
         Directory.GetFileSystemEntries(_root).ShouldBeEmpty();
 
         var message = capturedError.ToString();
-        message.ShouldContain("--name");
+        message.ShouldContain("--name", Case.Sensitive);
         message.ShouldContain("My Project");
     }
 
@@ -564,7 +564,7 @@ public class InitCommandTests
         Directory.GetFileSystemEntries(_root).ShouldBeEmpty();
 
         var message = capturedError.ToString();
-        message.ShouldContain("--spec");
+        message.ShouldContain("--spec", Case.Sensitive);
         // Pins that the diagnosis itself — not just the boilerplate sentence appended in
         // InitCommand — reached the message: MSBuildPropertyValue renders the offending
         // character as U+0001 rather than pasting the raw control character into the terminal.
@@ -619,7 +619,7 @@ public class InitCommandTests
         exitCode.ShouldBe(ExitCode.ToolError,
             "§5 gives 2 for a tool error and 1 for outstanding work — an argument the adopter " +
             "mistyped is a tool error, and reporting it as 1 makes it indistinguishable from drift");
-        error.ShouldStartWith(setting,
+        error.ShouldStartWith(setting, Case.Sensitive,
             customMessage: "a refusal leads with the setting the adopter got wrong");
         error.ShouldContain("is empty",
             customMessage: "a refusal says what is wrong with the value, not just that something is");
@@ -648,7 +648,7 @@ public class InitCommandTests
             var (exitCode, error) = RunCapturingError("", "Orders.ApiTests", "orders.json");
 
             exitCode.ShouldBe(ExitCode.ToolError);
-            error.ShouldStartWith("--project");
+            error.ShouldStartWith("--project", Case.Sensitive);
             Directory.GetFileSystemEntries(_root).ShouldBeEmpty(
                 "a blank --project must be refused, not resolved to the current directory");
         }
@@ -683,7 +683,7 @@ public class InitCommandTests
         exitCode.ShouldBe(ExitCode.ToolError);
         Directory.GetFileSystemEntries(_root).ShouldBeEmpty(
             "§5's exit 2 is \"nothing was written\", and an argument is judged before the first write");
-        error.ShouldStartWith("--spec",
+        error.ShouldStartWith("--spec", Case.Sensitive,
             customMessage: "a refusal leads with the setting the adopter got wrong");
         error.ShouldContain(spec,
             customMessage: "a refusal quotes what the adopter actually wrote");

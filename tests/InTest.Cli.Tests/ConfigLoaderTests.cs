@@ -94,9 +94,9 @@ public class ConfigLoaderTests
     {
         var message = Should.Throw<ConfigLoadException>(() => ConfigLoader.Load(_root)).Message;
 
-        message.ShouldContain("intest.json");
+        message.ShouldContain("intest.json", Case.Sensitive);
         message.ShouldContain(_root);
-        message.ShouldContain("intest init");
+        message.ShouldContain("intest init", Case.Sensitive);
     }
 
     [TestMethod]
@@ -104,7 +104,7 @@ public class ConfigLoaderTests
     {
         var reason = ReasonFor("""{ "schemaVersion": 1, "spec": { "source": "orders.json" } """);
 
-        reason.ShouldContain("intest.json");
+        reason.ShouldContain("intest.json", Case.Sensitive);
         reason.ShouldContain("not valid JSON");
     }
 
@@ -113,7 +113,7 @@ public class ConfigLoaderTests
     {
         var reason = ReasonFor("""[ { "spec": { "source": "orders.json" } } ]""");
 
-        reason.ShouldContain("intest.json");
+        reason.ShouldContain("intest.json", Case.Sensitive);
         reason.ShouldContain("array");
         reason.ShouldContain("object");
     }
@@ -128,8 +128,8 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec");
-        reason.ShouldContain("source");
+        reason.ShouldContain("spec", Case.Sensitive);
+        reason.ShouldContain("source", Case.Sensitive);
     }
 
     [TestMethod]
@@ -140,7 +140,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec");
+        reason.ShouldContain("spec", Case.Sensitive);
         reason.ShouldContain("object");
     }
 
@@ -152,7 +152,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec.source");
+        reason.ShouldContain("spec.source", Case.Sensitive);
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec.source");
+        reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain("42");
         reason.ShouldContain("string");
     }
@@ -187,7 +187,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec.source");
+        reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain("null");
     }
 
@@ -205,7 +205,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec.source");
+        reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain("empty");
         reason.ShouldNotContain("Spec file not found");
     }
@@ -233,8 +233,8 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("spec.source");
-        reason.ShouldContain("https://example.com/openapi.json",
+        reason.ShouldContain("spec.source", Case.Sensitive);
+        reason.ShouldContain("https://example.com/openapi.json", Case.Sensitive,
             customMessage: "a refusal quotes what the adopter actually wrote");
         reason.ShouldContain("URL",
             customMessage: "a refusal names the kind of value it is refusing, not just that it failed");
@@ -273,9 +273,9 @@ public class ConfigLoaderTests
     {
         var reason = ReasonFor("""{ "schemaVersion": 1, "spec": { "source": "orders.json" } }""");
 
-        reason.ShouldContain("project");
-        reason.ShouldContain("rootNamespace");
-        reason.ShouldContain("testBaseClass");
+        reason.ShouldContain("project", Case.Sensitive);
+        reason.ShouldContain("rootNamespace", Case.Sensitive);
+        reason.ShouldContain("testBaseClass", Case.Sensitive);
     }
 
     [TestMethod]
@@ -285,7 +285,7 @@ public class ConfigLoaderTests
         { "schemaVersion": 1, "spec": { "source": "orders.json" }, "project": ["Orders.ApiTests"] }
         """);
 
-        reason.ShouldContain("project");
+        reason.ShouldContain("project", Case.Sensitive);
         reason.ShouldContain("object");
     }
 
@@ -297,7 +297,7 @@ public class ConfigLoaderTests
           "project": { "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("project.rootNamespace");
+        reason.ShouldContain("project.rootNamespace", Case.Sensitive);
     }
 
     [TestMethod]
@@ -308,7 +308,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests" } }
         """);
 
-        reason.ShouldContain("project.testBaseClass");
+        reason.ShouldContain("project.testBaseClass", Case.Sensitive);
     }
 
     /// <summary>
@@ -324,7 +324,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": 7, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("project.rootNamespace");
+        reason.ShouldContain("project.rootNamespace", Case.Sensitive);
         reason.ShouldContain("7");
         reason.ShouldContain("string");
     }
@@ -337,7 +337,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": true } }
         """);
 
-        reason.ShouldContain("project.testBaseClass");
+        reason.ShouldContain("project.testBaseClass", Case.Sensitive);
         reason.ShouldContain("string");
     }
 
@@ -357,9 +357,9 @@ public class ConfigLoaderTests
                        "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("project.rootNamespace");
-        reason.ShouldContain("Change project.rootNamespace in intest.json");
-        reason.ShouldContain("Orders.ApiTests");
+        reason.ShouldContain("project.rootNamespace", Case.Sensitive);
+        reason.ShouldContain("Change project.rootNamespace in intest.json", Case.Sensitive);
+        reason.ShouldContain("Orders.ApiTests", Case.Sensitive);
     }
 
     [TestMethod]
@@ -370,8 +370,8 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
         """);
 
-        reason.ShouldContain("project.testBaseClass");
-        reason.ShouldContain("Change project.testBaseClass in intest.json");
+        reason.ShouldContain("project.testBaseClass", Case.Sensitive);
+        reason.ShouldContain("Change project.testBaseClass in intest.json", Case.Sensitive);
     }
 
     [TestMethod]
@@ -380,7 +380,7 @@ public class ConfigLoaderTests
         ReasonFor("""
         { "schemaVersion": 1, "spec": { "source": "orders.json" },
           "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """).ShouldContain("project.rootNamespace");
+        """).ShouldContain("project.rootNamespace", Case.Sensitive);
     }
 
     // ---- schemaVersion ---------------------------------------------------------------------
@@ -413,7 +413,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("schemaVersion");
+        reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldContain("2");
         reason.ShouldContain("1");
         reason.ShouldNotContain("upgrade");
@@ -433,7 +433,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("schemaVersion");
+        reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldNotContain("upgrade");
     }
 
@@ -445,7 +445,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("schemaVersion");
+        reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldContain("string");
     }
 
@@ -461,7 +461,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("schemaVersion");
+        reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldContain("1.5");
     }
 
@@ -479,7 +479,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "not a valid name", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("schemaVersion");
+        reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldNotContain("rootNamespace");
     }
 
@@ -570,7 +570,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("intestVersion");
+        reason.ShouldContain("intestVersion", Case.Sensitive);
         reason.ShouldContain("42");
         reason.ShouldContain("string");
     }
@@ -591,7 +591,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("intestVersion");
+        reason.ShouldContain("intestVersion", Case.Sensitive);
         reason.ShouldContain("null");
     }
 
@@ -616,7 +616,7 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        reason.ShouldContain("intestVersion");
+        reason.ShouldContain("intestVersion", Case.Sensitive);
         reason.ShouldContain("empty");
         reason.ShouldNotContain("not a string");
     }

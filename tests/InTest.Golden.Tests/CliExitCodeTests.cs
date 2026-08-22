@@ -66,7 +66,7 @@ public class CliExitCodeTests
         // culture, where the sentence around the token is localised and the token is not.
         var (_, output) = await RunCliAsync("init --spec orders.json");
 
-        output.ShouldContain("--name");
+        output.ShouldContain("--name", Case.Sensitive);
     }
 
     [TestMethod]
@@ -251,7 +251,7 @@ public class CliExitCodeTests
                 $"init --project \"{root}\" --name Orders.ApiTests --spec https://example.com/openapi.json");
 
             exitCode.ShouldBe(ExitCode.ToolError, output);
-            output.ShouldContain("--spec",
+            output.ShouldContain("--spec", Case.Sensitive,
                 customMessage: "a refusal leads with the setting the adopter got wrong");
             output.ShouldContain("URL",
                 customMessage: "a refusal names the kind of value it is refusing, so the adopter " +

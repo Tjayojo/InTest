@@ -74,7 +74,7 @@ public class UpgradeCommandTests
 
         var intestJsonPath = Path.Combine(_root, "intest.json");
         var text = File.ReadAllText(intestJsonPath);
-        text.ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"",
+        text.ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive,
             customMessage: "init is expected to declare the running tool's own version");
         File.WriteAllText(intestJsonPath, text.Replace(
             $"\"intestVersion\": \"{CliVersion.Current}\"", $"\"intestVersion\": \"{oldIntestVersion}\""));
@@ -125,8 +125,8 @@ public class UpgradeCommandTests
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
         exitCode.ShouldBe(ExitCode.Ok);
-        ReadIntestJson().ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"");
-        ReadDotnetTools().ShouldContain($"\"version\": \"{CliVersion.Current}\"");
+        ReadIntestJson().ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive);
+        ReadDotnetTools().ShouldContain($"\"version\": \"{CliVersion.Current}\"", Case.Sensitive);
         File.Exists(Path.Combine(_root, "Generated", "OrdersTests.g.cs")).ShouldBeTrue(
             "upgrade must regenerate, not just bump the version fields");
         report.ShouldContain(CliVersion.Current);
@@ -156,7 +156,7 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
-        ReadIntestJson().ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"");
+        ReadIntestJson().ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive);
     }
 
     // ---- targeted text edit, not parse-and-rewrite -------------------------------------------
@@ -221,10 +221,10 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var after = ReadIntestJson();
-        after.ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"");
+        after.ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive);
         // The rest of the document must still be exactly what was there — the insertion adds a
         // line, it does not touch neighbouring content.
-        after.ShouldContain("\"spec\": { \"source\": \"orders.json\" }");
+        after.ShouldContain("\"spec\": { \"source\": \"orders.json\" }", Case.Sensitive);
         after.ShouldContain(
             "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", \"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\" }");
     }
@@ -281,7 +281,7 @@ public class UpgradeCommandTests
         var afterBytes = await File.ReadAllBytesAsync(intestJsonPath);
         afterBytes.Take(3).ShouldBe(new byte[] { 0xEF, 0xBB, 0xBF },
             customMessage: "the BOM sits outside intestVersion's matched span and must survive untouched");
-        Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"");
+        Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive);
     }
 
     /// <summary>The dotnet-tools.json twin of the test above — the same byte-preservation claim
@@ -298,7 +298,7 @@ public class UpgradeCommandTests
 
         var afterBytes = await File.ReadAllBytesAsync(dotnetToolsPath);
         afterBytes.Take(3).ShouldBe(new byte[] { 0xEF, 0xBB, 0xBF });
-        Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"version\": \"{CliVersion.Current}\"");
+        Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"version\": \"{CliVersion.Current}\"", Case.Sensitive);
     }
 
     private static byte[] Utf8(string text) => Encoding.UTF8.GetBytes(text);
@@ -402,7 +402,7 @@ public class UpgradeCommandTests
         exitCode.ShouldBe(ExitCode.ToolError);
         report.ShouldNotContain(CliVersion.Current,
             customMessage: "nothing about a successful upgrade should be reported");
-        ReadIntestJson().ShouldContain("// pinned",
+        ReadIntestJson().ShouldContain("// pinned", Case.Sensitive,
             customMessage: "a config that never loaded must be left exactly as it was");
     }
 
@@ -441,7 +441,7 @@ public class UpgradeCommandTests
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
         exitCode.ShouldBe(ExitCode.WorkOutstanding);
-        report.ShouldContain("createProduct");
+        report.ShouldContain("createProduct", Case.Sensitive);
         ReadIntestJson().ShouldBe(intestJsonBefore,
             customMessage: "intestVersion must not be bumped when regeneration itself did not run");
         ReadDotnetTools().ShouldBe(dotnetToolsBefore);
@@ -492,9 +492,9 @@ public class UpgradeCommandTests
         var after = ReadDotnetTools();
         after.ShouldContain("\"version\": 1,\n  \"isRoot\": true", Case.Sensitive,
             customMessage: "the manifest format version (an unrelated integer under the same key name) must not change");
-        after.ShouldContain("\"some-other-tool\": { \"version\": \"3.4.5\"",
+        after.ShouldContain("\"some-other-tool\": { \"version\": \"3.4.5\"", Case.Sensitive,
             customMessage: "a sibling tool's own pin must be untouched");
-        after.ShouldContain($"\"intest.cli\": {{ \"version\": \"{CliVersion.Current}\"");
+        after.ShouldContain($"\"intest.cli\": {{ \"version\": \"{CliVersion.Current}\"", Case.Sensitive);
     }
 
     /// <summary>
@@ -528,8 +528,8 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var after = ReadDotnetTools();
-        after.ShouldContain($"\"version\": \"{CliVersion.Current}\"");
-        after.ShouldContain("\"metadata\": { \"notes\": \"pinned deliberately\" }",
+        after.ShouldContain($"\"version\": \"{CliVersion.Current}\"", Case.Sensitive);
+        after.ShouldContain("\"metadata\": { \"notes\": \"pinned deliberately\" }", Case.Sensitive,
             customMessage: "the unrelated nested object must survive untouched");
     }
 
@@ -620,7 +620,7 @@ public class UpgradeCommandTests
         var (exitCode, error) = await UpgradeCapturingErrorAsync(_root);
 
         exitCode.ShouldBe(ExitCode.ToolError);
-        error.ShouldContain("no \"version\" field",
+        error.ShouldContain("no \"version\" field", Case.Sensitive,
             customMessage: "the refusal must diagnose the actual problem");
         error.ShouldContain("add one by hand", Case.Insensitive,
             customMessage: "the refusal must prescribe a fix, matching its two siblings " +
@@ -672,8 +672,8 @@ public class UpgradeCommandTests
 
         exitCode.ShouldBe(ExitCode.Ok);
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue();
-        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=lf");
-        report.ShouldContain(".gitattributes",
+        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=lf", Case.Sensitive);
+        report.ShouldContain(".gitattributes", Case.Sensitive,
             customMessage: "the report must say a team-owned file was created, not just the two configs");
     }
 

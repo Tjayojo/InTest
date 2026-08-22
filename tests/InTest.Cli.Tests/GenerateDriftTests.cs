@@ -54,9 +54,9 @@ public class GenerateDriftTests
 
         await GenerateCommand.RunAsync(_root, CancellationToken.None, report);
 
-        report.ToString().ShouldContain("createProduct",
+        report.ToString().ShouldContain("createProduct", Case.Sensitive,
             customMessage: "the drift report is useless if it doesn't say which operation is unresolved");
-        report.ToString().ShouldContain("Run 'intest fixtures repair'");
+        report.ToString().ShouldContain("Run 'intest fixtures repair'", Case.Sensitive);
     }
 
     [TestMethod]

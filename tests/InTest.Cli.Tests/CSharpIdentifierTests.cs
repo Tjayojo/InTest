@@ -87,7 +87,7 @@ public class CSharpIdentifierTests
         // The actual requirement: the reason names the setting and quotes the offending value,
         // not just that the boolean came back false — a caller cannot compose a useful error
         // message otherwise.
-        reason.ShouldContain("project.rootNamespace");
+        reason.ShouldContain("project.rootNamespace", Case.Sensitive);
         reason.ShouldContain(string.IsNullOrWhiteSpace(value) ? "is empty" : value);
     }
 
@@ -98,7 +98,7 @@ public class CSharpIdentifierTests
         // "generically otherwise" branch, not the digit branch — it must still name the
         // offending character, not just avoid the digit wording.
         CSharpIdentifier.TryValidateDottedName("Orders.$Test", "project.rootNamespace", out var reason).ShouldBeFalse();
-        reason.ShouldContain("project.rootNamespace");
+        reason.ShouldContain("project.rootNamespace", Case.Sensitive);
         reason.ShouldContain("'$'");
         // The rule sentence itself mentions "digits", so pin the digit-specific phrase exactly
         // rather than the bare substring "digit".
