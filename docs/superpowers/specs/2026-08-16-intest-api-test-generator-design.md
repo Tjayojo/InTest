@@ -145,7 +145,8 @@ spec → [front-end] → TestPlan (JSON) → [template set] → .cs files + fixt
 ```
 
 **TestPlan** is the stable internal contract. Front-ends target it; template sets consume it.
-Dumpable via `--emit-plan` for debugging.
+Designed to be dumpable via `--emit-plan` for debugging — **not yet built**, so this is design
+intent, not a fact about the running tool.
 
 **Design constraint for v2:** `expectedOutcome` in TestPlan must be abstract, not literally an
 HTTP status int, or SOAP faults won't fit.
@@ -153,7 +154,8 @@ HTTP status int, or SOAP faults won't fit.
 ### Template sets — internal, not a public extension point
 
 v1 ships template sets InTest owns. There is no manifest format and no `templates extract`
-command; `--emit-plan` covers the debugging need.
+command; the planned `--emit-plan` (**not yet built**) is meant to cover the debugging need
+instead. Until it ships, that is the intended answer, not evidence the gap is already covered.
 
 **Assertion emission is a separate include** (`{{ include "assertions/status" }}`). Rev 2
 carried this seam speculatively for a v2 second assertion library. In rev 3 the seam is
@@ -247,8 +249,8 @@ The **public surface** covered by semver is: `InTest.Runtime`'s exported types, 
 JSON shape — the last because CI pipelines assert on it (§12).
 
 Explicitly **not** covered, and free to change in a minor: the exact text of failure messages,
-the internal `TestPlan` JSON (`--emit-plan` is a debugging aid, not an integration point), and
-template internals.
+the internal `TestPlan` JSON (`--emit-plan`, once built, is meant as a debugging aid, not an
+integration point — see §3), and template internals.
 
 This closes what earlier drafts filed as an open question about how current teams must stay.
 The real question was never currency; it was which combinations are supported, in both
@@ -473,7 +475,7 @@ Rev 2 and earlier drafts of rev 3 scattered commands across seven sections, and 
 | `intest fixtures repair` | `fixtures/` — **creates missing fixtures** by tier precedence, adds `TODO:` sentinels for newly-required properties, flags removed ones. Never overwrites an existing value | `Generated/`, team-owned files | 0 ok, including nothing to repair · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a committed fixture that cannot be read |
 | `intest fixtures promote` | Nothing — prints a paste-ready snippet and names the target file | Everything, `spec.source` especially (§10) | 0 ok |
 | `intest survey <spec-glob\|url>` | Nothing — prints a spec-population report (§17) | Everything | 0 ok · 2 no spec matched or unparseable |
-| `intest upgrade` | `intestVersion` in `intest.json`, the version in `.config/dotnet-tools.json`, then re-runs `generate`; `.gitattributes` **if the project does not already have one** | `fixtures/`, team-owned files — `.gitattributes` is the one narrow exception, written only when absent, never overwritten | 0 ok · 1 regeneration failed · 2 the running tool carries no version metadata, `intest.json` or `.config/dotnet-tools.json` is missing, unreadable or malformed, or `.config/dotnet-tools.json` has no `intest.cli` pin (or a pin with no `version` field) |
+| `intest upgrade` | Regenerates first — delegates to `generate`, writing `Generated/` and `coverage-report.json` exactly as `generate` does — then, only once that succeeds, bumps `intestVersion` in `intest.json` and the version in `.config/dotnet-tools.json` together; also writes `.gitattributes` **if the project does not already have one** | `fixtures/`, team-owned files — `.gitattributes` is the one narrow exception, written only when absent, never overwritten | 0 ok · 1 fixture drift (delegated `generate` reports it exactly as plain `generate` would — same meaning, same code, not a second condition) · 2 tool error |
 | `intest assertions add <name>` | Appends to `project.assertions`, then re-runs `generate` | Existing assertions in hand-written or generated code | 0 ok · 3 already present |
 
 **Argument refusals.** The `init` row above read `0 ok · 2 --name is not a valid C# name · 3
@@ -696,7 +698,8 @@ Set `<RunSettingsFilePath>` in the generated `.csproj` so a `.runsettings` is pi
 **zero command-line arguments**. Multi-stage pipelines pass `--settings qa.runsettings` or
 `dotnet test -- TestRunParameters.Parameter(name="profile", value="qa")`.
 
-**The scaffolded `orders.runsettings` must ship with `profile` commented out.** Because
+**The scaffolded `<Name>.runsettings` (e.g. `Orders.ApiTests.runsettings` — named after the
+project, not the API) must ship with `profile` commented out.** Because
 `<RunSettingsFilePath>` loads it unconditionally, a scaffold that declares `profile` makes
 tier 1 always match, `INTEST_PROFILE` becomes unreachable dead code, and a developer exporting
 the variable silently runs against the wrong environment. The scaffold therefore contains:
@@ -782,13 +785,14 @@ Orders.ApiTests/
 ├── intest.json                      # config — committed
 ├── coverage-report.json          # generator-owned — committed, regenerated, --check'd
 ├── appsettings*.json
-├── orders.runsettings
+├── Orders.ApiTests.runsettings   # named after the project, not the API
 ├── .editorconfig                 # naming style
 ├── .gitattributes                # pins Generated/, coverage-report.json, fixtures/**/*.json to LF
 ├── Generated/                    # regenerated wholesale — NEVER hand-edited
-│   ├── TestHost.g.cs             # AssemblyInitialize, DI, readiness, run ID, schema bundle
-│   ├── OrdersTests.g.cs
-│   └── Schemas.g.cs              # schema KEYS, not schema bodies
+│   ├── OrdersTests.g.cs          # one class per tag; TestHost itself ships in InTest.Runtime,
+│   │                             # not here — TestStartup.cs (below) delegates to it
+│   ├── spec-paths.json           # shared operation path prefix, for the base-URL guard (§7)
+│   └── spec-schemas.json         # bundled response/component schemas, keyed under "definitions"
 ├── fixtures/
 │   ├── create-order.json
 │   └── qa/create-order.json      # environment overlay
@@ -962,10 +966,13 @@ This keeps the ownership invariant intact: `spec.json` is generator-owned like `
 
 #### Bundling
 
-At `AssemblyInitialize`, each `components.schemas` entry is serialized and assembled into a
-single `{"definitions": { … }}` document with `#/components/schemas/` rewritten to
-`#/definitions/`. `Generated/Schemas.g.cs` therefore holds **keys**, not schema bodies —
-`Schemas.Order` resolves out of the runtime bundle.
+Each `components.schemas` entry is serialized and assembled into a single
+`{"definitions": { … }}` document with `#/components/schemas/` rewritten to `#/definitions/`,
+written by `generate` to `Generated/spec-schemas.json` — a JSON file, not a `.g.cs` class, and it
+holds full schema **bodies** under `"definitions"`, not just keys. `TestHost` loads it once at
+`[AssemblyInitialize]` into a `SchemaBundle` (`InTest.Runtime`); generated test methods reference
+one entry by a plain string key (`"ProblemDetails"`, `"ProductResponse"`) passed alongside that
+bundle to the assertion helper — there is no generated `Schemas.Order`-style typed accessor.
 
 **Bundle with `definitions`; never inline the `$ref`s.** Self-referential schemas are common,
 and circular-reference resolution is the exact defect that deprecated the entire
@@ -986,9 +993,11 @@ op:{operationId}:{statusCode}:{mediaType}      → op:listOrders:200:application
 ```
 
 The key derives from operation identity, never from ordinal, so it is stable across
-regenerations for the same reason operationId synthesis is (§6). `Schemas.g.cs` exposes it
-under the same generated-identifier rules as any other schema. Inline schemas are reported as
-a coverage **note**, not a skip — those operations are tested.
+regenerations for the same reason operationId synthesis is (§6). The generated test method
+splices this key in as a quoted string literal (`CSharpLiteral.Escape`d, like any other
+spec-derived value the template quotes) the same way it does a `components.schemas` name — there
+is no separate generated schema class for either case. Inline schemas are reported as a coverage
+**note**, not a skip — those operations are tested.
 
 ##### Unevaluatable keywords
 
@@ -2571,8 +2580,9 @@ A wall-clock total is not comparable to another without both a per-class breakdo
 - **Schema abstraction in TestPlan for SOAP.** More abstraction on speculation about a v2 that
   may not happen.
 - **`ISweepTarget` in v1.** Real burden on consumers. v1 documents the leakage risk instead.
-- **A public template-set format.** No third-party authors exist. `--emit-plan` covers the
-  debugging need.
+- **A public template-set format.** No third-party authors exist. The planned `--emit-plan`
+  (**not yet built** — see §3) is meant to cover the debugging need instead; until it ships, this
+  argument rests on a command that does not exist yet, not on one that already covers the gap.
 - **Per-test retries.** Hide real flakiness. Readiness gating addresses the actual cause.
 - **A keyed lock map in `InTest.Runtime`.** `[ResourceLock]` ships in 4.4.
 - **A InTest-owned parallelization control surface.** MSTest already exposes one.

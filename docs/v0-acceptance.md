@@ -1204,8 +1204,10 @@ Still open, stated rather than glossed:
 - **No pipeline run.** All runs were local. "In a real pipeline" remains unmet.
 - **`X-Test-Run-Id` was not verified in server-side telemetry.** The header is sent, but no
   sink was configured to confirm arrival.
-- **`survey`, `generate --check`, YAML input, and variation tests** are unbuilt, so nothing
-  about them was exercised.
+- **`survey`, YAML input, and variation tests** are unbuilt, so nothing about them was exercised.
+- **`generate --check` and `upgrade`** were built after this acceptance run (v1-e). No run
+  recorded in this document exercises either one — this file predates both and has not yet been
+  extended to cover them.
 - **One sample was measured per producer.** The corpus is deliberate but small; nothing here
   says how the composer behaves on a large real-world document.
 - **Cleanup was confirmed for the delete case, not the crash case.** §14 and getting-started

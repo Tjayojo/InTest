@@ -6,19 +6,21 @@ integration test suite running as a post-deployment gate.
 > **Phase 0 (`survey`) does not exist yet, nor does `fixtures promote` within Phase 5.
 > Everything else below does, including `--check` and `upgrade` within Phase 8.**
 >
-> `init`, `generate`, `fixtures repair` (Phase 5), `generate --check` and `upgrade` (Phase 8) all
-> work: together they produce a compiling MSTest project, complete with the fixture files every
-> operation needs, and keep committed output honest in CI. All are verified end to end against
-> live APIs, request bodies included — Catalog and Inventory pass in full, twice each, against an
-> unreset store. Orders — the one sample with declared `security` — now generates 24 tests:
-> **0 failed, 4 skipped, 20 passed**. The 4 skips are the wrong-scope 403 cases whose secondary
-> identity already holds the scope the operation requires — the runtime guard
-> (`RequireSecondaryIdentityLacks`, see the Auth section below) skips each with a stated reason
-> instead of running it against a request that identity is genuinely authorized for
+> `init`, `generate` and `fixtures repair` (Phase 5) work end to end and are verified against
+> live APIs, request bodies included, by the acceptance run below — Catalog and Inventory pass in
+> full, twice each, against an unreset store. Orders — the one sample with declared `security` —
+> now generates 24 tests: **0 failed, 4 skipped, 20 passed**. The 4 skips are the wrong-scope 403
+> cases whose secondary identity already holds the scope the operation requires — the runtime
+> guard (`RequireSecondaryIdentityLacks`, see the Auth section below) skips each with a stated
+> reason instead of running it against a request that identity is genuinely authorized for
 > (**F11, closed**; see [`v0-acceptance.md`](v0-acceptance.md), which records the run this closed
 > on). The 3 write-scope 403s — the cases the sample's identity pair can actually prove — ran and
-> passed. Not yet built: `survey`
-> (Phase 0), `fixtures promote` (Phase 5), `assertions add`,
+> passed. `generate --check` and `upgrade` (Phase 8) also work end to end — walking this document
+> against a live sample after they shipped is how the defects a later review found were caught —
+> but that acceptance run predates both commands and has not yet been extended to exercise them;
+> [`v0-acceptance.md`](v0-acceptance.md) says so directly in its own "still open" list rather than
+> implying coverage it does not have. Not yet built: `survey`
+> (Phase 0), `fixtures promote` (Phase 5), `assertions add`, `generate --emit-plan`,
 > variation tests, YAML input, and a URL `spec.source` (Phase 1 — `init` and `generate` both
 > refuse one; the `spec.json` snapshot that would make it work is designed and not written).
 > Nothing is published to NuGet, so build from source for now.
@@ -113,7 +115,7 @@ it to a committed `spec.json`, so a spec change still arrives as a reviewable di
 
 ```bash
 mkdir Orders.ApiTests && cd Orders.ApiTests
-intest init --spec ../Orders/bin/Debug/net10.0/orders.json
+intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.json
 ```
 
 `init` refuses to overwrite anything that already exists (exit `3`). It writes:
@@ -126,7 +128,7 @@ intest init --spec ../Orders/bin/Debug/net10.0/orders.json
 | `TestStartup.cs` | yours | DI registrations, named `HttpClient`, handlers |
 | `OrdersTestBase.cs` | yours | Your shared helpers; derives from `ApiTestBase` |
 | `appsettings.json`, `appsettings.staging.json` | yours | Profiles, base URLs, readiness |
-| `orders.runsettings` | yours | Ships with `profile` **commented out** — see Phase 3 |
+| `Orders.ApiTests.runsettings` | yours | Named after the project (`<Name>.runsettings`), not the API — ships with `profile` **commented out**, see Phase 3 |
 | `.config/dotnet-tools.json` | yours | Pins the CLI version so CI and your machine agree |
 | `.gitattributes` | yours | Pins `Generated/`, `coverage-report.json` and `fixtures/**/*.json` to LF, so a clone with `core.autocrlf=true` cannot check them out as CRLF and fail `generate --check` on every line |
 
@@ -156,7 +158,7 @@ Precedence, first match wins:
 2. Environment variable `INTEST_PROFILE`
 3. Default in `appsettings.json`
 
-The scaffolded `orders.runsettings` leaves `profile` commented out on purpose. Uncomment it and
+The scaffolded `Orders.ApiTests.runsettings` leaves `profile` commented out on purpose. Uncomment it and
 tier 1 always matches, making `INTEST_PROFILE` unreachable. Pin the profile only in
 environment-specific files like `qa.runsettings`.
 
@@ -236,15 +238,18 @@ authorized endpoint it declares.
 intest generate
 ```
 
-Writes `Generated/` — `TestHost.g.cs`, `OrdersTests.g.cs`, `Schemas.g.cs` — plus
-`coverage-report.json`. All regenerated wholesale; never hand-edit them.
+Writes `Generated/` — one `.g.cs` class per tag (`OrdersTests.g.cs` here), `spec-paths.json` and
+`spec-schemas.json` — plus `coverage-report.json` at the project root. All regenerated wholesale;
+never hand-edit them. `TestHost` itself is not generated — it ships in `InTest.Runtime` and
+`TestStartup.cs` delegates `[AssemblyInitialize]` to it (Phase 2).
 
 Read `coverage-report.json` now. It tells you what was skipped and why, which operations run on
 synthesized IDs, which produce status-only tests, and which auth tests are gated on a second
 identity.
 
-If any operation takes a request body, `generate` exits non-zero and reports the missing
-fixtures. That is expected on a first run.
+If any operation needs a fixture — a request body, or a required path/query parameter — `generate`
+exits non-zero and reports the missing fixtures. That is expected on a first run: even a bodiless
+`GET /products/{id}` needs one, for `id`.
 
 ---
 
@@ -594,6 +599,19 @@ once a fixture has registered at least one `OnCleanup`, and look for
 `InTest fixture cleanup: drained N action(s).` Unlike `[AssemblyInitialize]` output on a passing
 run (above), that line does reach both the console at that verbosity and the `.trx`'s last test
 result — so seeing neither means cleanup did not run, not that it succeeded quietly.
+
+**A stale local package cache can shadow a fresh build.** Nothing is published to NuGet yet
+(Prerequisites), so a scaffolded project resolves `InTest.Runtime` from wherever you point NuGet
+— typically a local feed you `dotnet pack` yourself. NuGet does not overwrite an
+already-cached version: an older `InTest.Runtime 0.1.0` left in `~/.nuget/packages/intest.runtime`
+by an earlier local build resolves ahead of a freshly packed one carrying the identical version
+number, and the scaffolded project fails to compile against members that plainly exist in the
+source you just built (`RequireFixture`, `FixtureBody` and similar — confirmed by direct
+experiment: deleting that cache entry and rebuilding is what fixes it, not any change to the
+generated code). Clear the specific entry (`dotnet nuget locals global-packages --clear` is
+blunt but works; deleting just the `intest.runtime` folder under the packages directory is
+narrower) before rebuilding, or bump the local package's version so it cannot collide with what
+is cached.
 
 **This is for pre-production.** InTest adds no guard rails against being pointed at production,
 deliberately. Pointing it there is your decision and your consequences.

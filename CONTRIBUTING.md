@@ -1,12 +1,14 @@
 # Contributing to InTest
 
 Thanks for looking. InTest is a working tool with an incomplete command surface. `intest init`,
-`generate`, `fixtures repair`, `generate --check` and `upgrade` run end to end today, verified
-against three sample APIs with a documented walkthrough in
-[`docs/getting-started.md`](docs/getting-started.md). `survey` and `assertions add` don't exist
-yet — that doc's own preamble tracks the gap precisely, and is the source of truth if this file
-and it ever disagree. Nothing is published to NuGet, so building from source is still how anyone
-tries it. The
+`generate`, `fixtures repair`, `generate --check` and `upgrade` run end to end today, with a
+documented walkthrough in [`docs/getting-started.md`](docs/getting-started.md); `init`,
+`generate` and `fixtures repair` are also verified against three sample APIs
+([`docs/v0-acceptance.md`](docs/v0-acceptance.md)) — `generate --check` and `upgrade` shipped
+after that acceptance run and are not yet covered by it. `survey`, `fixtures promote`,
+`assertions add` and `generate --emit-plan` don't exist yet — that doc's own preamble tracks the
+gap precisely, and is the source of truth if this file and it ever disagree. Nothing is published
+to NuGet, so building from source is still how anyone tries it. The
 [design spec](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md) remains the
 reference for why things are built the way they are.
 

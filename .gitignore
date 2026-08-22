@@ -59,8 +59,8 @@ Thumbs.db
 
 ## Agent instruction files — local tooling, deliberately not published.
 ## Kept on disk, untracked. Not part of the project; do not re-add without discussion.
+## CLAUDE.md is the deliberate exception: the user decided it should ship, and it is tracked.
 AGENTS.md
-CLAUDE.md
 GEMINI.md
 caveman.*
 .clinerules/
