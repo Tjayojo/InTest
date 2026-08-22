@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -22,12 +24,35 @@ public class InitCommandTests
     }
 
     [TestCleanup]
-    public void RemoveDirectory()
+    public void RemoveDirectory() => ForceDeleteDirectory(_root);
+
+    /// <summary>
+    /// Recursive delete that clears the read-only attribute first, rather than a plain
+    /// <see cref="Directory.Delete(string, bool)"/>. This is not defensive gold-plating: v1-e's
+    /// review originally asserted that <see cref="RemoveDirectory"/>'s plain delete already
+    /// proved a force-unlock helper unnecessary, on the theory that _root — which
+    /// GitattributesSurvivesAnAutocrlfTrueCheckout leaves containing a real <c>.git</c>
+    /// directory — already deletes cleanly today. Confirmed by direct experiment that this is
+    /// false on this platform: `git commit` leaves every loose object under
+    /// <c>.git/objects/**</c> mode <c>0444</c> (read-only, no write bit) on Windows, and a plain
+    /// recursive delete throws <see cref="UnauthorizedAccessException"/> the moment it reaches
+    /// one — reproduced by running <see cref="RemoveDirectory"/> unmodified against a scratch
+    /// repo, which failed the same way. Both _root and the temporary clone
+    /// GitattributesSurvivesAnAutocrlfTrueCheckout makes go through a real `git init`/`clone` +
+    /// commit, so both need this, not just the clone — hence one shared helper backing
+    /// <see cref="RemoveDirectory"/> itself rather than a second, clone-only copy.
+    /// </summary>
+    private static void ForceDeleteDirectory(string path)
     {
-        if (Directory.Exists(_root))
+        if (!Directory.Exists(path))
         {
-            Directory.Delete(_root, recursive: true);
+            return;
         }
+        foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
+        Directory.Delete(path, recursive: true);
     }
 
     [TestMethod]
@@ -71,9 +96,10 @@ public class InitCommandTests
     /// core.autocrlf=true (the Git-for-Windows default) set on the source, then materialize a
     /// second working copy with the same setting forced on the destination — the two-step path a
     /// Windows adopter's own clone goes through — and diff the bytes. Every one of InTest's own
-    /// generated artefacts (Generated/**, coverage-report.json, fixtures/*.json) must come back
-    /// byte-identical; without .gitattributes pinning them, git's own autocrlf translation would
-    /// rewrite every LF to CRLF on the second checkout, exactly as the manual experiment showed.
+    /// generated artefacts (Generated/**, coverage-report.json, fixtures/**/*.json — a base
+    /// fixture and a profile overlay alike) must come back byte-identical; without
+    /// .gitattributes pinning them, git's own autocrlf translation would rewrite every LF to
+    /// CRLF on the second checkout, exactly as the manual experiment showed.
     /// </summary>
     [TestMethod]
     public async Task GitattributesSurvivesAnAutocrlfTrueCheckout()
@@ -82,11 +108,16 @@ public class InitCommandTests
         File.WriteAllText(Path.Combine(_root, "orders.json"), SpecNeedingNoFixture);
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(ExitCode.Ok);
 
-        // `generate` alone never writes fixtures/ (only `fixtures repair` does), so write one by
-        // hand — pure LF, matching what FixtureDocument's writer now produces — to exercise the
-        // fixtures/*.json pattern too, not just Generated/** and coverage-report.json.
-        Directory.CreateDirectory(Path.Combine(_root, "fixtures"));
+        // `generate` alone never writes fixtures/ (only `fixtures repair` does), so write a base
+        // fixture and a profile overlay by hand — pure LF, matching what FixtureDocument's
+        // writer now produces. The overlay is the important half: fixtures/{profile}/*.json
+        // (FixtureStore.Load's overlay directory) is purely adopter-authored and committed —
+        // `fixtures repair` never writes it — which the v1-e review calls out as the strongest
+        // case for pinning, not the weakest, so this round trip must exercise
+        // fixtures/**/*.json's recursive match, not just the non-recursive fixtures/*.json case.
+        Directory.CreateDirectory(Path.Combine(_root, "fixtures", "qa"));
         File.WriteAllText(Path.Combine(_root, "fixtures", "sample.json"), "{\n  \"sample\": true\n}\n");
+        File.WriteAllText(Path.Combine(_root, "fixtures", "qa", "sample.json"), "{\n  \"sample\": false\n}\n");
 
         var tracked = new[]
         {
@@ -95,6 +126,7 @@ public class InitCommandTests
             Path.Combine("Generated", "spec-paths.json"),
             "coverage-report.json",
             Path.Combine("fixtures", "sample.json"),
+            Path.Combine("fixtures", "qa", "sample.json"),
         };
         var beforeCheckout = tracked.ToDictionary(f => f, f => File.ReadAllBytes(Path.Combine(_root, f)));
 
@@ -121,42 +153,161 @@ public class InitCommandTests
 
             foreach (var file in tracked)
             {
-                File.ReadAllBytes(Path.Combine(clone, file)).ShouldBe(beforeCheckout[file],
-                    $"{file} changed bytes across a core.autocrlf=true checkout — .gitattributes did not pin it to LF.");
+                AssertByteIdenticalAcrossCheckout(file, beforeCheckout[file], File.ReadAllBytes(Path.Combine(clone, file)));
             }
         }
         finally
         {
+            // Same helper RemoveDirectory's [TestCleanup] uses for _root, not a second
+            // clone-only copy or a plain Directory.Delete — see ForceDeleteDirectory's own doc
+            // comment for why a plain recursive delete does not work against a directory that
+            // contains a real `.git` (v1-e review, minor 7).
             ForceDeleteDirectory(clone);
         }
     }
 
+    /// <summary>
+    /// Fails with a message that names both things that can produce this exact symptom — bytes
+    /// differing across a core.autocrlf=true checkout — rather than asserting only one. The
+    /// original message ("`.gitattributes` did not pin it to LF") is true when this test's own
+    /// .gitattributes has a gap; it is false, and misleading, when the writer that produced
+    /// <paramref name="before"/> already emitted CRLF before the file was ever committed (a
+    /// <c>JsonSerializerOptions.NewLine</c> or template <c>Normalize</c> regression) — in which
+    /// case the checkout changed nothing and .gitattributes is not the bug. The two are
+    /// distinguished by whether <paramref name="before"/> already contains a CRLF sequence: if it
+    /// does, the checkout did not introduce it. A raw <c>byte[]</c> comparison (Shouldly's
+    /// default <c>ShouldBe</c>) renders on the order of 10 KB of decimal byte codes for a file
+    /// this size before reaching any custom message; hex is at least legible, and the CRLF counts
+    /// alone usually say which half of the diagnosis applies without reading the dump at all.
+    /// </summary>
+    private static void AssertByteIdenticalAcrossCheckout(string file, byte[] before, byte[] after)
+    {
+        if (before.AsSpan().SequenceEqual(after))
+        {
+            return;
+        }
+
+        var crlfBefore = CountCrlf(before);
+        var crlfAfter = CountCrlf(after);
+        var likelyCause = crlfBefore > 0
+            ? "the writer that produced this file already emitted CRLF before it was committed " +
+              "(JsonSerializerOptions.NewLine, or a template's Normalize step, was not honored) " +
+              "— .gitattributes is not at fault here"
+            : ".gitattributes did not pin this file to LF, so the core.autocrlf=true checkout " +
+              "rewrote its LF line endings to CRLF";
+
+        const int previewBytes = 256;
+        Assert.Fail(
+            $"{file} changed bytes across a core.autocrlf=true checkout: {before.Length} bytes " +
+            $"before, {after.Length} after; {crlfBefore} CRLF sequence(s) before the checkout, " +
+            $"{crlfAfter} after. Likely cause: {likelyCause}. First {previewBytes} bytes, hex — " +
+            $"before: {Convert.ToHexString(before, 0, Math.Min(before.Length, previewBytes))}; " +
+            $"after: {Convert.ToHexString(after, 0, Math.Min(after.Length, previewBytes))}.");
+    }
+
+    private static int CountCrlf(byte[] bytes)
+    {
+        var count = 0;
+        for (var i = 0; i < bytes.Length - 1; i++)
+        {
+            if (bytes[i] == (byte)'\r' && bytes[i + 1] == (byte)'\n')
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // 60s: generous for `init`/`clone`/`config`/`add`/`commit`/`checkout` against a scratch repo
+    // with a handful of files, but still short enough that a wedged git process fails this test
+    // loudly instead of wedging the whole CI job the way an unbounded WaitForExit() previously
+    // could (v1-e review, Important 6).
+    private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// One empty file, shared by every <see cref="RunGit"/> call in this class and pointed at by
+    /// <c>GIT_CONFIG_GLOBAL</c>/<c>GIT_CONFIG_SYSTEM</c> below, so a scratch repo never inherits
+    /// the machine's own global or system git config. Without this a developer or CI box with
+    /// <c>commit.gpgsign=true</c> makes `git commit` block on a passphrase prompt that never
+    /// arrives under a non-interactive test host, and <c>core.hooksPath</c> or
+    /// <c>init.templateDir</c> can inject third-party hooks into a repository this test creates
+    /// and deletes within seconds. Lazy and written once — the file is always empty, so per-call
+    /// I/O would be pure overhead.
+    /// </summary>
+    private static readonly Lazy<string> EmptyGitConfig = new(() =>
+    {
+        var path = Path.Combine(Path.GetTempPath(), "intest-tests-empty-gitconfig-" + Guid.NewGuid().ToString("N")[..8]);
+        File.WriteAllText(path, string.Empty);
+        return path;
+    });
+
     private static void RunGit(string workingDirectory, string arguments)
     {
-        using var process = Process.Start(new ProcessStartInfo("git", arguments)
+        var startInfo = new ProcessStartInfo("git", arguments)
         {
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-        })!;
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        process.ExitCode.ShouldBe(0, $"git {arguments} failed: {stdout}{stderr}");
-    }
+        };
+        startInfo.Environment["GIT_CONFIG_GLOBAL"] = EmptyGitConfig.Value;
+        startInfo.Environment["GIT_CONFIG_SYSTEM"] = EmptyGitConfig.Value;
+        // This test never talks to a remote, so any credential/terminal prompt here can only
+        // mean something is misconfigured — refuse it outright rather than block on it.
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 
-    private static void ForceDeleteDirectory(string path)
-    {
-        if (!Directory.Exists(path))
+        Process process;
+        try
         {
-            return;
+            process = Process.Start(startInfo)!;
         }
-        foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+        catch (Win32Exception ex)
         {
-            File.SetAttributes(file, FileAttributes.Normal);
+            // Process.Start's default failure here is a raw Win32Exception with no mention of
+            // what was being started or why — indistinguishable, out of context, from any other
+            // failure to launch a process. Name the actual cause: this class shells out to a
+            // real `git` binary and has no fallback if one is not on PATH (v1-e review, minor 11).
+            Assert.Fail(
+                $"Could not start 'git {arguments}' in \"{workingDirectory}\": {ex.Message}. Is " +
+                "git installed and on PATH? GitattributesSurvivesAnAutocrlfTrueCheckout shells " +
+                "out to a real git binary and cannot run without one.");
+            throw; // Unreachable — Assert.Fail always throws — but keeps `process` definitely assigned.
         }
-        Directory.Delete(path, recursive: true);
+
+        using (process)
+        {
+            // Read both streams concurrently via the async event-based API, not
+            // ReadToEnd() on stdout followed by ReadToEnd() on stderr: a child process's stderr
+            // pipe is a fixed-size OS buffer (about 4 KB), and `git add -A` on a scaffolded
+            // project under autocrlf=true alone emits over a thousand bytes of "LF will be
+            // replaced by CRLF" warnings — measured at 1549 bytes, 38% of the buffer. Reading
+            // stdout to completion first blocks forever the moment stderr fills, because nothing
+            // is draining it and the child is blocked trying to write to it: a deadlock, not a
+            // slow test (v1-e review, Important 6).
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            if (!process.WaitForExit((int)GitTimeout.TotalMilliseconds))
+            {
+                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { /* already exited */ }
+                Assert.Fail(
+                    $"git {arguments} in \"{workingDirectory}\" did not exit within " +
+                    $"{GitTimeout.TotalSeconds}s — killed to fail this test loudly instead of " +
+                    "wedging the run.");
+            }
+
+            // Per WaitForExit(int)'s own documentation: when reading redirected streams via the
+            // asynchronous event-based API, call the parameterless WaitForExit() after receiving
+            // true from the timed overload, to guarantee the async handlers above have finished
+            // appending to stdout/stderr before they are read for the failure message below.
+            process.WaitForExit();
+
+            process.ExitCode.ShouldBe(0, $"git {arguments} failed: {stdout}{stderr}");
+        }
     }
 
     [TestMethod]
@@ -571,10 +722,13 @@ public class InitCommandTests
     // moving it rather than deleting it.
 
     // ScaffoldStillBuildsWithNoTokenProviderRegistered moved to InTest.Golden.Tests, next to
-    // CompileVerificationTests (Task 10 item 7): it is the only out-of-process build that lived
-    // in this assembly, and under a solution-level `dotnet test` this assembly's ~6s run fully
-    // overlaps InTest.Golden.Tests' ~1m40s one, so two independent MSBuild invocations could
-    // build scaffolded projects that both ProjectReference the same InTest.Runtime.csproj
-    // simultaneously — a known source of intermittent obj/ file-lock failures. The assertion
+    // CompileVerificationTests (Task 10 item 7): it was the only out-of-process *build* that
+    // lived in this assembly, and under a solution-level `dotnet test` this assembly's ~6s run
+    // fully overlaps InTest.Golden.Tests' ~1m40s one, so two independent MSBuild invocations
+    // could build scaffolded projects that both ProjectReference the same InTest.Runtime.csproj
+    // simultaneously — a known source of intermittent obj/ file-lock failures. (v1-e's
+    // GitattributesSurvivesAnAutocrlfTrueCheckout, added later, shells out to a real `git`
+    // binary and so is also out-of-process, but it never invokes MSBuild, so the file-lock race
+    // this comment describes still does not apply to it.) The assertion
     // itself is unchanged; see ScaffoldCompileVerificationTests there.
 }

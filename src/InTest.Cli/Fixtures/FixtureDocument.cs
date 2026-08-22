@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using InTest.Cli.Json;
 
 namespace InTest.Cli.Fixtures;
 
@@ -128,13 +129,13 @@ public sealed class FixtureDocument
             root["body"] = Body.DeepClone();
         }
 
-        // NewLine = "\n" pins the interior line endings to LF (System.Text.Json otherwise uses
-        // Environment.NewLine, CRLF on Windows); the trailing "+ \"\\n\"" is the final newline
-        // after the closing brace, which WriteIndented never emits on its own. fixtures/ is
-        // written only by `fixtures repair`, never generated wholesale like Generated/, so a
-        // hand-edited value here is read closely — mixed line endings would bury the one changed
-        // line in a whole-file diff, which is the failure this fix removes.
-        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" }) + "\n";
+        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
+        // The trailing "+ \"\\n\"" is the final newline after the closing brace, which indented
+        // JSON serialization never emits on its own. fixtures/ is written only by `fixtures repair`,
+        // never generated wholesale like Generated/, so a hand-edited value here is read closely
+        // — mixed line endings would bury the one changed line in a whole-file diff, which is the
+        // failure this fix removes.
+        return root.ToJsonString(CommittedJsonOptions.Value) + "\n";
     }
 
     /// <summary>

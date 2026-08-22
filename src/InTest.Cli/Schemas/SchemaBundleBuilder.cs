@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using InTest.Cli.Json;
 using InTest.Cli.Planning;
 using Microsoft.OpenApi;
 
@@ -37,15 +38,14 @@ public static class SchemaBundleBuilder
         }
 
         var bundle = new JsonObject { ["definitions"] = definitions };
-        // NewLine = "\n" pins the interior line endings to LF (System.Text.Json otherwise uses
-        // Environment.NewLine, CRLF on Windows) — same fix, same reasoning, as the other three
-        // ToJsonString(WriteIndented: true) sites in this project (CoverageReport,
-        // GenerateCommand's spec-paths.json, FixtureDocument). Unlike those three, this call
-        // previously appended nothing after ToJsonString, so the file had no trailing newline at
-        // all; the appended "\n" below is a deliberate addition, not a preserved behaviour,
-        // chosen so every JSON file `generate` writes ends the same way — a single trailing LF —
-        // rather than leaving spec-schemas.json as the one file in Generated/ without one.
-        return bundle.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true, NewLine = "\n" })
+        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
+        // Unlike the other three call sites, this one previously appended nothing after
+        // ToJsonString, so the file had no trailing newline at all; the appended "\n" below is a
+        // deliberate addition, not a preserved behaviour, chosen so every JSON file `generate`
+        // writes ends the same way — a single trailing LF — rather than leaving spec-schemas.json
+        // as the one file in Generated/ without one. Pinned by
+        // SchemaBundleBuilderTests.EndsWithASingleTrailingLineFeed.
+        return bundle.ToJsonString(CommittedJsonOptions.Value)
                      .Replace(ComponentPrefix, DefinitionPrefix, StringComparison.Ordinal)
                      + "\n";
     }

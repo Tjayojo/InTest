@@ -1,5 +1,5 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
+using InTest.Cli.Json;
 using InTest.Cli.Planning;
 
 namespace InTest.Cli.Coverage;
@@ -148,13 +148,11 @@ public static class CoverageReport
             }
         };
 
-        // NewLine pins the *interior* line endings this writer emits between properties to LF;
-        // without it, System.Text.Json defaults to Environment.NewLine, which is CRLF on Windows.
-        // The trailing "+ \"\\n\"" below is unrelated — WriteIndented never emits a line ending
-        // after the final closing brace, so that final newline is still added by hand. Before
-        // this fix the two disagreed: every interior line was CRLF, only the appended last line
-        // was LF. This is a committed, `--check`-compared artefact, so one line ending throughout
-        // matters for the same reason it matters in any file a human diffs.
-        return report.ToJsonString(new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" }) + "\n";
+        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
+        // The trailing "+ \"\\n\"" below is separate — indented JSON serialization never emits a
+        // line ending after the final closing brace, so that final newline is still added by
+        // hand here. This is a committed, `--check`-compared artefact, so one line ending
+        // throughout matters for the same reason it matters in any file a human diffs.
+        return report.ToJsonString(CommittedJsonOptions.Value) + "\n";
     }
 }
