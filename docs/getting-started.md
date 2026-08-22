@@ -19,7 +19,11 @@ integration test suite running as a post-deployment gate.
 > against a live sample after they shipped is how the defects a later review found were caught —
 > but that acceptance run predates both commands and has not yet been extended to exercise them;
 > [`v0-acceptance.md`](v0-acceptance.md) says so directly in its own "still open" list rather than
-> implying coverage it does not have. Not yet built: `survey`
+> implying coverage it does not have. That same run is also why every command below Phase 2 is
+> shown as `dotnet intest …` rather than bare `intest` — the acceptance run installed the packaged
+> tool for the first time in this project's history and found bare `intest` does not resolve
+> against the local manifest `init` scaffolds (**F13, closed**; see `v0-acceptance.md`). Phase 2
+> explains why. Not yet built: `survey`
 > (Phase 0), `fixtures promote` (Phase 5), `assertions add`, `generate --emit-plan`,
 > variation tests, YAML input, and a URL `spec.source` (Phase 1 — `init` and `generate` both
 > refuse one; the `spec.json` snapshot that would make it work is designed and not written).
@@ -134,6 +138,21 @@ intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.jso
 
 Everything above is yours to edit and is never regenerated.
 
+**Every command from here on is `dotnet intest …`, not bare `intest`.** `.config/dotnet-tools.json`
+is a **local** tool manifest (`isRoot: true`) — that is the whole reason it exists: it pins the
+exact CLI version so CI and your machine restore the same one, and CI proves it by running
+`dotnet tool restore` (Phase 8) before anything else. A local manifest is never added to `PATH`,
+unlike a global install's shim directory, so after a real restore bare `intest` is simply not
+found — confirmed cross-shell, Git Bash and PowerShell both reject it the same way. `dotnet
+intest …` is the SDK's short form for a manifest-restored local tool (available without `dotnet
+tool run` since .NET 7); `dotnet tool run intest …` is the longer equivalent, and both resolve the
+version this project just pinned, where a stray global copy on `PATH` would not (**F13, closed**;
+see [`v0-acceptance.md`](v0-acceptance.md) for the experiment). `init` above is the one exception,
+shown bare: it is what *creates* the manifest, so there is nothing yet to restore against.
+Getting a working `intest` on `PATH` to run `init` at all — a global install, or building from
+source today, since nothing is published to NuGet yet (see the banner above) — is a separate,
+still-open gap; `v0-acceptance.md` tracks it and this note does not resolve it.
+
 ---
 
 ## Phase 3 — configure
@@ -235,7 +254,7 @@ authorized endpoint it declares.
 ## Phase 4 — generate
 
 ```bash
-intest generate
+dotnet intest generate
 ```
 
 Writes `Generated/` — one `.g.cs` class per tag (`OrdersTests.g.cs` here), `spec-paths.json` and
@@ -256,7 +275,7 @@ exits non-zero and reports the missing fixtures. That is expected on a first run
 ## Phase 5 — fixtures
 
 ```bash
-intest fixtures repair
+dotnet intest fixtures repair
 ```
 
 The only command that writes under `fixtures/`. It creates missing fixtures, adds `TODO:`
@@ -434,7 +453,7 @@ hand-editing fixtures or resetting the environment in between.
 > here today. The snippet below describes what it will produce once it exists.
 
 ```bash
-intest fixtures promote
+dotnet intest fixtures promote
 ```
 
 Prints a paste-ready snippet — an `ISchemaFilter`, an XML `<example>`, a transformer — for
@@ -496,7 +515,7 @@ Two pipelines, two different jobs.
 ```bash
 dotnet tool restore
 dotnet build ../Orders                 # produce the spec artifact
-intest generate --check                # fail if committed output is stale
+dotnet intest generate --check         # fail if committed output is stale
 dotnet test
 ```
 
@@ -513,7 +532,7 @@ usual.
 That last exit code exists so a tool upgrade is never mistaken for spec drift:
 
 ```bash
-intest upgrade                         # regenerate, then bump the version pin deliberately
+dotnet intest upgrade                  # regenerate, then bump the version pin deliberately
 ```
 
 `upgrade` regenerates against the running tool, then bumps `intestVersion` in `intest.json` and

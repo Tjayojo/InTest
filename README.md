@@ -72,9 +72,12 @@ Read these before evaluating — they are firm for v1, and they rule InTest out 
 Worth knowing before you start, because it surprises people.
 
 ```bash
-intest generate          # reports missing/stale fixtures, exits non-zero
-intest fixtures repair   # creates and updates them
+dotnet intest generate          # reports missing/stale fixtures, exits non-zero
+dotnet intest fixtures repair   # creates and updates them
 ```
+
+Shown as `dotnet intest …`, not bare `intest`, because these run inside a project `init` already
+scaffolded — see "Using it" below for why the invocation changes at that point.
 
 `intest fixtures repair` creates a fixture for every operation that needs a request body or a
 required path/query parameter. Where your spec provides an `example` or a `default`, that value
@@ -103,19 +106,33 @@ Working today:
 
 ```bash
 intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.json
-intest generate                    # exits non-zero on a first run — see below
-intest fixtures repair
-intest generate                    # regenerate now that fixtures exist
+dotnet intest generate                    # exits non-zero on a first run — see below
+dotnet intest fixtures repair
+dotnet intest generate                    # regenerate now that fixtures exist
 dotnet test
-intest generate --check            # CI: fail if committed output is stale
-intest upgrade                     # adopt a new tool version deliberately
+dotnet intest generate --check            # CI: fail if committed output is stale
+dotnet intest upgrade                     # adopt a new tool version deliberately
 ```
+
+`init` is the one command above shown bare: it is what creates the local tool manifest
+(`.config/dotnet-tools.json`) every command after it restores against, so there is nothing yet
+for `init` itself to resolve through. From `generate` on, `dotnet intest …` is what actually
+runs — bare `intest` is only on `PATH` after a **global** install, and `init` scaffolds a
+**local** one instead, so CI and your machine restore the identical pinned version (`dotnet tool
+restore`, confirmed against a real restore, cross-shell — see
+[`docs/getting-started.md`](docs/getting-started.md), Phase 2 and Phase 8, for the full
+explanation and evidence).
 
 Designed, not yet built:
 
 ```bash
 intest survey "specs/**/*.json"    # size the work before adopting
 ```
+
+Shown bare, unlike everything in "Using it" above: there is no project yet at this point, so no
+local manifest either — `survey` runs pre-adoption against whatever a **global**
+`dotnet tool install -g InTest.Cli` put on `PATH`, the same shape shown in
+[`docs/getting-started.md`](docs/getting-started.md)'s Phase 0.
 
 Generated code lands in `Generated/` and is regenerated wholesale. Your code lives in
 same-named partial classes outside it, and InTest never touches those. Request bodies and
