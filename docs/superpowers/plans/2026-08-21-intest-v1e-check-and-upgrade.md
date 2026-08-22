@@ -157,7 +157,24 @@ Every `ToJsonString(WriteIndented: true)` site in `src/InTest.Cli/` — and **"m
 
 Applying all three operations to the first three gives a double trailing newline. Applying them to the fourth also changes its trailing byte, which may be right but is a second behavioural change and should be intended rather than incidental. Either name the operation per site, or extract one helper and state which of the three it performs.
 
-**Check `FixtureDocument` deliberately** — fixtures are adopter-edited, so normalizing them changes files people own; decide and say why either way.
+**`FixtureDocument` is included — decided, and the adopter-edited objection argues *for* it.**
+
+Per `CLAUDE.md`'s ownership table, `fixtures/` is written by `fixtures repair` **only**; `generate` merely reports drift. Adopters edit fixture *values*, but the bytes are produced wholesale by InTest's writer, so pinning the newline changes what InTest emits — squarely inside its own lane. This is not Task 4's `.gitattributes` case, where the tool creates a file the team owns.
+
+And hand-edited committed files are where newline churn does the **most** damage. If `fixtures repair` emits CRLF on one machine and LF on another, every Windows run produces a whole-file diff that buries the one changed value — in the file adopters must read most carefully, since a wrong fixture value is how a suite passes while asserting nothing. Exempting one of four writers would also need a comment justifying the asymmetry, and there isn't a defensible one.
+
+**Use `JsonSerializerOptions.NewLine = "
+"`, not string surgery.** It exists on net10.0 and states the intent at the writer. Note all four writers already append a literal `+ "
+"`, so today the *last* line ends LF while every interior line ends CRLF — the code already intended LF and never got the interior.
+
+*A hypothesis measured and killed, so nobody re-derives it:* `.Replace("
+", "
+")` on serialized JSON cannot corrupt an adopter's fixture value containing an embedded CRLF, because System.Text.Json escapes control characters inside string values — an embedded CRLF serializes as the two-character escape `
+`, never as raw bytes. Verified by round-trip. So string surgery would be *safe*, just worse. Prefer `NewLine` for intent, not for safety.
+
+**The one cost, which belongs in the commit message:** the first `fixtures repair` after this change produces a one-time whole-file diff in every existing adopter's `fixtures/*.json` on Windows. Real churn in team-owned files — but one-time, in the direction that ends churn permanently, and only during an operation that already rewrites fixtures.
+
+**Drift detection is *not* affected — measured.** `FixtureDrift.Compare` takes two `FixtureDocument` objects, not serialized text, so drift is structural and platform-independent today. This defect is latent for drift and live only for `--check`, which compares bytes. Do not claim it fixes a drift bug.
 
 - [ ] **Step 3: Scaffold a `.gitattributes` — and give it a migration path**
 
