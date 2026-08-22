@@ -27,6 +27,47 @@ public static class InitCommand
         "\"../Orders/bin/Debug/net10.0/orders.json\".";
 
     /// <summary>
+    /// The exact bytes `init` scaffolds at <c>.gitattributes</c> — hoisted to a named constant,
+    /// internal rather than private, so <c>UpgradeCommand</c> can write the identical file for a
+    /// project scaffolded before <c>[lf-everywhere]</c> shipped (v1-e plan, Task 2 Step 3 /
+    /// Task 4 Step 1b) without a second hand-copied literal that could silently drift from this
+    /// one. Modeled on this repository's own <c>.gitattributes</c>, which pins the identical case
+    /// (*.g.cs.txt golden files, *.scriban templates) for the identical reason — with one
+    /// deliberate difference: no <c>* text=auto</c> line. That line normalizes *every* path under
+    /// wherever this file lives, not just the three patterns below, and a .gitattributes in a
+    /// subdirectory outranks one at the adopting team's repo root for paths beneath it — so it
+    /// would silently reverse a deliberate root policy such as `* -text` for TestStartup.cs,
+    /// appsettings*.json, this project's own .csproj, and anything the team adds later (the
+    /// "everything else | the adopting team | InTest never touches" row of CLAUDE.md's ownership
+    /// table). `eol=lf` on its own already implies `text` for the paths it names, so it needs no
+    /// help from a blanket normalization line — confirmed by mutation: deleting `* text=auto`
+    /// from this scaffold leaves GitattributesSurvivesAnAutocrlfTrueCheckout passing; the three
+    /// `eol=lf` lines carry the fix alone.
+    /// <para>
+    /// Every path pinned here is InTest-owned: `generate` deletes and rewrites Generated/
+    /// wholesale and writes coverage-report.json, `fixtures repair` writes fixtures/**/*.json —
+    /// base fixtures and every profile overlay subdirectory alike, since FixtureStore.Load deep-
+    /// merges fixtures/{profile}/*.json over fixtures/*.json and both are committed, hand-edited
+    /// files — and all of it is now pure-LF content (TemplateRenderer.Normalize for the .g.cs
+    /// classes, CommittedJsonOptions.NewLine for the JSON writers). Without this file, a clone
+    /// with core.autocrlf=true — the Git-for-Windows default — rewrites every one of them to CRLF
+    /// on checkout, because nothing else tells git these particular paths must stay LF. That
+    /// checkout-time rewrite is invisible to `fixtures repair` (FixtureDrift.Compare works on
+    /// parsed FixtureDocument objects, not bytes) but not to a byte-for-byte comparison such as
+    /// `generate --check`.
+    /// </para>
+    /// </summary>
+    internal const string GitattributesContent = """
+    # InTest writes these files with LF interior line endings (a template Normalize step for
+    # generated .g.cs classes, JsonSerializerOptions.NewLine = "\n" for the JSON files). A
+    # clone with core.autocrlf=true (the Git-for-Windows default) would otherwise rewrite
+    # them to CRLF on checkout, with nothing on disk to show why.
+    Generated/** text eol=lf
+    coverage-report.json text eol=lf
+    fixtures/**/*.json text eol=lf
+    """;
+
+    /// <summary>
     /// Every refusal below runs before the first write, and none of them catches: an exception
     /// this command does not anticipate is §5's exit 2 by way of <c>Program</c>'s crash floor,
     /// which covers every command rather than only the three that remembered to catch. This was
@@ -204,40 +245,11 @@ public static class InitCommand
         dotnet_diagnostic.CA1707.severity = none
         """);
 
-        // Modeled on this repository's own .gitattributes, which pins the identical case
-        // (*.g.cs.txt golden files, *.scriban templates) for the identical reason — with one
-        // deliberate difference: no `* text=auto` line. That line normalizes *every* path under
-        // wherever this file lives, not just the three patterns below, and a .gitattributes in a
-        // subdirectory outranks one at the adopting team's repo root for paths beneath it — so it
-        // would silently reverse a deliberate root policy such as `* -text` for TestStartup.cs,
-        // appsettings*.json, this project's own .csproj, and anything the team adds later (the
-        // "everything else | the adopting team | InTest never touches" row of CLAUDE.md's
-        // ownership table). `eol=lf` on its own already implies `text` for the paths it names, so
-        // it needs no help from a blanket normalization line — confirmed by mutation: deleting
-        // `* text=auto` from this scaffold leaves GitattributesSurvivesAnAutocrlfTrueCheckout
-        // passing; the three `eol=lf` lines carry the fix alone.
-        //
-        // Every path pinned here is InTest-owned: `generate` deletes and rewrites Generated/
-        // wholesale and writes coverage-report.json, `fixtures repair` writes
-        // fixtures/**/*.json — base fixtures and every profile overlay subdirectory alike, since
-        // FixtureStore.Load deep-merges fixtures/{profile}/*.json over fixtures/*.json and both
-        // are committed, hand-edited files — and all of it is now pure-LF content
-        // (TemplateRenderer.Normalize for the .g.cs classes, CommittedJsonOptions.NewLine = "\n"
-        // for the JSON writers). Without this file, a clone with core.autocrlf=true — the
-        // Git-for-Windows default — rewrites every one of them to CRLF on checkout, because
-        // nothing else tells git these particular paths must stay LF. That checkout-time rewrite
-        // is invisible to `fixtures repair` (FixtureDrift.Compare works on parsed
-        // FixtureDocument objects, not bytes) but not to a future byte-for-byte comparison such
-        // as `generate --check`.
-        Write(projectRoot, ".gitattributes", """
-        # InTest writes these files with LF interior line endings (a template Normalize step for
-        # generated .g.cs classes, JsonSerializerOptions.NewLine = "\n" for the JSON files). A
-        # clone with core.autocrlf=true (the Git-for-Windows default) would otherwise rewrite
-        # them to CRLF on checkout, with nothing on disk to show why.
-        Generated/** text eol=lf
-        coverage-report.json text eol=lf
-        fixtures/**/*.json text eol=lf
-        """);
+        // Content and reasoning both live once, on GitattributesContent above — UpgradeCommand
+        // writes the identical constant for a project `init` never got the chance to scaffold it
+        // for, and a second hand-copied literal here would be exactly the kind of duplicate this
+        // repository's "one canonical explanation" rule exists to prevent.
+        Write(projectRoot, ".gitattributes", GitattributesContent);
 
         Write(projectRoot, "TestStartup.cs", $$"""
         using InTest.Runtime;
@@ -365,7 +377,13 @@ public static class InitCommand
         return ExitCode.Ok;
     }
 
-    private static void Write(string root, string relativePath, string content)
+    /// <summary>
+    /// Internal rather than private: <c>UpgradeCommand</c> reuses this exact normalization
+    /// (<c>ReplaceLineEndings("\n") + "\n"</c>, matching every other file `init` scaffolds) to
+    /// write <see cref="GitattributesContent"/> for a project `init` itself refuses to touch —
+    /// see that field's doc comment for why the two commands must share the constant.
+    /// </summary>
+    internal static void Write(string root, string relativePath, string content)
         => File.WriteAllText(Path.Combine(root, relativePath), content.ReplaceLineEndings("\n") + "\n");
 
     /// <summary>

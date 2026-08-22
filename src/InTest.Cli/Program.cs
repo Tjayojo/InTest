@@ -42,10 +42,17 @@ repair.SetAction((parseResult, cancellationToken) =>
     FixturesRepairCommand.RunAsync(parseResult.GetValue(projectOption)!, cancellationToken));
 fixtures.Subcommands.Add(repair);
 
+var upgrade = new Command("upgrade",
+    "Adopt the running intest version: bump intestVersion and the .config/dotnet-tools.json pin, then regenerate.");
+upgrade.Options.Add(projectOption);
+upgrade.SetAction((parseResult, cancellationToken) =>
+    UpgradeCommand.RunAsync(parseResult.GetValue(projectOption)!, cancellationToken));
+
 var root = new RootCommand("InTest — generate API integration tests from an OpenAPI document.");
 root.Subcommands.Add(generate);
 root.Subcommands.Add(init);
 root.Subcommands.Add(fixtures);
+root.Subcommands.Add(upgrade);
 
 // §5's exit-code convention, applied at the one layer no command owns. Two rules meet here, both
 // of which System.CommandLine answers with exit 1 and §5 answers with exit 2, and neither of
