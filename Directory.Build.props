@@ -9,5 +9,18 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+    <!-- NuGet package metadata is immutable once a version is published, so this has to be
+         right before the first upload — set here, not per-project, because InTest.Cli and
+         InTest.Runtime are the only two packed projects and both want the same values. This
+         applies repo-wide, including the four test projects and four sample APIs; all eight
+         already set <IsPackable>false</IsPackable> individually (verified by inspecting every
+         .csproj under tests/ and samples/ during the ownership-transfer change that added these
+         properties), so the assembly-level Authors/Copyright attributes land in their DLLs like
+         any other project's, but none of them can be packed or published. -->
+    <Authors>Tjay Ojo</Authors>
+    <Copyright>Copyright (c) 2026 Tjay Ojo</Copyright>
+    <PackageProjectUrl>https://github.com/Tjayojo/intest</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Tjayojo/intest.git</RepositoryUrl>
   </PropertyGroup>
 </Project>

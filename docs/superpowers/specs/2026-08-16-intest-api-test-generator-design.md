@@ -12,9 +12,11 @@ what changed and why.
 > nuget.org on 2026-08-16: `InTest`, `InTest.Cli`, `InTest.Runtime` and `InTest.Core` all
 > return 404 on the flat-container index, and a fuzzy package search for `intest` returns
 > zero hits, and no C# repository of substance uses the name. On GitHub the org name `intest`
-> is **not** available — a personal account holds it — so the repository lives at
-> **`github.com/Dexom-GH/intest`**, MIT licensed. (Rev 2's provisional name `Jig` was taken:
-> nuget.org carries `Jig` 0.2.0–0.3.1.)
+> is **not** available — a personal account holds it — so the repository lived at
+> `github.com/Dexom-GH/intest`, MIT licensed, until it was transferred to the owner's personal
+> account on 2026-08-22 and now lives at **`github.com/Tjayojo/intest`** — see "Hosting
+> organisation" under §20 Closed for why the original reasoning stopped explaining the location.
+> (Rev 2's provisional name `Jig` was taken: nuget.org carries `Jig` 0.2.0–0.3.1.)
 >
 > Casing convention: `InTest` for packages, namespaces and types; `intest` for the CLI
 > command, `intest.json`, and `INTEST_PROFILE`. The split-cap form disambiguates it from the
@@ -52,7 +54,7 @@ run with `dotnet test` like any other test project. InTest is a development-time
 
 ### Project status
 
-InTest is open source, MIT licensed, published at `github.com/Dexom-GH/intest`, and intended
+InTest is open source, MIT licensed, published at `github.com/Tjayojo/intest`, and intended
 for use by organisations and individuals its maintainers will never meet. That is a design
 input, not a distribution detail, and it is what the following rules follow from:
 
@@ -2630,13 +2632,33 @@ answers it will never receive.
 
 ### Closed
 
-- **Licence — MIT.** Confirmed: `LICENSE` on `Dexom-GH/intest` is MIT, © 2026 Dexom-GH. It
-  matches every pinned dependency (Microsoft.OpenApi, NJsonSchema, Shouldly, MSTest, Scriban,
-  System.CommandLine), so InTest adds no licence surface of its own — which is the same test
-  that excluded FluentAssertions and `JsonSchema.Net` (§4).
+- **Licence — MIT.** Confirmed: `LICENSE` on `Tjayojo/intest` is MIT, © 2026 Tjay Ojo (updated
+  2026-08-22 alongside the hosting move below; the licence choice itself did not change).
+  **Corrected 2026-08-22** — the original claim that MIT "matches every pinned dependency
+  (Microsoft.OpenApi, NJsonSchema, Shouldly, MSTest, Scriban, System.CommandLine)" was checked
+  against each package's own `.nuspec` in the local NuGet cache rather than trusted as written,
+  and the premise was wrong: Microsoft.OpenApi, NJsonSchema, MSTest.TestFramework and
+  System.CommandLine are MIT, but **Shouldly is BSD-3-Clause** and **Scriban is BSD-2-Clause**.
+  Shouldly is test-only and never ships; Scriban ships inside `InTest.Cli`'s tool package (see
+  `THIRD-PARTY-NOTICES.md` at the repo root, added in the same change). The conclusion survives
+  the correction even though the premise did not: all six are permissive, none is copyleft, none
+  charges a fee or requires reciprocal licensing, so InTest still adds no licence surface of the
+  kind that excluded FluentAssertions and `JsonSchema.Net` (§4) — a licence-fee or copyleft
+  encumbrance, not the plain attribution notice BSD asks for and the notices file now carries.
 - **Hosting organisation — `Dexom-GH`.** `github.com/intest` is held by a personal account, so
   the repo lives at `github.com/Dexom-GH/intest`. Half of item 1 above; the NuGet IDs remain
   unreserved.
+
+  **Superseded 2026-08-22.** `Dexom-GH/intest` was transferred to the owner's personal GitHub
+  account; the repo now lives at `github.com/Tjayojo/intest`. The reasoning above no longer
+  explains the current location — it justified choosing a personal *organisation* account
+  because the bare name `github.com/intest` was unavailable, and says nothing about why the repo
+  would end up under a personal *user* account instead. That happened because the owner decided,
+  outside this spec, to hold `intest` personally rather than under any organisation. The decision
+  itself (repo location, MIT licence, NuGet IDs still unreserved) is otherwise unchanged. The old
+  URL still resolves via GitHub's account-rename redirect, but that redirect lasts only until
+  someone else claims the `Dexom-GH` name, so it must not be treated as a stable address —
+  nothing in this spec or the shipped packages should reference it going forward.
 - **Tool ↔ runtime compatibility.** Answered by the semver contract in §3 rather than left as a
   question: majors move together, any CLI `N.y` with any runtime `N.x`, previous major
   supported 12 months.
