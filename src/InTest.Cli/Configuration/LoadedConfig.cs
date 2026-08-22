@@ -2,8 +2,9 @@ namespace InTest.Cli.Configuration;
 
 /// <summary>
 /// The settings <c>intest.json</c> carries that a command actually reads, after validation.
-/// Every property is non-null and known-good: a <see cref="LoadedConfig"/> only exists because
-/// <see cref="ConfigLoader.Load"/> did not throw.
+/// A <see cref="LoadedConfig"/> only exists because <see cref="ConfigLoader.Load"/> did not
+/// throw, so every property is known-good — but "known-good" allows <c>null</c> where a setting
+/// is legitimately optional; see <see cref="IntestVersion"/>.
 /// </summary>
 /// <param name="IntestVersion">
 /// The <c>intest</c> version that generated this config, when the config declares one — null
@@ -16,4 +17,4 @@ public sealed record LoadedConfig(
     string SpecSource,
     string RootNamespace,
     string TestBaseClass,
-    string? IntestVersion = null);
+    string? IntestVersion);

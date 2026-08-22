@@ -174,6 +174,8 @@ public static class ConfigLoader
     /// that isn't a match already produces §8's message naming both sides and pointing at
     /// <c>upgrade</c> — including something malformed like "banana". Only emptiness is refused
     /// here, since <c>""</c> is a mistake rather than a version claim, not a shape to validate.
+    /// (<c>generate --check</c> itself does not exist yet — this argument is what it will need
+    /// once it does, not a description of behaviour already implemented.)
     /// </para>
     /// </summary>
     private static string? ReadOptionalIntestVersion(JsonElement root)
@@ -195,7 +197,7 @@ public static class ConfigLoader
         }
 
         var text = declared.GetString()!;
-        if (text.Length == 0)
+        if (string.IsNullOrWhiteSpace(text))
         {
             throw new ConfigLoadException($"intestVersion in {FileName} is empty. {rule}");
         }

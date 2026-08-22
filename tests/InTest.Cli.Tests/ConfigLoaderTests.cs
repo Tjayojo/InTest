@@ -538,14 +538,70 @@ public class ConfigLoaderTests
         ConfigLoader.Load(_root).IntestVersion.ShouldBe("banana");
     }
 
+    /// <summary>
+    /// intestVersion's twin of <see cref="ExplainsASpecSourceThatIsNotAStringAndQuotesWhatWasWritten"/>:
+    /// the same <c>ValueKind != JsonValueKind.String</c> shape, on a different setting, and
+    /// nothing else in this file pins it. Confirmed by mutation — replacing the throw this guards
+    /// with <c>return null</c> and running the suite left it green, because
+    /// <see cref="SurfacesAnyNonEmptyIntestVersionRegardlessOfShape"/> and its neighbours only
+    /// ever write intestVersion as a string.
+    /// </summary>
     [TestMethod]
-    public void ExplainsAnEmptyIntestVersion()
+    public void ExplainsAnIntestVersionThatIsNotAStringAndQuotesWhatWasWritten()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "intestVersion": "", "spec": { "source": "orders.json" },
+        { "schemaVersion": 1, "intestVersion": 42, "spec": { "source": "orders.json" },
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
         reason.ShouldContain("intestVersion");
+        reason.ShouldContain("42");
+        reason.ShouldContain("string");
+    }
+
+    /// <summary>
+    /// The other half of the same branch, and the one <see cref="RequireString"/> already treats
+    /// as worth naming specially: <c>declared.ValueKind == JsonValueKind.Null ? "null" :
+    /// Quote(declared)</c> exists because JSON null is what a half-finished hand edit leaves
+    /// behind — the same reasoning <see cref="ExplainsASpecSourceThatIsJsonNull"/> pins for
+    /// spec.source. Losing that ternary in a later refactor is exactly the kind of change a test
+    /// asserting only "intestVersion" would not notice; this asserts "null" too.
+    /// </summary>
+    [TestMethod]
+    public void ExplainsAnIntestVersionThatIsJsonNull()
+    {
+        var reason = ReasonFor("""
+        { "schemaVersion": 1, "intestVersion": null, "spec": { "source": "orders.json" },
+          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+        """);
+
+        reason.ShouldContain("intestVersion");
+        reason.ShouldContain("null");
+    }
+
+    /// <summary>
+    /// Empty and whitespace-only get the same refusal, for the same reason: both are "a mistake
+    /// rather than a version claim" (<see cref="ReadOptionalIntestVersion"/>'s own doc comment),
+    /// and both would otherwise render §8's mismatch message with a hole where the declared
+    /// version belongs. <c>spec.source</c>, thirty lines above in <see cref="ConfigLoader"/>,
+    /// draws the identical line with <c>string.IsNullOrWhiteSpace</c> — this mirrors it rather
+    /// than re-deriving it. Asserting only "intestVersion" (as this test used to) is too weak to
+    /// pin the branch: mutation shows it is the sole guard here, and a message that merely
+    /// mentions the setting without saying what is wrong with it would still pass. Asserting
+    /// "empty" too, and ruling out the non-string branch's wording, closes that gap.
+    /// </summary>
+    [TestMethod]
+    [DataRow("", DisplayName = "empty string")]
+    [DataRow("   ", DisplayName = "whitespace only")]
+    public void ExplainsAnEmptyIntestVersion(string value)
+    {
+        var reason = ReasonFor($$"""
+        { "schemaVersion": 1, "intestVersion": "{{value}}", "spec": { "source": "orders.json" },
+          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+        """);
+
+        reason.ShouldContain("intestVersion");
+        reason.ShouldContain("empty");
+        reason.ShouldNotContain("not a string");
     }
 }
