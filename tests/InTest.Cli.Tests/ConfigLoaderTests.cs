@@ -392,8 +392,18 @@ public class ConfigLoaderTests
 
     /// <summary>
     /// The message must name the version the config declares and the version this CLI
-    /// implements, and must NOT point at `intest upgrade` — that command does not exist, and
-    /// naming it would reproduce one level down exactly the defect this check closes.
+    /// implements, and must NOT point at `intest upgrade`. `intest upgrade` exists as of v1-e,
+    /// but that is not why this assertion still holds — it holds because `upgrade` still cannot
+    /// act on this refusal. `UpgradeCommand` calls straight into `GenerateCommand.RunAsync`,
+    /// which calls <see cref="ConfigLoader.Load"/> the same way plain `generate` always has, so
+    /// this exact check refuses the config before any of `upgrade`'s own edits ever run —
+    /// confirmed by building the case directly: republish the CLI with a higher
+    /// <see cref="ConfigLoader.SupportedSchemaVersion"/> and run that build's `upgrade` against
+    /// an ordinary, older-schema config. Exit 2, config untouched. Naming `intest upgrade` in the
+    /// message would point at a command that, for this exact input, cannot act — the
+    /// documented-but-unreachable remedy shape this project calls `[paired]` and has closed six
+    /// times before. See <see cref="ConfigLoader.RequireSupportedSchemaVersion"/>'s own doc
+    /// comment for the fuller version of this reasoning.
     /// </summary>
     [TestMethod]
     public void RefusesASchemaVersionThisCliDoesNotImplement()
@@ -409,6 +419,12 @@ public class ConfigLoaderTests
         reason.ShouldNotContain("upgrade");
     }
 
+    /// <summary>
+    /// Same reasoning as <see cref="RefusesASchemaVersionThisCliDoesNotImplement"/> above, for
+    /// the sibling case: a config missing <c>schemaVersion</c> entirely is refused by the same
+    /// check, before `upgrade`'s regenerate-first call would ever see it, so the message must
+    /// not name a remedy that cannot run against this input either.
+    /// </summary>
     [TestMethod]
     public void ExplainsAMissingSchemaVersion()
     {

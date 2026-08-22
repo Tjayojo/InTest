@@ -345,29 +345,29 @@ requests rather than orphaning them.
 
 `intest.json` at the test project root, committed.
 
-```jsonc
+```json
 {
   "schemaVersion": 1,
   "intestVersion": "1.0.0",
   "spec": {
     "source": "../Orders/bin/Debug/net10.0/orders.json",
-    "producer": "auto"           // auto | swashbuckle | aspnetcore | nswag
+    "producer": "auto"
   },
   "project": {
     "name": "Orders.ApiTests",
     "rootNamespace": "Orders.ApiTests",
-    "framework": "mstest",       // FROZEN
-    "assertions": ["shouldly"],  // shouldly | mstest — additive, never a swap
+    "framework": "mstest",
+    "assertions": ["shouldly"],
     "testBaseClass": "Orders.ApiTests.OrdersTestBase"
   },
   "naming": {
-    "identifiers": {             // FROZEN
+    "identifiers": {
       "style": "pascal",
       "class":     "{Tag}Tests",
       "method":    "{OperationId}_Contract",
       "variation": "{OperationId}_{Property}_{Case}"
     },
-    "display": {                 // changeable any time
+    "display": {
       "method":    "Given {Tag}, when {OperationId}, then {Status}",
       "variation": "{Property} = {Value} → {Status}"
     }
@@ -397,6 +397,20 @@ requests rather than orphaning them.
   }
 }
 ```
+
+This is real, strict JSON — `ConfigLoader.Parse` is a bare `JsonDocument.Parse` with
+`CommentHandling.Disallow` and `AllowTrailingCommas: false`, so a real `intest.json` cannot carry
+the `//` comments an earlier revision of this example did; copying that block verbatim made every
+InTest command exit 2, confirmed by running it. The five fields that block used to annotate
+inline:
+
+| Field | Note |
+|---|---|
+| `spec.producer` | `auto` \| `swashbuckle` \| `aspnetcore` \| `nswag` |
+| `project.framework` | **Frozen** — see "Frozen vs. additive axes" below |
+| `project.assertions` | `shouldly` \| `mstest` — additive, never a swap |
+| `naming.identifiers` | **Frozen** — see "Frozen vs. additive axes" below |
+| `naming.display` | Changeable any time — cosmetic, no compile impact |
 
 `generation.parallel` does not exist — see §11.
 
@@ -452,14 +466,14 @@ Rev 2 and earlier drafts of rev 3 scattered commands across seven sections, and 
 
 | Command | Writes | Never writes | Exit |
 |---|---|---|---|
-| `intest init` | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs`, `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings`, `.config/dotnet-tools.json` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused, or the scaffold failed · 3 already initialised |
+| `intest init` | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs`, `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings`, `.config/dotnet-tools.json`, `.gitattributes` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused, or the scaffold failed · 3 already initialised |
 | `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, or spec unparseable |
-| `intest generate --check` | Nothing | Everything | 0 identical · 1 `Generated/` or `coverage-report.json` differs · 2 tool error · 4 tool-version mismatch |
+| `intest generate --check` | Nothing | Everything | 0 identical · 1 `Generated/` or `coverage-report.json` differs, or a fixture has drifted (same code as plain `generate`'s exit 1, §5's exit-1 row already lists both as one code) · 2 tool error · 4 tool-version mismatch, checked before any output comparison and only when `intestVersion` is declared (absent means no claim made, not a mismatch) |
 | `intest generate --emit-plan` | `TestPlan` JSON to stdout | Everything | 0 ok |
 | `intest fixtures repair` | `fixtures/` — **creates missing fixtures** by tier precedence, adds `TODO:` sentinels for newly-required properties, flags removed ones. Never overwrites an existing value | `Generated/`, team-owned files | 0 ok, including nothing to repair · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a committed fixture that cannot be read |
 | `intest fixtures promote` | Nothing — prints a paste-ready snippet and names the target file | Everything, `spec.source` especially (§10) | 0 ok |
 | `intest survey <spec-glob\|url>` | Nothing — prints a spec-population report (§17) | Everything | 0 ok · 2 no spec matched or unparseable |
-| `intest upgrade` | `intestVersion` in `intest.json`, the version in `.config/dotnet-tools.json`, then re-runs `generate` | `fixtures/`, team-owned files | 0 ok · 1 regeneration failed |
+| `intest upgrade` | `intestVersion` in `intest.json`, the version in `.config/dotnet-tools.json`, then re-runs `generate`; `.gitattributes` **if the project does not already have one** | `fixtures/`, team-owned files — `.gitattributes` is the one narrow exception, written only when absent, never overwritten | 0 ok · 1 regeneration failed · 2 the running tool carries no version metadata, `intest.json` or `.config/dotnet-tools.json` is missing, unreadable or malformed, or `.config/dotnet-tools.json` has no `intest.cli` pin (or a pin with no `version` field) |
 | `intest assertions add <name>` | Appends to `project.assertions`, then re-runs `generate` | Existing assertions in hand-written or generated code | 0 ok · 3 already present |
 
 **Argument refusals.** The `init` row above read `0 ok · 2 --name is not a valid C# name · 3
@@ -559,6 +573,30 @@ content tracks the *shape* of the spec rather than the templates, so a spec chan
 an untagged operation, a new synthesized operationId, or a newly unevaluatable keyword shows
 up there and nowhere else. Excluding it would let exactly the drift the report exists to
 surface pass `--check` silently.
+
+### `--check`'s version gate
+
+`intestVersion` in `intest.json` is optional — a config predating this field, or hand-edited
+without it, still loads (§5's config grows by addition; see `ConfigLoaderTests.IgnoresSettingsItDoesNotRead`).
+Three rules govern how `--check` uses it, and they only make sense read together:
+
+- **Exit 4 fires on any difference, not only a major.** §8's own worked example compares
+  `1.0.0` against `1.1.0` — a minor difference — and presents it as the failing case, with the
+  message quoted there. Reaching for the `InTest.Runtime` **N.x** accepts `InTest.Cli` **N.y**
+  compatibility guarantee above would be a different axis: that guarantee is about whether a
+  *package* accepts *generated code*, not about whether *committed output* is fresh against the
+  tool that would produce it now. `--check` answers the second question, so it compares by exact
+  string equality against the running tool's own version, whatever axis moved.
+- **The version check runs before any output is compared.** A version mismatch **and** a real
+  output difference is reported as exit 4, not 1 — otherwise a stale tool would report "the spec
+  changed" when the true story is "the generator changed", the exact confusion `intestVersion`
+  exists to prevent (§8).
+- **Absent means no claim made, not a mismatch.** When `intest.json` declares no `intestVersion`
+  at all, `--check` skips the version check entirely and compares output as usual — it does not
+  fail with a message naming a blank declared version. Exit 4 exists to catch output generated
+  by a **different** tool version; a config that claims no version is not claiming a different
+  one, so treating absence as a mismatch would invent a failure for a config the loader is
+  required to accept.
 
 ---
 
@@ -746,6 +784,7 @@ Orders.ApiTests/
 ├── appsettings*.json
 ├── orders.runsettings
 ├── .editorconfig                 # naming style
+├── .gitattributes                # pins Generated/, coverage-report.json, fixtures/**/*.json to LF
 ├── Generated/                    # regenerated wholesale — NEVER hand-edited
 │   ├── TestHost.g.cs             # AssemblyInitialize, DI, readiness, run ID, schema bundle
 │   ├── OrdersTests.g.cs

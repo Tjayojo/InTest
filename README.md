@@ -9,9 +9,10 @@ or in a pull request, never as part of the deployment pipeline.
 
 > **Status: v0. Working, but early — and nothing is published to NuGet yet.**
 >
-> `intest init` and `intest generate` work: they produce a compiling MSTest project whose
-> contract tests pass against a live API. That has been verified against three sample APIs, one
-> per OpenAPI producer — see [`docs/v0-acceptance.md`](docs/v0-acceptance.md). Catalog and
+> `intest init`, `intest generate`, `intest generate --check` and `intest upgrade` work: together
+> they produce a compiling MSTest project whose contract tests pass against a live API, and keep
+> committed output honest in CI. That has been verified against three sample APIs, one per
+> OpenAPI producer — see [`docs/v0-acceptance.md`](docs/v0-acceptance.md). Catalog and
 > Inventory pass in full, twice each, against an unreset store. Orders — the one sample with
 > declared `security` — generates 24 tests: **0 failed, 4 skipped, 20 passed**. The 4 skips are
 > the wrong-scope 403 cases whose secondary identity already holds the scope the operation
@@ -23,7 +24,7 @@ or in a pull request, never as part of the deployment pipeline.
 > operations with a request body no longer generate a test that cannot send one — see "What day
 > one actually looks like" below.
 >
-> **Not yet built:** variation tests, `intest survey`, `generate --check`, YAML input, and
+> **Not yet built:** variation tests, `intest survey`, `intest assertions add`, YAML input, and
 > **a URL `spec.source`** — the OpenAPI document must be a local path today. `init` and
 > `generate` both refuse a URL outright rather than letting it fail as a mangled path; the
 > `spec.json` snapshot that would make a URL source work is designed (§9) and not written.
@@ -98,13 +99,14 @@ intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.jso
 intest generate
 intest fixtures repair
 dotnet test
+intest generate --check            # CI: fail if committed output is stale
+intest upgrade                     # adopt a new tool version deliberately
 ```
 
 Designed, not yet built:
 
 ```bash
 intest survey "specs/**/*.json"    # size the work before adopting
-intest generate --check            # CI: fail if committed output is stale
 ```
 
 Generated code lands in `Generated/` and is regenerated wholesale. Your code lives in

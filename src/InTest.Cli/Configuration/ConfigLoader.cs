@@ -212,10 +212,21 @@ public static class ConfigLoader
     /// config written for a later schema was reinterpreted under this one's meanings, producing
     /// wrong output and no error. That is the only failure on this surface that was silent.
     /// <para>
-    /// The message deliberately does not mention <c>intest upgrade</c>, which does not exist yet.
-    /// Naming a command that is not implemented would reproduce, one level down, the same defect
-    /// this check closes. The remedy it states instead is the one available today: the declared
-    /// version and the implemented version must match, by moving either.
+    /// <b>The message deliberately does not mention <c>intest upgrade</c>, and the reason is not
+    /// that the command is unimplemented — it now is (v1-e).</b> It is still not the remedy: a
+    /// reviewer built the case directly (v1-e plan, Task 5 Step 4) — set
+    /// <see cref="SupportedSchemaVersion"/> to a higher number, republished the CLI, and ran that
+    /// build's <c>upgrade</c> against an ordinary, older-schema project. Result: exit 2, config
+    /// untouched. <c>UpgradeCommand</c> calls straight into <c>GenerateCommand.RunAsync</c>, which
+    /// calls <see cref="Load"/> the same way `generate` always has — so this exact check refuses
+    /// the config before <c>upgrade</c>'s own edits ever run, on the very input a schema migration
+    /// exists to accept. Naming <c>intest upgrade</c> here would point at a command that, for this
+    /// refusal, cannot act — the documented-but-unreachable remedy shape this project has closed
+    /// six times before (v1-e plan, `[paired]`). The remedy this message states instead is the one
+    /// actually available: the declared version and the implemented version must match, by moving
+    /// either. A real migration path requires this loader itself to learn to accept (or upgrade)
+    /// an old <c>schemaVersion</c> rather than refuse it on sight — future work, not a gap
+    /// <c>UpgradeCommand</c> could close on its own (see its own doc comment, decision 3).
     /// </para>
     /// </summary>
     private static void RequireSupportedSchemaVersion(JsonElement root)

@@ -3,21 +3,22 @@
 End-to-end walkthrough: from an existing .NET API with an OpenAPI document, to a committed
 integration test suite running as a post-deployment gate.
 
-> **Phase 0 (`survey`) does not exist yet, nor does `--check` within Phase 8, nor
-> `fixtures promote` within Phase 5. Everything else below does.**
+> **Phase 0 (`survey`) does not exist yet, nor does `fixtures promote` within Phase 5.
+> Everything else below does, including `--check` and `upgrade` within Phase 8.**
 >
-> `init`, `generate`, and `fixtures repair` (Phase 5) all work: together they produce a
-> compiling MSTest project, complete with the fixture files every operation needs. All three
-> are verified end to end against live APIs, request bodies included — Catalog and Inventory pass
-> in full, twice each, against an unreset store. Orders — the one sample with declared `security`
-> — now generates 24 tests: **0 failed, 4 skipped, 20 passed**. The 4 skips are the wrong-scope
-> 403 cases whose secondary identity already holds the scope the operation requires — the
-> runtime guard (`RequireSecondaryIdentityLacks`, see the Auth section below) skips each with a
-> stated reason instead of running it against a request that identity is genuinely authorized for
+> `init`, `generate`, `fixtures repair` (Phase 5), `generate --check` and `upgrade` (Phase 8) all
+> work: together they produce a compiling MSTest project, complete with the fixture files every
+> operation needs, and keep committed output honest in CI. All are verified end to end against
+> live APIs, request bodies included — Catalog and Inventory pass in full, twice each, against an
+> unreset store. Orders — the one sample with declared `security` — now generates 24 tests:
+> **0 failed, 4 skipped, 20 passed**. The 4 skips are the wrong-scope 403 cases whose secondary
+> identity already holds the scope the operation requires — the runtime guard
+> (`RequireSecondaryIdentityLacks`, see the Auth section below) skips each with a stated reason
+> instead of running it against a request that identity is genuinely authorized for
 > (**F11, closed**; see [`v0-acceptance.md`](v0-acceptance.md), which records the run this closed
 > on). The 3 write-scope 403s — the cases the sample's identity pair can actually prove — ran and
 > passed. Not yet built: `survey`
-> (Phase 0), `generate --check` and `intest upgrade` (Phase 8), `fixtures promote` (Phase 5),
+> (Phase 0), `fixtures promote` (Phase 5), `assertions add`,
 > variation tests, YAML input, and a URL `spec.source` (Phase 1 — `init` and `generate` both
 > refuse one; the `spec.json` snapshot that would make it work is designed and not written).
 > Nothing is published to NuGet, so build from source for now.
@@ -127,6 +128,7 @@ intest init --spec ../Orders/bin/Debug/net10.0/orders.json
 | `appsettings.json`, `appsettings.staging.json` | yours | Profiles, base URLs, readiness |
 | `orders.runsettings` | yours | Ships with `profile` **commented out** — see Phase 3 |
 | `.config/dotnet-tools.json` | yours | Pins the CLI version so CI and your machine agree |
+| `.gitattributes` | yours | Pins `Generated/`, `coverage-report.json` and `fixtures/**/*.json` to LF, so a clone with `core.autocrlf=true` cannot check them out as CRLF and fail `generate --check` on every line |
 
 Everything above is yours to edit and is never regenerated.
 
@@ -466,6 +468,7 @@ telemetry down to the individual test.
 | `fixtures/`, `intest.json` | user-secrets |
 | `appsettings*.json` (non-local), `*.runsettings` | anything with a credential in it |
 | `.config/dotnet-tools.json` | |
+| `.gitattributes` | |
 | **`spec.json`** — only when `spec.source` is a URL, **not built yet** (Phase 1) | `spec.json` is **not** created for a local `spec.source`; the build copies that file instead |
 
 Generated code is committed so a spec change arrives as a reviewable diff on the pull request,
@@ -492,11 +495,27 @@ intest generate --check                # fail if committed output is stale
 dotnet test
 ```
 
-`--check` compares `Generated/` and `coverage-report.json` against a fresh run. Exit codes:
-`0` identical, `1` output differs, `2` tool error, `4` the tool version does not match
-`intestVersion` in `intest.json`. That last one exists so a tool upgrade is never mistaken for
-spec drift — `intest upgrade` is designed to adopt a new version deliberately, but it is not
-built yet (see the preamble above).
+`--check` compares `Generated/` and `coverage-report.json` against a fresh run, writing nothing
+either way. Exit codes: `0` identical, `1` `Generated/` or `coverage-report.json` differs, or a
+fixture has drifted from what the spec now requires — same meaning as plain `generate`'s exit 1,
+different message; `2` tool error; `4` the running tool's version does not match `intestVersion`
+in `intest.json`. The version check runs **before** any output is compared, so a stale tool never
+reports "the spec changed" when the real story is "the generator changed" — and it only fires
+when `intest.json` declares a version at all: an older config with no `intestVersion` is not
+claiming a match or a mismatch, so `--check` skips the version check and compares output as
+usual.
+
+That last exit code exists so a tool upgrade is never mistaken for spec drift:
+
+```bash
+intest upgrade                         # regenerate, then bump the version pin deliberately
+```
+
+`upgrade` regenerates against the running tool, then bumps `intestVersion` in `intest.json` and
+the `intest.cli` pin in `.config/dotnet-tools.json` together — so the version change and its
+output change land in one reviewable commit rather than arriving disguised as spec drift. It also
+scaffolds `.gitattributes` if the project does not already have one (see Phase 2) — the only way
+a project created before this file existed can get one.
 
 Cross-repo, the API build step means cloning the API repo. That is a real cost and worth
 knowing before you start.
