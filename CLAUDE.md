@@ -41,6 +41,15 @@ Running the sample APIs requires specific environment variables (ports, issuer/a
 `ASPNETCORE_ENVIRONMENT=Development`). See `samples/README.md`; getting them wrong produces
 500s or silent 404s rather than an obvious failure.
 
+Nothing is published to NuGet, so exercising Phase 8 of `docs/getting-started.md` (`dotnet tool
+restore`, `generate --check`, `upgrade`) needs a local pack-and-restore — never improvise this by
+hand, NuGet's global package cache never invalidates a locally-built version number (see
+CONTRIBUTING.md's "Testing against a local build"). Use:
+
+```bash
+pwsh scripts/local-e2e-test.ps1
+```
+
 ## Build configuration
 
 - Central package management: **all** versions live in `Directory.Packages.props`. A

@@ -253,6 +253,60 @@ Covered by semver: the runtime's exported types, the `intest.json` schema, CLI c
 and exit codes, and the coverage report's JSON shape. Not covered: failure message text, the
 internal `TestPlan` JSON, and template internals.
 
+## Testing against a local build
+
+Nothing is published to NuGet yet, so trying the documented adoption path
+(`docs/getting-started.md` Phase 8 — `dotnet tool restore`, `generate --check`, `upgrade`) means
+packing `InTest.Cli` and `InTest.Runtime` yourself and restoring a scaffolded project against
+them. **Use `scripts/local-e2e-test.ps1` for this. Do not improvise a `dotnet pack` +
+`dotnet restore` by hand.**
+
+**Why this is a rule and not a suggestion:** NuGet's package cache (`~/.nuget/packages/`) is
+keyed by exact version, machine-wide, and is never invalidated by a newer local build carrying
+the same version number. A locally-packed `0.1.0` becomes indistinguishable from a real
+published `0.1.0` forever — the next restore silently keeps using whatever is already cached,
+with no error and no visible reason for the mismatch. This has already cost real time on this
+project, twice, for the identical reason:
+
+- **v1-e Task 5.** A stale `InTest.Runtime 0.1.0`, built one commit behind `HEAD`, shadowed a
+  fresh build and produced `CS0103` on members (`RequireFixture`, `FixtureBody` and similar) that
+  plainly existed in the source just built. Confirmed by direct experiment: deleting the cache
+  entry and rebuilding is what fixed it, not any change to the generated code — see
+  `docs/getting-started.md`'s "Things that will bite you" for the fuller writeup.
+- **The v1-e Task 6 acceptance run** (`docs/v0-acceptance.md`, "Second trap, found during Task 5
+  and confirmed here"). The identical defect recurred in a *different* run, despite the first
+  occurrence already being fully diagnosed — because the safe procedure existed only as prose in
+  a run report, never as anything a later run would actually pick up and use.
+
+**What does not fix this, measured rather than assumed:** packing alone is not the hazard.
+`dotnet pack` on its own never populates `~/.nuget/packages/` — verified by packing a throwaway
+version and confirming the cache stayed empty. It is specifically a *restore* resolving from a
+local feed that writes into the global cache, and the adoption path cannot be exercised without
+one. "Don't pack" is therefore not a fix; the fix has to make the restore itself harmless.
+
+`scripts/local-e2e-test.ps1` does exactly that, two ways, both required:
+
+1. **Redirects `NUGET_PACKAGES`** to a scratch directory for its entire run, so no restore it
+   triggers — pack, build, `dotnet run`, or `dotnet tool restore` — can reach the global cache.
+   Measured: a restore with `NUGET_PACKAGES` pointed at a scratch directory lands entirely there,
+   confirmed empty in the real cache both before and after.
+2. **Packs at a version that can never collide with a real release** —
+   `0.1.0-local.<timestamp>.pid<pid>`, applied as a `-p:Version=` MSBuild global property, which
+   overrides `Directory.Build.props`'s `<Version>0.1.0</Version>` for the whole build without
+   editing that file (its pin to `0.1.0` is deliberate — see `Directory.Build.props`'s own
+   comment — and is not this script's to change). Defence in depth: even if redirection 1 were
+   ever bypassed by a manual step outside the script, a `0.1.0-local.*` package cannot shadow a
+   published `0.1.0`.
+
+It also exercises the whole local adoption path against `samples/Catalog.Api` in the process —
+`init`, `generate`, `fixtures repair`, `generate --check`, `upgrade`, and a real `dotnet build`
+against the packed `InTest.Runtime`, which is the step that would have caught both incidents
+above (`generate --check` alone never compiles anything, it only compares text). See the
+script's own header comment for the full design, including why it is one PowerShell script
+rather than a PowerShell-plus-Bash pair, and what is deliberately out of scope
+(`dotnet test` against a live sample API — a different, separately-flaky concern from the NuGet
+hazard this script exists to close).
+
 ## Code of conduct
 
 Be decent. Assume good faith, disagree about the work rather than the person, and accept that

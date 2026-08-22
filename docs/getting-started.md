@@ -632,6 +632,15 @@ blunt but works; deleting just the `intest.runtime` folder under the packages di
 narrower) before rebuilding, or bump the local package's version so it cannot collide with what
 is cached.
 
+**The honest way to avoid this, rather than recover from it after the fact**: don't improvise
+Phase 8 by hand at all. Run `scripts/local-e2e-test.ps1` (see `CONTRIBUTING.md`'s "Testing
+against a local build") — it packs at a version that can never collide with a real release and
+redirects the whole run's restores away from your real package cache, so this cannot happen in
+the first place. It is not a substitute for Phase 8 being runnable from a bare clone once
+`InTest.Cli`/`InTest.Runtime` are actually published (still an open gap — see
+`docs/v0-acceptance.md`), but it is the current answer to "how do I try any of this before it
+ships."
+
 **This is for pre-production.** InTest adds no guard rails against being pointed at production,
 deliberately. Pointing it there is your decision and your consequences.
 
