@@ -14,9 +14,12 @@ namespace InTest.Cli;
 /// </para>
 /// <para>
 /// §5 is the contract; this type only transcribes it. Changing a value here does not change the
-/// convention, it breaks it. §5's code <c>4</c> — tool/config version mismatch — is deliberately
-/// absent: it belongs to <c>generate --check</c>, which is not shipped, so declaring it now would
-/// add a constant no code path can return. The gap is the unshipped flag, not an oversight.
+/// convention, it breaks it. §5's code <c>4</c> — tool/config version mismatch — now has a
+/// declaration and a returner: <c>generate --check</c> (v1-e) is the one command that reads
+/// <c>intestVersion</c> and can tell a stale committed run from a fresh comparison, so it is the
+/// only path this code can come from. Before v1-e it was deliberately absent here for the
+/// opposite reason it is present now — declaring a constant no code path could return would have
+/// been the same defect this file exists to prevent, just aimed at a number instead of a name.
 /// </para>
 /// </summary>
 public static class ExitCode
@@ -48,4 +51,18 @@ public static class ExitCode
     /// The command declined because proceeding would destroy or duplicate existing state.
     /// </summary>
     public const int AlreadyInitialised = 3;
+
+    /// <summary>
+    /// <c>intest.json</c>'s <c>intestVersion</c> does not match the running tool's own version —
+    /// <c>generate --check</c> only, and only when the config declares a version at all (§5's
+    /// <c>[read-what-init-wrote]</c>: absent means no claim made, not a mismatch). Kept apart
+    /// from <see cref="WorkOutstanding"/> deliberately, per §8: "so CI can distinguish it from a
+    /// genuine diff" — a version drift and a real spec change call for different remedies
+    /// (<c>intest upgrade</c> vs. reviewing what the spec changed), and folding both into <c>1</c>
+    /// would make a CI failure unable to say which one happened. Checked, and returned, before
+    /// any output comparison runs — §8 requires the version mismatch to pre-empt a diff, not
+    /// race it, so a stale-tool run never reports "the spec changed" when the real story is "the
+    /// generator changed".
+    /// </summary>
+    public const int VersionMismatch = 4;
 }

@@ -266,4 +266,60 @@ public class CliExitCodeTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    /// <summary>
+    /// v1-e Task 3. Every other <c>--check</c> assertion lives in
+    /// <c>InTest.Cli.Tests.GenerateCheckCommandTests</c>, calling <c>GenerateCommand.RunAsync</c>
+    /// directly with <c>check: true</c> — which never exercises <c>Program.cs</c>'s option
+    /// definitions at all, for the same reason every other test in this class exists: an
+    /// in-process call skips the parse layer entirely. <c>--check</c> is a plain
+    /// <c>Option&lt;bool&gt;</c> with no custom parser, so nothing here is expected to reach the
+    /// unreachable-by-design catches <c>Program.cs</c> documents for that case — this test is
+    /// only about whether the flag is wired to <c>generate</c> at all, and whether it survives
+    /// the trip through <c>ParseResult.GetValue</c> into the exit code a real invocation reports.
+    /// </summary>
+    [TestMethod]
+    public async Task CheckFlagIsWiredThroughToGenerate()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "intest-checkflag-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "orders.json"), """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Orders", "version": "1.0" },
+              "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+                "responses": { "200": { "description": "ok" } } } } }
+            }
+            """);
+
+            var init = await RunCliAsync(
+                $"init --project \"{root}\" --name Orders.ApiTests --spec orders.json");
+            init.ExitCode.ShouldBe(ExitCode.Ok, init.Output);
+
+            var firstGenerate = await RunCliAsync($"generate --project \"{root}\"");
+            firstGenerate.ExitCode.ShouldBe(ExitCode.Ok, firstGenerate.Output);
+
+            var matchingCheck = await RunCliAsync($"generate --project \"{root}\" --check");
+            matchingCheck.ExitCode.ShouldBe(ExitCode.Ok,
+                $"a fresh scaffold's committed output must match its own render:{Environment.NewLine}{matchingCheck.Output}");
+
+            // Edits the committed class file directly rather than the spec, so this test does not
+            // depend on GenerateCheckCommandTests' more detailed "which artefact changed" cases —
+            // it only needs *some* real difference, to prove --check's own exit-1 branch (not
+            // just its exit-0 branch) survives the trip through Program.cs.
+            var classFile = Path.Combine(root, "Generated", "OrdersTests.g.cs");
+            await File.AppendAllTextAsync(classFile, "// hand-edited, no longer matches a fresh render\n");
+
+            var driftedCheck = await RunCliAsync($"generate --project \"{root}\" --check");
+            driftedCheck.ExitCode.ShouldBe(ExitCode.WorkOutstanding,
+                $"a hand-edited generated file must be reported as drift through the real CLI, " +
+                $"not just through GenerateCommand.RunAsync called directly:{Environment.NewLine}{driftedCheck.Output}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

@@ -8,10 +8,20 @@ var projectOption = new Option<string>("--project")
     DefaultValueFactory = _ => Directory.GetCurrentDirectory()
 };
 
+var checkOption = new Option<bool>("--check")
+{
+    Description = "Compare committed output against a fresh render instead of writing. " +
+                   "Reads only; writes nothing under Generated/ or coverage-report.json."
+};
+
 var generate = new Command("generate", "Generate tests from the configured OpenAPI document.");
 generate.Options.Add(projectOption);
+generate.Options.Add(checkOption);
 generate.SetAction((parseResult, cancellationToken) =>
-    GenerateCommand.RunAsync(parseResult.GetValue(projectOption)!, cancellationToken));
+    GenerateCommand.RunAsync(
+        parseResult.GetValue(projectOption)!,
+        cancellationToken,
+        check: parseResult.GetValue(checkOption)));
 
 var nameOption = new Option<string>("--name") { Description = "Test project name.", Required = true };
 var specOption = new Option<string>("--spec") { Description = "Path of the OpenAPI document, relative to the test project directory.", Required = true };

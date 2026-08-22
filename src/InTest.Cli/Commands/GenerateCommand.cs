@@ -46,8 +46,82 @@ public static class GenerateCommand
         return shared.Count == 0 ? string.Empty : "/" + string.Join("/", shared);
     }
 
+    // ---- [no-write]'s seam, named before it was written -------------------------------------
+    //
+    // `--check` must compare without writing. The plan calls out two shapes that both look like
+    // "nothing was written" and are not the same guarantee:
+    //
+    //   (a) write, then diff against a backup, then restore — observable if the process dies
+    //       mid-run, and the enforcement test below (the "wrote nothing" tests in
+    //       GenerateCheckCommandTests) DOES catch this shape, because it inspects the project's
+    //       files immediately after RunAsync returns, backup or no backup.
+    //   (b) render to a temp directory and diff directory-to-directory — passes that same test
+    //       trivially, because nothing under the project ever changes. This is the shape
+    //       [no-write]'s own text warns cannot be caught mechanically: "nothing under the project
+    //       changes in that case."
+    //
+    // The seam chosen here is neither: BuildOutputs (below) renders every artefact `generate`
+    // owns into an in-memory `IReadOnlyDictionary<string, string>` — project-relative path to
+    // file content — from (document, plan, config) alone, with no filesystem access at all. Write
+    // mode and check mode then branch on that same map:
+    //
+    //   * write mode deletes Generated/ wholesale and writes every map entry to disk, exactly as
+    //     `generate` always has;
+    //   * check mode never calls File.WriteAllText, Directory.CreateDirectory, Directory.Delete,
+    //     or any other mutating filesystem call — it only *reads* whatever already exists on disk
+    //     and compares it against the map's content, plus a separate directory walk of the
+    //     existing Generated/ tree to catch a file the map does not mention at all (the orphan
+    //     case: an operation dropped from the spec leaves its old .g.cs behind, and a rendered
+    //     file that was never dirtied by this run's write path could not report on because it
+    //     never runs one).
+    //
+    // That last property — check mode contains no call that mutates the filesystem, not "check
+    // mode's mutations happen to cancel out" — is what makes shape (b) unreachable by
+    // construction rather than merely untested: there is no temp directory anywhere in this file
+    // for a stray write to land in.
+    private static IReadOnlyDictionary<string, string> BuildOutputs(
+        OpenApiDocument document, Planning.TestPlan plan, LoadedConfig config)
+    {
+        var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var renderer = new TemplateRenderer();
+        foreach (var testClass in plan.Classes)
+        {
+            outputs[$"Generated/{testClass.ClassName}.g.cs"] =
+                renderer.RenderClass(testClass, config.RootNamespace, config.TestBaseClass);
+        }
+
+        outputs["Generated/spec-schemas.json"] = SchemaBundleBuilder.Build(document, plan);
+
+        // The prefix every operation path shares, if any. TestHost uses it to detect a base URL
+        // that repeats it; otherwise every request 404s and nothing says why.
+        var pathManifest = new JsonObject { ["operationPathPrefix"] = CommonPathPrefix(plan) };
+        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
+        // The trailing "+ \"\\n\"" is the final newline after the closing brace, which indented
+        // JSON serialization never emits on its own.
+        outputs["Generated/spec-paths.json"] = pathManifest.ToJsonString(CommittedJsonOptions.Value) + "\n";
+
+        // Not under Generated/: §5's invariant table is explicit that `generate` also writes
+        // coverage-report.json at the project root, and §8/[no-write] both require --check to
+        // compare it alongside Generated/ for the same reason — it is the one generated artefact
+        // whose content tracks the spec's *shape* rather than the templates, so a spec change
+        // that only adds a coverage-report line (a new untagged operation, a synthesized
+        // operationId, a newly unevaluatable keyword) would otherwise pass --check silently.
+        outputs["coverage-report.json"] = CoverageReport.ToJson(plan);
+
+        return outputs;
+    }
+
+    /// <summary>
+    /// Relative-path segments are always written with '/' (matching the keys <see
+    /// cref="BuildOutputs"/> produces and the paths a message names), converted to the host's
+    /// separator only at the point a filesystem API needs one.
+    /// </summary>
+    private static string ToFullPath(string projectRoot, string relativePath)
+        => Path.Combine(projectRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
     public static async Task<int> RunAsync(
-        string projectRoot, CancellationToken cancellationToken, TextWriter? report = null)
+        string projectRoot, CancellationToken cancellationToken, TextWriter? report = null, bool check = false)
     {
         report ??= Console.Out;
 
@@ -71,16 +145,42 @@ public static class GenerateCommand
             // ConfigLoader for why that lives in one loader rather than at each read site.
             var config = ConfigLoader.Load(projectRoot);
 
+            // [exact-match], checked first: before the spec is even loaded, let alone before any
+            // output comparison. §8 requires the version check to fail "before comparing any
+            // output" — a version mismatch and a real diff must report as 4, not 1, or a stale
+            // tool silently narrates its own drift as "the spec changed". Cheapest place to put
+            // it is also the correct one: it needs nothing this command has not already loaded.
+            //
+            // `generate` (no --check) never reaches this branch. §5's command table gives plain
+            // `generate` no exit 4 row at all — intestVersion existing is not a promise every
+            // regeneration re-validates it, only that `--check` (and, later, `upgrade`) can.
+            if (check && config.IntestVersion is not null && config.IntestVersion != CliVersion.Current)
+            {
+                ReportVersionMismatch(report, config.IntestVersion, CliVersion.Current);
+                return ExitCode.VersionMismatch;
+            }
+
             var spec = await SpecLoader.LoadFromFileAsync(Path.Combine(projectRoot, config.SpecSource), cancellationToken)
                                        .ConfigureAwait(false);
 
             var plan = TestPlanBuilder.Build(spec.Document);
 
-            // Drift is checked — and reported — before anything is written. generate never
-            // writes under fixtures/ (that is fixtures repair's job alone, Task 3); it only
-            // compares what each operation needing a fixture would compose today against what
-            // is actually committed, so a spec change that silently invalidates a fixture is
-            // caught here instead of surfacing as a confusing runtime failure in Task 9's suite.
+            // Fixture drift is checked — and reported — before anything is written, in both
+            // modes. It is read-only already (DetectFixtureDrift never touches fixtures/), so
+            // sharing it between `generate` and `generate --check` costs check mode nothing and
+            // keeps one answer to "does this project need fixtures repair" rather than two.
+            //
+            // The decision this plan asked for: under --check, drift and an output difference
+            // are both reported as exit 1, and deliberately so — but they are NOT the same
+            // meaning wearing the same number by accident. §5's own text for exit 1 already lists
+            // them as two members of one code: "fixture drift, validation failures, `--check`
+            // differences". The number is shared by design (both are "real work outstanding that
+            // a human must do", §5's exit-1 definition verbatim) while the message is not: drift
+            // names the operation and points at `fixtures repair` (unchanged from plain
+            // `generate`, below); an output difference names the file and points at `generate`.
+            // A CI script branching only on the exit code cannot tell them apart, and does not
+            // need to — both mean "do not merge yet" — but a human reading the output always can,
+            // because the two messages never share a sentence.
             var drift = DetectFixtureDrift(spec.Document, plan, projectRoot);
             if (drift.Count > 0)
             {
@@ -92,6 +192,13 @@ public static class GenerateCommand
                 return ExitCode.WorkOutstanding;
             }
 
+            var outputs = BuildOutputs(spec.Document, plan, config);
+
+            if (check)
+            {
+                return await RunCheckAsync(projectRoot, outputs, report, cancellationToken).ConfigureAwait(false);
+            }
+
             var generated = Path.Combine(projectRoot, "Generated");
 
             if (Directory.Exists(generated))
@@ -100,30 +207,12 @@ public static class GenerateCommand
             }
             Directory.CreateDirectory(generated);
 
-            var renderer = new TemplateRenderer();
-            foreach (var testClass in plan.Classes)
+            foreach (var (relativePath, content) in outputs)
             {
-                var source = renderer.RenderClass(testClass, config.RootNamespace, config.TestBaseClass);
-                await File.WriteAllTextAsync(Path.Combine(generated, testClass.ClassName + ".g.cs"), source, cancellationToken)
-                          .ConfigureAwait(false);
+                var fullPath = ToFullPath(projectRoot, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+                await File.WriteAllTextAsync(fullPath, content, cancellationToken).ConfigureAwait(false);
             }
-
-            await File.WriteAllTextAsync(Path.Combine(generated, "spec-schemas.json"),
-                SchemaBundleBuilder.Build(spec.Document, plan), cancellationToken).ConfigureAwait(false);
-
-            // The prefix every operation path shares, if any. TestHost uses it to detect a
-            // base URL that repeats it; otherwise every request 404s and nothing says why.
-            var pathManifest = new JsonObject { ["operationPathPrefix"] = CommonPathPrefix(plan) };
-            // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for
-            // why. The trailing "+ \"\\n\"" is the final newline after the closing brace, which
-            // indented JSON serialization never emits on its own.
-            await File.WriteAllTextAsync(
-                Path.Combine(generated, "spec-paths.json"),
-                pathManifest.ToJsonString(CommittedJsonOptions.Value) + "\n",
-                cancellationToken).ConfigureAwait(false);
-
-            await File.WriteAllTextAsync(Path.Combine(projectRoot, "coverage-report.json"),
-                CoverageReport.ToJson(plan), cancellationToken).ConfigureAwait(false);
 
             Console.WriteLine($"Generated {plan.Classes.Sum(c => c.Cases.Count)} test(s) across {plan.Classes.Count} class(es).");
             if (plan.Skipped.Count > 0)
@@ -147,6 +236,118 @@ public static class GenerateCommand
             Console.Error.WriteLine(ex.Message);
             return ExitCode.ToolError;
         }
+    }
+
+    /// <summary>
+    /// §8's worked message, verbatim, with one addition: when the running tool's own version is
+    /// <see cref="CliVersion.FallbackVersion"/>, that is a build problem wearing the clothes of a
+    /// version-drift problem (see <see cref="CliVersion.FallbackVersion"/>'s own doc comment),
+    /// and §8's remedy — "run `intest upgrade`" — is actively wrong advice for it: `upgrade`
+    /// would write "0.0.0" into <c>intestVersion</c>, a value that will match this same broken
+    /// binary forever and never again produce this warning, permanently hiding the real defect
+    /// instead of fixing it. So that case gets its own sentence and does not mention `upgrade` at
+    /// all. Both cases return <see cref="ExitCode.VersionMismatch"/> — the CI-facing contract
+    /// ("this is not a real diff") is identical either way; only the human-facing remedy differs.
+    /// <para>
+    /// <paramref name="runningVersion"/> is passed in rather than read from
+    /// <see cref="CliVersion.Current"/> directly, so <c>GenerateCheckCommandTests</c> can exercise
+    /// the <see cref="CliVersion.FallbackVersion"/> branch without needing a binary actually built
+    /// without version metadata — the one CliVersion.Current value a normal test run cannot
+    /// produce, since this repository's own <c>Directory.Build.props</c> pins a real version. The
+    /// call site still always passes <see cref="CliVersion.Current"/>; only the seam moved.
+    /// </para>
+    /// </summary>
+    internal static void ReportVersionMismatch(TextWriter report, string declaredVersion, string runningVersion)
+    {
+        if (runningVersion == CliVersion.FallbackVersion)
+        {
+            report.WriteLine(
+                $"intest.json was generated by intest {declaredVersion}; the running tool reports " +
+                $"\"{CliVersion.FallbackVersion}\", which means it was built without version " +
+                "metadata rather than that it is actually version 0.0.0.");
+            report.WriteLine(
+                "This is a build problem, not a version to adopt — do not run `intest upgrade` here, " +
+                "it would only write \"0.0.0\" into intestVersion and hide the defect permanently. " +
+                "Rebuild intest so its assembly carries a real informational version, then re-run --check.");
+            return;
+        }
+
+        report.WriteLine(
+            $"intest.json was generated by intest {declaredVersion}; running tool is {runningVersion}.");
+        report.WriteLine(
+            $"Regenerate with the pinned version, or run `intest upgrade` to adopt {runningVersion} deliberately.");
+    }
+
+    /// <summary>
+    /// The compare half of [no-write]. Every call here is a read: <see cref="File.Exists"/>,
+    /// <see cref="File.ReadAllTextAsync(string, CancellationToken)"/>, and
+    /// <see cref="Directory.EnumerateFiles(string, string, SearchOption)"/> for the orphan sweep.
+    /// Nothing in this method's call graph can create, delete, or modify a file — see the
+    /// [no-write] seam comment above <see cref="BuildOutputs"/> for why that property, not merely
+    /// "and then nothing changed", is the actual guarantee.
+    /// </summary>
+    private static async Task<int> RunCheckAsync(
+        string projectRoot, IReadOnlyDictionary<string, string> outputs, TextWriter report,
+        CancellationToken cancellationToken)
+    {
+        var differences = new List<string>();
+
+        foreach (var (relativePath, expectedContent) in outputs)
+        {
+            var fullPath = ToFullPath(projectRoot, relativePath);
+            if (!File.Exists(fullPath))
+            {
+                differences.Add($"{relativePath} is missing.");
+                continue;
+            }
+
+            var actualContent = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(actualContent, expectedContent, StringComparison.Ordinal))
+            {
+                differences.Add($"{relativePath} differs from a fresh render.");
+            }
+        }
+
+        // The stale-file case: an operation (or a whole tag) dropped from the spec leaves its old
+        // .g.cs sitting under Generated/ with no corresponding key in `outputs` at all, so the
+        // loop above — which only ever walks `outputs`, never the disk — cannot see it by
+        // construction. A naive for-each-rendered-file comparison reports 0 here, which is
+        // exactly the silently-permissive gap the plan calls out. coverage-report.json needs no
+        // equivalent sweep: it is one named file at the project root, never a directory `generate`
+        // owns wholesale, so there is no sibling for a stale entry to hide among.
+        var generatedDir = Path.Combine(projectRoot, "Generated");
+        if (Directory.Exists(generatedDir))
+        {
+            var expected = outputs.Keys
+                .Where(k => k.StartsWith("Generated/", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+
+            // AllDirectories, not TopDirectoryOnly: every artefact BuildOutputs produces today is
+            // flat under Generated/, but a stray file written by a bug (or by hand) has no reason
+            // to respect that, and this sweep is the only thing standing between such a file and
+            // a --check run that reports 0 while something sits there unaccounted for.
+            foreach (var file in Directory.EnumerateFiles(generatedDir, "*", SearchOption.AllDirectories))
+            {
+                var relativePath = "Generated/" + Path.GetRelativePath(generatedDir, file).Replace('\\', '/');
+                if (!expected.Contains(relativePath))
+                {
+                    differences.Add($"{relativePath} exists on disk but a fresh render does not produce it.");
+                }
+            }
+        }
+
+        if (differences.Count > 0)
+        {
+            foreach (var difference in differences.OrderBy(d => d, StringComparer.Ordinal))
+            {
+                report.WriteLine(difference);
+            }
+            report.WriteLine("Run 'intest generate' to update.");
+            return ExitCode.WorkOutstanding;
+        }
+
+        report.WriteLine("Generated/ and coverage-report.json match a fresh render.");
+        return ExitCode.Ok;
     }
 
     /// <summary>
