@@ -8,8 +8,8 @@ namespace InTest.Cli.Configuration;
 /// <param name="IntestVersion">
 /// The <c>intest</c> version that generated this config, when the config declares one — null
 /// when <c>intestVersion</c> is absent, which is expected for a config predating it or one that
-/// was hand-edited without it. Validated for shape only: deciding what a version <i>means</i>
-/// (comparing it against the running CLI) is <c>generate --check</c>'s job, not
+/// was hand-edited without it. Validated only as a non-empty string: deciding what a version
+/// <i>means</i> (comparing it against the running CLI) is <c>generate --check</c>'s job, not
 /// <see cref="ConfigLoader"/>'s.
 /// </param>
 public sealed record LoadedConfig(

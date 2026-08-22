@@ -163,10 +163,17 @@ public static class ConfigLoader
     /// hand-edited without it — still has to load. Absence is surfaced as null, not defaulted to
     /// some version string, so a caller can tell "no claim made" from "claimed and matched".
     /// <para>
-    /// Only the shape is checked here — that it is a string of the same form
-    /// <see cref="CliVersion.Current"/> takes, three dot-separated whole numbers. What the version
-    /// <i>means</i> — whether it matches the running CLI — is <c>generate --check</c>'s job, not
-    /// this loader's.
+    /// No shape is enforced beyond "non-empty string". <see cref="CliVersion.Current"/> does NOT
+    /// always take the form of three dot-separated whole numbers: it strips only the SourceLink
+    /// <c>+&lt;sha&gt;</c> suffix, and a SemVer 2 informational version puts a prerelease label
+    /// <i>before</i> that build metadata — <c>1.0.0-rc.1+&lt;sha&gt;</c> — so the "-rc.1" survives.
+    /// A three-number shape check therefore rejects a config the tool's own binary just wrote
+    /// whenever it was built from a prerelease, which is worse than the field going unread
+    /// entirely. It also buys nothing: under <c>[exact-match]</c>, <c>generate --check</c>
+    /// compares this value against the running CLI by string equality, so any non-empty string
+    /// that isn't a match already produces §8's message naming both sides and pointing at
+    /// <c>upgrade</c> — including something malformed like "banana". Only emptiness is refused
+    /// here, since <c>""</c> is a mistake rather than a version claim, not a shape to validate.
     /// </para>
     /// </summary>
     private static string? ReadOptionalIntestVersion(JsonElement root)
@@ -176,8 +183,8 @@ public static class ConfigLoader
             return null;
         }
 
-        var rule = "It must be the intest version that generated this config, as three " +
-                   "dot-separated whole numbers — for example \"0.1.0\".";
+        var rule = "It must be the intest version that generated this config, as a non-empty " +
+                   "string — for example \"0.1.0\".";
 
         if (declared.ValueKind != JsonValueKind.String)
         {
@@ -188,24 +195,13 @@ public static class ConfigLoader
         }
 
         var text = declared.GetString()!;
-        if (!IsWellFormedVersion(text))
+        if (text.Length == 0)
         {
-            throw new ConfigLoadException(
-                $"intestVersion in {FileName} is {Quote(declared)}, which is not a version. {rule}");
+            throw new ConfigLoadException($"intestVersion in {FileName} is empty. {rule}");
         }
 
         return text;
     }
-
-    /// <summary>
-    /// Exactly three dot-separated whole numbers — the shape <see cref="CliVersion.Current"/>
-    /// always takes, since it already strips SourceLink's <c>+&lt;sha&gt;</c> suffix.
-    /// <see cref="Version.TryParse(string?, out Version?)"/> alone is too lenient: it also accepts
-    /// two components ("1.0") and four ("1.0.0.0"), neither of which this CLI ever writes.
-    /// </summary>
-    private static bool IsWellFormedVersion(string text) =>
-        text.Split('.') is [_, _, _] parts &&
-        Array.TrueForAll(parts, part => part.Length > 0 && Array.TrueForAll(part.ToCharArray(), char.IsAsciiDigit));
 
     /// <summary>
     /// Checked before every setting it governs. §5: <c>schemaVersion</c> "moves only on a major —
