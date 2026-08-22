@@ -560,7 +560,7 @@ public class ConfigLoaderTests
     }
 
     /// <summary>
-    /// The other half of the same branch, and the one <see cref="RequireString"/> already treats
+    /// The other half of the same branch, and the one <c>RequireString</c> already treats
     /// as worth naming specially: <c>declared.ValueKind == JsonValueKind.Null ? "null" :
     /// Quote(declared)</c> exists because JSON null is what a half-finished hand edit leaves
     /// behind — the same reasoning <see cref="ExplainsASpecSourceThatIsJsonNull"/> pins for
@@ -581,7 +581,7 @@ public class ConfigLoaderTests
 
     /// <summary>
     /// Empty and whitespace-only get the same refusal, for the same reason: both are "a mistake
-    /// rather than a version claim" (<see cref="ReadOptionalIntestVersion"/>'s own doc comment),
+    /// rather than a version claim" (<c>ReadOptionalIntestVersion</c>'s own doc comment),
     /// and both would otherwise render §8's mismatch message with a hole where the declared
     /// version belongs. <c>spec.source</c>, thirty lines above in <see cref="ConfigLoader"/>,
     /// draws the identical line with <c>string.IsNullOrWhiteSpace</c> — this mirrors it rather
