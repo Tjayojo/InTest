@@ -16,6 +16,7 @@ Each revision is recorded rather than folded in, because the reasoning that prod
 
 - **rev 2** — `[major-only]` was wrong (the governing text existed one section from the one cited), and the byte-stability pre-flight measured determinism when the risk was portability.
 - **rev 3** — the verdict task instructed the implementer to run something impossible; `[exact-match]` asserted an unshipped mechanism works.
+- **rev 5** — Task 5 Step 4 instructed the implementer to plant this plan's own `[paired]` defect, and Tasks 2-4 accumulated seven documentation carry-forwards that had no landing site. Both corrected below. Every item was found by an implementer or reviewer *running* something, never by re-reading the plan.
 - **rev 4** — rev 3's corrections landed in the **decision** sections and were not carried into the **tasks**. An implementer works from the tasks. One decision and its step specified different tests; one decision had no landing site and was contradicted by a later task; one deferred question was deferred to a task that never answered it.
 
 ---
@@ -259,9 +260,33 @@ Five places assert these do not exist. Stale claims are this project's recurring
 - [ ] **Step 1:** `getting-started` — the banner's not-built list **and** its opening sentence, which enumerates gaps inline and has gone stale independently before. Phase 8's inline "not built yet" hedge beside `upgrade`.
 - [ ] **Step 2:** `README.md` — both "Not yet built" and "Designed, not yet built".
 - [ ] **Step 3:** `CLAUDE.md` — "`survey`, `generate --check`, `upgrade` … do **not** exist yet".
-- [ ] **Step 4:** `ExitCode.cs`'s doc, and `ConfigLoader.RequireSupportedSchemaVersion`'s message — which "deliberately does not mention `intest upgrade`, which does not exist yet". It now does; naming it is the remedy the message lacked.
+- [ ] **Step 4:** `ExitCode.cs`'s doc.
+
+> **Do NOT name `intest upgrade` in `ConfigLoader.RequireSupportedSchemaVersion`'s message.** Rev 4 instructed exactly that, on the reasoning that the message "deliberately does not mention `intest upgrade`, which does not exist yet — it now does".
+>
+> It does exist, and it is still not the remedy. A reviewer built the case rather than reasoning about it: set `SupportedSchemaVersion = 2`, republished, and ran that "2.0 CLI" `upgrade` against a normal `schemaVersion: 1` project — the exact input a major migration exists to accept. **Exit 2, config untouched** — `upgrade` returns that same refusal, because it calls `GenerateCommand.RunAsync`, which calls `ConfigLoader.Load`, which refuses first.
+>
+> So naming it would produce a documented remedy that cannot be taken — the `[paired]` shape, planted by the plan written to prevent it, and the seventh instance in this repository. The existing comment declines to name it for a reason that is now wrong; **replace the reason, keep the refusal.** The honest note is that `upgrade` cannot migrate a schema until `ConfigLoader` changes, so shipping a v2 means changing the loader first, not adding a branch to `UpgradeCommand`.
 - [ ] **Step 5:** §5 — record `[exact-match]`, the check-order, and the absent-version rule from `[read-what-init-wrote]`.
-- [ ] **Step 6:** §5's `upgrade` row (**both** the writes and never-writes columns — they currently contradict each other on this), and §5's `init` row, which enumerates scaffolded files and has gone stale three times already. Commit.
+- [ ] **Step 6:** §5's `upgrade` row — **all three columns**, not two. The writes column omits `.gitattributes`; the never-writes column says "team-owned files", which `.gitattributes` now contradicts; and the **Exit column reads `0 ok · 1 regeneration failed` while exit 2 is reachable five ways** (a build with no version metadata, a missing tools manifest, a manifest with no `intest.cli` pin, a pin with no `version` field, an unreadable `intest.json`). Exit codes are public API under `CONTRIBUTING.md`'s semver rule, so this column is a contract, not prose.
+
+- [ ] **Step 7: The scaffold enumerations — four sites, one addition**
+
+`.gitattributes` is now scaffolded by `init` and by `upgrade`, and four places enumerate what `init` writes without it: §5's `init` row (which the spec itself notes has gone stale three times), the project-tree listing later in §5, and two sites in `docs/getting-started.md`. Find them by enumerating `init`'s actual write calls and comparing, not by trusting this list.
+
+- [ ] **Step 8: §5's `generate --check` row is incomplete**
+
+It reads `1  Generated/ or coverage-report.json differs`. Fixture drift under `--check` also exits 1, deliberately — §5's own exit-1 text already lists drift and `--check` differences as two members of one code. The decision is recorded in `GenerateCommand.cs`, so only a reader of the source hits it; a reader of §5, which is the public contract, does not.
+
+- [ ] **Step 9: §5's `intest.json` example does not load**
+
+The example is opened as a ```jsonc fence and carries inline `//` comments on five lines. `ConfigLoader.Parse` is a bare `JsonDocument.Parse` — `CommentHandling.Disallow`, `AllowTrailingCommas: false` — so **copying that block verbatim makes every InTest command exit 2**, confirmed by running it. This is the file that made Task 4's plan text claim `intest.json` is "documented as `jsonc` with inline comments". Either re-fence as ```json and move the annotations to a table, or state that the comments are annotation and not part of the file.
+
+- [ ] **Step 10: Two test assertions now forbid the truth**
+
+`ConfigLoaderTests.cs:409` and `:421` assert `reason.ShouldNotContain("upgrade")`, reasoning that the command does not exist. It does. Note that Step 4 explains why the *message* should still not name it — so decide whether these assertions are now right for a new reason, or should go. Do not simply delete them because they look stale; the refusal they encode is currently correct.
+
+Commit.
 
 ---
 
