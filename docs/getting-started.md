@@ -134,7 +134,7 @@ intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.jso
 | `appsettings.json`, `appsettings.staging.json` | yours | Profiles, base URLs, readiness |
 | `Orders.ApiTests.runsettings` | yours | Named after the project (`<Name>.runsettings`), not the API — ships with `profile` **commented out**, see Phase 3 |
 | `.config/dotnet-tools.json` | yours | Pins the CLI version so CI and your machine agree |
-| `.gitattributes` | yours | Pins `Generated/`, `coverage-report.json` and `fixtures/**/*.json` to LF, so a clone with `core.autocrlf=true` cannot check them out as CRLF and fail `generate --check` on every line |
+| `.gitattributes` | yours | Pins `Generated/`, `coverage-report.json` and `fixtures/**/*.json` to CRLF, so a clone whose checkout would otherwise default to LF (Linux/macOS, or Windows with `core.autocrlf` set to `false`/`input`) cannot check them out as LF and fail `generate --check` on every line |
 
 Everything above is yours to edit and is never regenerated.
 
