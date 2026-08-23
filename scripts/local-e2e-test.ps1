@@ -100,7 +100,7 @@
 # the same reasoning has to appear twice, one copy is authoritative and the other points at it --
 # never two copies that must agree by discipline. A bash port of this script would be exactly
 # that: every step above (the version stamp format, the NUGET_PACKAGES redirection, the exact
-# sequence of expected exit codes, the csproj patch, the contrived version-mismatch test) would
+# sequence of expected exit codes, the csproj-reference verification, the contrived version-mismatch test) would
 # exist twice, and the two would drift the first time either one changed without the other.
 #
 # PowerShell 7 (`pwsh`) is itself cross-platform -- it ships and runs natively on Linux and macOS,
@@ -325,22 +325,22 @@ try {
         '--', 'init', '--name', $ProjectName, '--spec', $Spec
     )
 
-    # ---- Patch the one place `init` hardcodes "InTest.Runtime" ... Version="0.1.0" (verified at
-    # src/InTest.Cli/Commands/InitCommand.cs -- the scaffolded .csproj's PackageReference version
-    # is a literal, not derived from CliVersion.Current the way intestVersion and the tool pin
-    # are). Without this, the scaffold would ask for InTest.Runtime 0.1.0, which was never packed
-    # under that number here -- restore would correctly fail rather than silently resolving the
-    # wrong thing, but the point of this script is to prove the *real* local build compiles, so
-    # point it at what was actually packed.
+    # ---- Verify, do not patch: docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's
+    # [scaffold-reads-itself] (Task 1) replaced InitCommand.cs's hardcoded
+    # Include="InTest.Runtime" Version="0.1.0" with an interpolation of CliVersion.Current, so
+    # `intest init` -- run above via `dotnet run ... -p:Version=$LocalVersion -- init ...` --
+    # already scaffolds InTest.Runtime at $LocalVersion on its own; this script no longer has
+    # anything to patch. What used to be a patch step is now a verification of that fact: this is
+    # the "confirm the generated .csproj references that same version" proof this script exists
+    # to run end to end, and its absence would otherwise surface only indirectly, as a NU1102
+    # restore failure several steps later at `dotnet build`, pointing at the wrong cause.
     $csprojPath = Join-Path $ScaffoldDir "$ProjectName.csproj"
     $csprojText = Get-Content -Raw -LiteralPath $csprojPath
-    $needle = 'Include="InTest.Runtime" Version="0.1.0"'
+    $needle = "Include=`"InTest.Runtime`" Version=`"$LocalVersion`""
     $matchCount = ([regex]::Matches($csprojText, [regex]::Escape($needle))).Count
     if ($matchCount -ne 1) {
-        throw "Expected exactly one '$needle' in $csprojPath, found $matchCount -- InitCommand's scaffolded csproj shape has changed; update this script's patch logic."
+        throw "Expected exactly one '$needle' in $csprojPath, found $matchCount -- either InitCommand's scaffolded csproj shape changed, or [scaffold-reads-itself] regressed and the scaffold is no longer following CliVersion.Current."
     }
-    $csprojText = $csprojText.Replace($needle, "Include=`"InTest.Runtime`" Version=`"$LocalVersion`"")
-    Set-Content -LiteralPath $csprojPath -Value $csprojText -NoNewline
 
     # ---- nuget.config for the scaffold only: <clear/> so nothing ambient (a stray user-level
     # feed, credentials, anything else configured on this machine) can leak in and make this run

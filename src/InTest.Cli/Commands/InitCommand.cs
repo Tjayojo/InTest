@@ -213,6 +213,40 @@ public static class InitCommand
         }
         """);
 
+        // [scaffold-reads-itself] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md,
+        // Task 1): InTest.Runtime's PackageReference below used to hardcode "0.1.0". A CLI built
+        // as a prerelease (say 0.1.0-preview.3) would then scaffold a project asking for
+        // InTest.Runtime 0.1.0 exactly — a version that will not exist on nuget.org until the
+        // first stable release, so the scaffolded restore could never succeed. CliVersion.Current
+        // is already in hand a couple of hundred lines above (intestVersion, in the intest.json
+        // write); emitting it here too makes the scaffold self-consistent by construction —
+        // whatever version this CLI was built as, that is what it references, with no literal to
+        // drift.
+        //
+        // Neither of this repository's two escaping rules applies to the interpolation below, and
+        // that is a deliberate reading rather than an oversight:
+        //   - Naming.CSharpLiteral governs values pasted inside a C# string literal in *generated*
+        //     source — mstest-class.scriban's output, read by a C# compiler later. This string is
+        //     a C# interpolated raw string literal in InitCommand.cs itself; raw string literals
+        //     have no escape sequences to begin with, and an interpolation hole is filled by
+        //     .ToString() verbatim, so there is no C#-literal-escaping step here at all, let alone
+        //     one CSharpLiteral would need to perform.
+        //   - Naming.MSBuildPropertyValue governs adopter-supplied text landing in MSBuild
+        //     *element* text content — see <InTestSpecSource>{specSourceEscaped}</InTestSpecSource>
+        //     above. Its XML layer escapes '&' and '<' but deliberately never the double-quote
+        //     that delimits an *attribute* value (see its own remarks), because it was written for
+        //     the element-text position. Version="..." below is an attribute value, a different
+        //     grammatical slot; reusing an escaper shaped for the wrong slot would silently mis-
+        //     escape a literal '"' if one ever reached it (it would not be turned into &quot;, so
+        //     it would prematurely close the attribute), rather than actually being safe here.
+        // Applying either would also be solving a problem CliVersion.Current cannot pose: unlike
+        // --spec, this is not adopter input. It is CliVersion.Read()'s output — an
+        // AssemblyInformationalVersionAttribute value stripped at the first '+' — constrained by
+        // construction to SemVer 2.0's grammar (ASCII letters, digits, '.', '-'; semver.org §9),
+        // which contains none of '&', '<', '"', '%', '$', '@', ';', '?', '*': every character
+        // either escaping rule exists to guard against. A build that somehow produced an
+        // informational version outside that grammar would be a build-system defect to fix at the
+        // source, not a value either escaper could safely paper over here.
         Write(projectRoot, $"{projectName}.csproj", $"""
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
@@ -229,7 +263,7 @@ public static class InitCommand
             <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
             <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
             <PackageReference Include="Shouldly" Version="4.3.0" />
-            <PackageReference Include="InTest.Runtime" Version="0.1.0" />
+            <PackageReference Include="InTest.Runtime" Version="{CliVersion.Current}" />
           </ItemGroup>
           <ItemGroup>
             <Content Include="Generated/spec-schemas.json" Link="spec-schemas.json" CopyToOutputDirectory="PreserveNewest" />

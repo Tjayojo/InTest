@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using InTest.Cli;
+using InTest.Cli.Commands;
 using Shouldly;
 
 namespace InTest.Architecture.Tests;
@@ -41,19 +43,36 @@ namespace InTest.Architecture.Tests;
 /// PackageReference each scaffold site actually declares and checks it against the center.
 /// </para>
 /// <para>
-/// <b>What is deliberately excluded, and why:</b> InTest.Runtime's version in InitCommand.cs's
-/// scaffold (currently 0.1.0) is not a third-party dependency version — it is InTest's own packed
-/// <c>&lt;Version&gt;</c>, pinned in Directory.Build.props precisely so a scaffolded restore can
-/// resolve <c>InTest.Runtime</c> at all (Directory.Build.props' own comment: "the scaffolded
-/// project pins InTest.Runtime 0.1.0, so the packages must pack as 0.1.0"). It has no
-/// PackageVersion entry in Directory.Packages.props to compare against — confirmed by reading the
-/// file, not assumed — so comparing it there would be comparing against nothing. This guard
-/// instead compares InTest.Runtime's scaffolded version against Directory.Build.props' own
-/// <c>&lt;Version&gt;</c>, which is its actual source of truth, so InTest.Runtime stays coupled
-/// too rather than silently unchecked. Getting this wrong (routing InTest.Runtime through the
-/// Directory.Packages.props comparison instead) would make the guard fail permanently against a
-/// file that was never wrong — worse than no guard, because it teaches the next person to ignore
-/// this test's red.
+/// <b>What is deliberately excluded, and why — updated by
+/// docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's Task 1
+/// (<c>[scaffold-reads-itself]</c>):</b> InTest.Runtime's version in InitCommand.cs's scaffold is
+/// not a third-party dependency version — it is InTest's own packed version — so it has no
+/// PackageVersion entry in Directory.Packages.props to compare against, confirmed by reading the
+/// file, not assumed. Before Task 1, InitCommand.cs hardcoded a literal ("0.1.0") there, and this
+/// guard compared that literal against Directory.Build.props' own <c>&lt;Version&gt;</c> — its
+/// source of truth at the time. Task 1 removed the literal: a CLI built as a prerelease (say
+/// 0.1.0-preview.3) now scaffolds <c>Version="{CliVersion.Current}"</c>, an interpolation rather
+/// than a fixed number, so the scaffolded restore can never ask for a version that has not shipped
+/// yet. There is nothing left in Directory.Build.props for that position to be compared against —
+/// comparing it there would (again) be comparing against nothing, and worse, against a value that
+/// no longer has anything to do with what gets scaffolded.
+/// <para>
+/// This class now checks InTest.Runtime two different ways, matching how CLAUDE.md's own
+/// "one canonical explanation" section treats mechanism vs. proof: a fast, in-process, source-text
+/// check inside <see cref="AssertScaffoldMatchesCentral"/> below, that InitCommand.cs's scaffold
+/// interpolates <see cref="RuntimeVersionExpression"/> at this exact position rather than any
+/// literal (catches a regression back to a hardcoded version, including a plausible-looking
+/// "0.1.0", without needing to run anything); and a behavioral check,
+/// <see cref="AssertInitCommandScaffoldsTheRunningRuntimeVersion"/>, that actually runs
+/// <c>InitCommand.Run</c> and reads the InTest.Runtime version InTest genuinely wrote back,
+/// comparing it against <see cref="CliVersion.Current"/> — the assertion Task 1 Step 2 asks for
+/// verbatim ("the scaffold emits the running version"), and the only one of the two that was
+/// measured to discriminate a hardcoded literal from the fix (see that method's own doc comment
+/// for the experiment). <c>ReadRuntimeSelfVersion</c> is still called by both test methods below,
+/// unchanged — Task 2 of the same plan removes Directory.Build.props' <c>&lt;Version&gt;</c>
+/// element entirely and expects that call, not this class's InTest.Runtime comparisons, to be
+/// what fails first; that is deliberate continuity across the two tasks, not an oversight here.
+/// </para>
 /// </para>
 /// </summary>
 [TestClass]
@@ -76,6 +95,18 @@ public class PackageVersionCouplingTests
     /// silently skipped — see <see cref="AssertScaffoldMatchesCentral"/>.
     /// </summary>
     private const string RuntimeSelfVersionedPackage = "InTest.Runtime";
+
+    /// <summary>
+    /// The exact text InitCommand.cs's scaffold is expected to carry as InTest.Runtime's
+    /// <c>Version</c> attribute value, verbatim, since <c>[scaffold-reads-itself]</c>
+    /// (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md, Task 1) replaced the
+    /// hardcoded "0.1.0" literal with an interpolation of <see cref="CliVersion.Current"/>.
+    /// InitCommand.cs's <c>.csproj</c> scaffold is a single-<c>$</c> C# interpolated raw string
+    /// literal (<c>$"""..."""</c>, not <c>$$"""..."""</c>), so its interpolation holes use single
+    /// braces — matching this constant, not the double-brace holes InitCommand.cs's other two
+    /// scaffolded templates (<c>intest.json</c>, <c>.config/dotnet-tools.json</c>) use.
+    /// </summary>
+    private const string RuntimeVersionExpression = "{CliVersion.Current}";
 
     private static string RepoRoot()
     {
@@ -114,6 +145,16 @@ public class PackageVersionCouplingTests
         return result;
     }
 
+    /// <summary>
+    /// Reads Directory.Build.props' own <c>&lt;Version&gt;</c> element. Kept, and still called by
+    /// both test methods below, even though neither's InTest.Runtime comparison consumes the
+    /// returned value any more after <c>[scaffold-reads-itself]</c> (see this class's own doc
+    /// comment) — docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's Task 2 removes
+    /// this element entirely and names this exact assertion, unchanged, as the acceptance signal
+    /// for that removal: both test methods are expected to fail here, for this one reason, the
+    /// moment <c>&lt;Version&gt;</c> is gone. Deleting this call now would silently move that
+    /// signal somewhere else.
+    /// </summary>
     private static string ReadRuntimeSelfVersion()
     {
         var path = Path.Combine(RepoRoot(), "Directory.Build.props");
@@ -132,14 +173,19 @@ public class PackageVersionCouplingTests
     /// <paramref name="relativePath"/> (relative to the repo root) and checks each one against
     /// <paramref name="central"/> — Directory.Packages.props for everything except
     /// <see cref="RuntimeSelfVersionedPackage"/>, which is checked against
-    /// <paramref name="runtimeSelfVersion"/> (Directory.Build.props' own Version) instead. See
-    /// this class's doc comment for why that one package takes a different path.
+    /// <see cref="RuntimeVersionExpression"/> instead (a fixed, expected source-text shape, not a
+    /// value read from <paramref name="runtimeSelfVersion"/> — see this class's own doc comment).
+    /// <paramref name="runtimeSelfVersion"/> itself is unused inside this method; it stays a
+    /// parameter only so both call sites keep computing it via <see cref="ReadRuntimeSelfVersion"/>
+    /// — see that method's doc comment for why that call must survive on its own.
     /// </summary>
     private static void AssertScaffoldMatchesCentral(
         string relativePath,
         Dictionary<string, string> central,
         string runtimeSelfVersion)
     {
+        _ = runtimeSelfVersion; // see the parameter's own doc comment above
+
         var fileLabel = Path.GetFileName(relativePath);
         var path = Path.Combine(RepoRoot(), relativePath);
         var text = File.ReadAllText(path);
@@ -163,12 +209,24 @@ public class PackageVersionCouplingTests
 
             if (package == RuntimeSelfVersionedPackage)
             {
-                if (scaffoldVersion != runtimeSelfVersion)
+                // [scaffold-reads-itself]: the fast, in-process half of the InTest.Runtime guard.
+                // There is no version literal here any more to compare against a central value —
+                // what this checks instead is that the scaffold's source text still interpolates
+                // CliVersion.Current at this exact position (the Version attribute
+                // PackageReferencePattern just matched) rather than any literal, including a
+                // plausible-looking "0.1.0". A source-text match cannot prove the scaffold
+                // actually *emits* the running version, only that it is still wired to try —
+                // AssertInitCommandScaffoldsTheRunningRuntimeVersion below is the behavioral half
+                // that proves the rest, and the one Task 1 Step 2 was measured against.
+                if (scaffoldVersion != RuntimeVersionExpression)
                 {
                     offenders.Add(
-                        $"{package}: {fileLabel} pins {scaffoldVersion}, but Directory.Build.props' " +
-                        $"<Version> — InTest's own packed version, which is what the scaffolded " +
-                        $"restore actually needs to resolve — is {runtimeSelfVersion}.");
+                        $"{package}: {fileLabel} pins \"{scaffoldVersion}\" for its Version " +
+                        $"attribute, but this must be exactly {RuntimeVersionExpression} — " +
+                        "InitCommand.cs's scaffold is required to reference CliVersion.Current " +
+                        "there rather than any literal version, or a CLI built as a prerelease " +
+                        "scaffolds a restore that can never succeed (see [scaffold-reads-itself], " +
+                        "docs/superpowers/plans/2026-08-23-trunk-based-versioning.md).");
                 }
                 continue;
             }
@@ -206,6 +264,76 @@ public class PackageVersionCouplingTests
         var runtimeSelfVersion = ReadRuntimeSelfVersion();
         AssertScaffoldMatchesCentral(
             Path.Combine("src", "InTest.Cli", "Commands", "InitCommand.cs"), central, runtimeSelfVersion);
+    }
+
+    /// <summary>
+    /// The behavioral half of the InTest.Runtime guard, and the one Task 1 Step 2 of
+    /// docs/superpowers/plans/2026-08-23-trunk-based-versioning.md actually asks for: "an
+    /// assertion that the scaffold emits the running version." Runs the real <c>init</c> scaffold
+    /// into a throwaway directory — the same <c>InitCommand.Run</c> call
+    /// <c>InTest.Cli.Tests.InitCommandTests</c> exercises — and reads back the InTest.Runtime
+    /// <c>PackageReference</c>'s <c>Version</c> attribute from the <c>.csproj</c> <c>init</c>
+    /// actually wrote, rather than InitCommand.cs's source text (which
+    /// <see cref="InitCommandScaffoldVersionsMatchTheCenter"/> above already checks, mechanically,
+    /// at the source level via <see cref="RuntimeVersionExpression"/>).
+    /// <para>
+    /// <b>Proven to discriminate, not merely written and trusted.</b> Under an ordinary build,
+    /// this assembly's own <see cref="CliVersion.Current"/> and the scaffold's emitted value are
+    /// both "0.1.0" — so this assertion alone would pass just as happily whether InitCommand.cs
+    /// called <see cref="CliVersion.Current"/> or still hardcoded "0.1.0", which is exactly the
+    /// defect this guard exists to catch. The two are told apart only by building at a version
+    /// other than 0.1.0. Measured directly: building InTest.Cli and this project with
+    /// <c>-p:Version=9.9.9-test.1</c> and running only this test
+    /// (<c>--filter FullyQualifiedName~AssertInitCommandScaffoldsTheRunningRuntimeVersion</c>)
+    /// passes, with the scaffolded .csproj's InTest.Runtime reference reading "9.9.9-test.1" —
+    /// confirming the assertion moved with the build rather than being trivially true at the
+    /// default version. Reverting InitCommand.cs's interpolation to a hardcoded
+    /// <c>Version="0.1.0"</c> literal and rebuilding at that same overridden version then fails
+    /// this exact test, and only this test, with a message naming "0.1.0" against the expected
+    /// "9.9.9-test.1" — proof that this specific assertion, not some other test in the suite,
+    /// is what catches the regression (CLAUDE.md's own recorded lesson: a whole-suite failure
+    /// does not by itself say which assertion caught it — filtering to this one test name is what
+    /// makes the attribution unambiguous). Both halves of that experiment are recorded in this
+    /// task's own report rather than kept as a second, permanent build configuration in this
+    /// suite — the same practice this repository already follows for
+    /// <c>JsonWritingOptionsGuardTests</c> and <c>TemplateEscapingGuardTests</c>: prove a guard
+    /// once by mutation, then trust it rather than running the mutant forever.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void AssertInitCommandScaffoldsTheRunningRuntimeVersion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "intest-pkgcoupling-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(root);
+        try
+        {
+            InitCommand.Run(root, "Scaffold.ApiTests", "spec.json").ShouldBe(0);
+
+            var csprojPath = Path.Combine(root, "Scaffold.ApiTests.csproj");
+            var csprojText = File.ReadAllText(csprojPath);
+
+            Match? runtimeMatch = null;
+            foreach (Match candidate in PackageReferencePattern.Matches(csprojText))
+            {
+                if (candidate.Groups[1].Value == RuntimeSelfVersionedPackage)
+                {
+                    runtimeMatch = candidate;
+                    break;
+                }
+            }
+
+            runtimeMatch.ShouldNotBeNull(
+                "the scaffolded .csproj has no InTest.Runtime PackageReference at all — " +
+                "InitCommand.cs's scaffold shape has changed; update this test alongside it.");
+
+            runtimeMatch!.Groups[2].Value.ShouldBe(CliVersion.Current,
+                "the scaffolded InTest.Runtime PackageReference must carry the running intest's " +
+                "own version — see [scaffold-reads-itself].");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [TestMethod]

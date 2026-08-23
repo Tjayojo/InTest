@@ -1,7 +1,14 @@
 <Project>
   <PropertyGroup>
-    <!-- The scaffolded project pins InTest.Runtime 0.1.0, so the packages must pack as 0.1.0;
-         the SDK default of 1.0.0 would make the scaffolded restore fail. -->
+    <!-- Pinned rather than left to the SDK default of 1.0.0, which would ship InTest.Cli and
+         InTest.Runtime a full major ahead of the README's own "v0, working but early" framing.
+         The scaffold does NOT drive this value the way it used to: docs/superpowers/plans/
+         2026-08-23-trunk-based-versioning.md's [scaffold-reads-itself] (Task 1) replaced
+         InitCommand.cs's hardcoded "InTest.Runtime 0.1.0" PackageReference with an interpolation
+         of CliVersion.Current, so the scaffold now follows whatever this element says rather than
+         the other way around — the causality this comment used to describe is inverted from here
+         on. See PackageVersionCouplingTests.RuntimeVersionExpression for the guard that now
+         checks the scaffold against CliVersion.Current directly, not against this element. -->
     <Version>0.1.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
