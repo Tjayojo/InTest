@@ -12,6 +12,12 @@
 
 ---
 
+## Revision note
+
+Task 2's implementer caught a gap the plan missed on first write: `tests/InTest.Cli.Tests/TemplateRendererTests.cs` asserts against `TemplateRenderer.Render`'s output using seven hard-coded-`\n` checks across seven test methods, none of which were in this plan's original file list for any task. Flipping `Normalize` to CRLF makes five of them fail outright (an exact-match `ShouldContain` with an embedded `\n` no longer occurs) and silently defangs two more (`ShouldNotContain("\n\n\n")` and `ShouldNotContain("\n\n    }")` become vacuously true against CRLF content — they stop catching the regression they exist to catch, without failing). Folded into Task 2 Step 6 below rather than a separate task, since it is a direct, same-file-family consequence of Step 1's change and leaving it for a later task would mean Task 2's own commit leaves the Cli suite red.
+
+---
+
 ## What does *not* change
 
 - `UpgradeCommand.SetIntestVersion` / `DetectFileNewline` — already convention-agnostic: it reads whichever newline the adopter's own `intest.json` already uses and matches it. `intest.json` and `.config/dotnet-tools.json` stay outside `[crlf-everywhere]`'s scope entirely; they are adopter-owned and never pinned by `.gitattributes` (per `docs/superpowers/plans/2026-08-21-intest-v1e-check-and-upgrade.md`'s own Task 2 Step 3 reasoning — only InTest-owned paths are pinned). **Do not touch `UpgradeCommand.cs`, `UpgradeCommandTests.cs`'s `InsertsIntestVersionWhenAbsent`/`InsertsIntestVersionUsingTheConfigsOwnCrlfLineEnding`/`NeverBumpsTheManifestFormatVersionOrAnotherToolsPin` tests, or `SetIntestVersionInserts*`/`SetIntestVersionReplaces*`/`DoesNotCorruptANestedKeyNamedIntestVersion` in this plan** — they already pass unchanged in either direction and touching them is scope creep.
@@ -136,10 +142,137 @@ dotnet test tests/InTest.Golden.Tests
 
 Expected: full `InTest.Golden.Tests` suite passes (35 tests) **without** `INTEST_UPDATE_GOLDEN` set — this is the real verification; Step 3 alone only proves the write happened, not that a fresh render matches it.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Do not commit yet — Step 6 below touches a test file in the same logical change**
+
+- [ ] **Step 6: Fix `TemplateRendererTests.cs`'s hard-coded LF assertions**
+
+In `tests/InTest.Cli.Tests/TemplateRendererTests.cs`, every one of the following lines embeds a bare `\n` that either exact-matches against `Render(...)`'s output or checks for its *absence* — both need the `\n` changed to `\r\n` so the assertion means the same thing against CRLF output that it meant against LF output. There are 20 lines across 7 test methods; find them with:
 
 ```bash
-git add src/InTest.Cli/Rendering/TemplateRenderer.cs tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt
+grep -n '\\n\\n\|{\\n\|)\]\\n' tests/InTest.Cli.Tests/TemplateRendererTests.cs
+```
+
+Apply these exact replacements (shown as old → new; every other character on each line — comments, `customMessage` text, method names — stays unchanged):
+
+In `EmitsNoStrayBlankLines` (~line 180-185):
+```csharp
+        rendered.ShouldNotContain("\n\n\n");        // no double blank line anywhere
+        rendered.ShouldNotContain("\n\n    }");     // no blank line before a closing brace
+
+        rendered.ShouldContain(httpMethod == "POST"
+            ? "then 200\")]\n    [DoNotParallelize]\n    public async Task"
+            : "then 200\")]\n    public async Task");
+```
+becomes:
+```csharp
+        rendered.ShouldNotContain("\r\n\r\n\r\n");        // no double blank line anywhere
+        rendered.ShouldNotContain("\r\n\r\n    }");       // no blank line before a closing brace
+
+        rendered.ShouldContain(httpMethod == "POST"
+            ? "then 200\")]\r\n    [DoNotParallelize]\r\n    public async Task"
+            : "then 200\")]\r\n    public async Task");
+```
+
+In `EmitsNoStrayBlankLinesForADeclaredErrorCase` (~line 325-328):
+```csharp
+        rendered.ShouldNotContain("\n\n\n");
+        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldContain("    {\n        using var request",
+            customMessage: "no RequireFixture line and no leftover blank line ahead of it");
+```
+becomes:
+```csharp
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
+        rendered.ShouldContain("    {\r\n        using var request",
+            customMessage: "no RequireFixture line and no leftover blank line ahead of it");
+```
+
+In `EmitsNoStrayBlankLinesForAWrongScopeAuthCase` (~line 433-437):
+```csharp
+        rendered.ShouldNotContain("\n\n\n");
+        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldContain(
+            "    {\n        RequireMultipleIdentities();\n        using var _ = UseIdentity(IdentitySlot.Secondary);\n\n        using var request",
+            customMessage: "guard and override must sit on adjacent lines, with exactly one blank line before the request");
+```
+becomes:
+```csharp
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
+        rendered.ShouldContain(
+            "    {\r\n        RequireMultipleIdentities();\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        using var request",
+            customMessage: "guard and override must sit on adjacent lines, with exactly one blank line before the request");
+```
+
+In `EmitsNoStrayBlankLinesForANoTokenAuthCase` (~line 445-449):
+```csharp
+        rendered.ShouldNotContain("\n\n\n");
+        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldContain(
+            "    {\n        using var _ = UseIdentity(IdentitySlot.None);\n\n        using var request",
+            customMessage: "no guard line for a 401 case, and no leftover blank line ahead of the override");
+```
+becomes:
+```csharp
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
+        rendered.ShouldContain(
+            "    {\r\n        using var _ = UseIdentity(IdentitySlot.None);\r\n\r\n        using var request",
+            customMessage: "no guard line for a 401 case, and no leftover blank line ahead of the override");
+```
+
+In `EmitsNoStrayBlankLinesForAWrongScopeCaseWithRequiredScopes` (~line 543-547):
+```csharp
+        rendered.ShouldNotContain("\n\n\n");
+        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldContain(
+            "    {\n        RequireMultipleIdentities();\n        RequireSecondaryIdentityLacks(\"orders.write\");\n        using var _ = UseIdentity(IdentitySlot.Secondary);\n\n        using var request",
+            customMessage: "both guards and the override sit on adjacent lines, with exactly one blank line before the request");
+```
+becomes:
+```csharp
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
+        rendered.ShouldContain(
+            "    {\r\n        RequireMultipleIdentities();\r\n        RequireSecondaryIdentityLacks(\"orders.write\");\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        using var request",
+            customMessage: "both guards and the override sit on adjacent lines, with exactly one blank line before the request");
+```
+
+In `EmitsNoStrayBlankLinesWithABodyOrQueryParameters` (~line 558-563) — this one does not fail today (its checks are all `ShouldNotContain`, which is vacuously true against CRLF content and so silently stops testing anything — fix it anyway, since a test that can never fail is a test-coverage regression this codebase's own conventions do not tolerate):
+```csharp
+        var withBody = Render(PlanWithBody());
+        withBody.ShouldNotContain("\n\n\n");
+        withBody.ShouldNotContain("\n\n    }");
+
+        var withQuery = Render(PlanWithQueryParameters("page", "sort"));
+        withQuery.ShouldNotContain("\n\n\n");
+        withQuery.ShouldNotContain("\n\n    }");
+```
+becomes:
+```csharp
+        var withBody = Render(PlanWithBody());
+        withBody.ShouldNotContain("\r\n\r\n\r\n");
+        withBody.ShouldNotContain("\r\n\r\n    }");
+
+        var withQuery = Render(PlanWithQueryParameters("page", "sort"));
+        withQuery.ShouldNotContain("\r\n\r\n\r\n");
+        withQuery.ShouldNotContain("\r\n\r\n    }");
+```
+
+After making all of the above, re-run:
+
+```bash
+dotnet build InTest.sln
+dotnet test tests/InTest.Cli.Tests
+```
+
+Expected: 410 passing, 0 failing (no test added or removed — every one of the 7 methods above already existed and already ran; only their assertion literals changed).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/InTest.Cli/Rendering/TemplateRenderer.cs tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt tests/InTest.Cli.Tests/TemplateRendererTests.cs
 git commit -m "feat: generate .g.cs classes with CRLF line endings"
 ```
 
