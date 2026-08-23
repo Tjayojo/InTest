@@ -267,7 +267,7 @@ dotnet build InTest.sln
 dotnet test tests/InTest.Cli.Tests
 ```
 
-Expected: 410 passing, 0 failing (no test added or removed — every one of the 7 methods above already existed and already ran; only their assertion literals changed).
+**Expected: 409 passing, 1 failing — not 410/0.** The one failure is `InitCommandTests.GitattributesSurvivesAnAutocrlfTrueCheckout`, and it is *expected* at this checkpoint: that test scaffolds a project via `InitCommand` and round-trips it through a simulated `core.autocrlf=true` checkout, but `InitCommand.GitattributesContent` still pins `Generated/** text eol=lf` (Task 4 has not run yet), while `Normalize` (this task) now emits CRLF — the scaffolded pin and the renderer's actual output disagree until Task 4 lands. Confirm the failure is *only* that one test, by name, before proceeding — a different or additional failure is a real regression, not this known gap. No test was added or removed in this task; the 7 methods above already existed and already ran, only their assertion literals changed.
 
 - [ ] **Step 7: Commit**
 
