@@ -38,16 +38,16 @@ public static class SchemaBundleBuilder
         }
 
         var bundle = new JsonObject { ["definitions"] = definitions };
-        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
-        // Unlike the other three call sites, this one previously appended nothing after
-        // ToJsonString, so the file had no trailing newline at all; the appended "\n" below is a
+        // CommittedJsonOptions pins interior line endings to CRLF; see its own doc comment for
+        // why. Unlike the other three call sites, this one previously appended nothing after
+        // ToJsonString, so the file had no trailing newline at all; the appended "\r\n" below is a
         // deliberate addition, not a preserved behaviour, chosen so every JSON file `generate`
-        // writes ends the same way — a single trailing LF — rather than leaving spec-schemas.json
-        // as the one file in Generated/ without one. Pinned by
-        // SchemaBundleBuilderTests.EndsWithASingleTrailingLineFeed.
+        // writes ends the same way — a single trailing CRLF — rather than leaving
+        // spec-schemas.json as the one file in Generated/ without one. Pinned by
+        // SchemaBundleBuilderTests.EndsWithASingleTrailingCarriageReturnLineFeed.
         return bundle.ToJsonString(CommittedJsonOptions.Value)
                      .Replace(ComponentPrefix, DefinitionPrefix, StringComparison.Ordinal)
-                     + "\n";
+                     + "\r\n";
     }
 
     private static IEnumerable<(string Key, IOpenApiSchema Schema)> InlineResponseSchemas(OpenApiDocument document, TestPlan plan)

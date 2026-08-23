@@ -82,20 +82,20 @@ public class SchemaBundleBuilderTests
     }
 
     /// <summary>
-    /// Pins the trailing "\n" the v1-e line-endings task added to Build(): before that fix it
-    /// appended nothing at all, so spec-schemas.json was the one file in Generated/ with no
-    /// final newline. GitattributesSurvivesAnAutocrlfTrueCheckout's before/after byte comparison
-    /// cannot catch a regression back to that — both sides of that round trip are written by
-    /// the same call to Build(), so an unconditional absence would compare equal to itself. This
-    /// test is the only thing asserting the newline is there at all, and also that it is exactly
-    /// one LF, not CRLF and not doubled.
+    /// Pins the trailing "\r\n" the v1-e line-endings task added to Build() (LF at the time;
+    /// [crlf-everywhere] flips the direction, not the reasoning): before that fix it appended
+    /// nothing at all, so spec-schemas.json was the one file in Generated/ with no final newline.
+    /// GitattributesSurvivesAnAutocrlfTrueCheckout's before/after byte comparison cannot catch a
+    /// regression back to that — both sides of that round trip are written by the same call to
+    /// Build(), so an unconditional absence would compare equal to itself. This test is the only
+    /// thing asserting the newline is there at all, and also that it is exactly one CRLF, not a
+    /// bare LF and not doubled.
     /// </summary>
     [TestMethod]
-    public async Task EndsWithASingleTrailingLineFeed()
+    public async Task EndsWithASingleTrailingCarriageReturnLineFeed()
     {
         var bundle = await BuildAsync();
-        bundle.ShouldEndWith("\n");
-        bundle.ShouldNotEndWith("\r\n");
-        bundle.ShouldNotEndWith("\n\n");
+        bundle.ShouldEndWith("\r\n");
+        bundle.ShouldNotEndWith("\r\n\r\n");
     }
 }
