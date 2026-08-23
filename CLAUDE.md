@@ -50,6 +50,19 @@ CONTRIBUTING.md's "Testing against a local build"). Use:
 pwsh scripts/local-e2e-test.ps1
 ```
 
+CI (`.github/workflows/build-and-test.yml`, push to `main` and every pull request, matrixed
+`ubuntu-latest`/`windows-latest`) runs the commands above split across three jobs: `fast`
+(Architecture + Cli + Runtime, ~33.5–35.5s measured cold-cache), `golden` (Golden alone, kept in
+its own parallel job so its ~90–107s cannot delay `fast`'s verdict), and `dogfood`
+(`scripts/ci/dogfood.ps1`: `init` → `generate` → `fixtures repair` → `generate` →
+`generate --check` against the three sample specs under `samples/`, no live API — static only).
+Reproduce `fast`/`golden` locally with the `dotnet test` invocations above; reproduce `dogfood`
+locally with `pwsh scripts/ci/dogfood.ps1 -RepoRoot . -ScaffoldRoot <dir-outside-the-checkout>
+-CliDll <path-to-built-InTest.Cli.dll>`. `scripts/ci/assert-trx-results.ps1` then checks each
+`.trx` actually reports executed tests for the right assembly, so a suite silently matching
+nothing cannot read as green. Every third-party action the workflow uses is pinned by commit
+SHA — see CONTRIBUTING.md's dependency policy.
+
 ## Build configuration
 
 - Central package management: **all** versions live in `Directory.Packages.props`. A

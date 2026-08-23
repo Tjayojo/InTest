@@ -2361,6 +2361,17 @@ the source-presence problem above.
     at the expected tier; a second `repair` is a no-op; and a `repair` run after a hand-edited
     value leaves that value untouched. This is the path that had no owner until it was traced
     end to end, and the no-overwrite assertion is what protects hand-written data.
+13. **CI dogfoods `generate --check` against real specs.** `.github/workflows/build-and-test.yml`'s
+    `dogfood` job (`docs/superpowers/plans/2026-08-22-intest-ci.md`, `[dogfood]`) runs
+    `init` → `generate` → `fixtures repair` → `generate` → `generate --check` against the three
+    sample specs under `samples/` on every push to `main` and every pull request. This is the
+    strongest evidence available that `generate --check` — the mechanism §8 and `README.md` tell
+    adopters to run as their own CI gate — behaves as documented against real, hand-authored,
+    multi-producer OpenAPI documents, because it is InTest's own generator being exercised by
+    InTest's own drift check, not a hand-rolled simulation of one. Scoped deliberately: the job is
+    static (no `dotnet build` of a scaffold, no HTTP), so it proves the generation and
+    drift-detection path, not the request/response path §9 describes — it does not run generated
+    *tests* against a live API, and does not stand in for item 4's round-trip coverage above.
 
 ---
 

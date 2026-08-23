@@ -230,6 +230,12 @@ New dependencies are held to a hard line, because adopters inherit whatever we t
 - **Deprecated or vulnerable versions are disqualifying.** Check nuget.org's deprecation and
   vulnerability metadata, not just the version number. The entire `Microsoft.OpenApi` 2.x line
   is deprecated, which an earlier revision missed.
+- **Third-party GitHub Actions are dependencies too, and inherit this policy — pinned harder.**
+  An action executes with repository secrets in scope, a strictly larger supply-chain surface
+  than a NuGet package sitting in a lockfile. Every action
+  `.github/workflows/build-and-test.yml` uses is pinned by **commit SHA**, never a tag — a tag
+  is mutable and can be repointed after review. See "Continuous integration" below for how each
+  pin was resolved and verified.
 
 ## Scope requests
 
@@ -257,6 +263,50 @@ that is useful data.
   path. It is deliberately a full end-to-end trace rather than a summary, because walking it is
   what catches gaps — reading it top to bottom is how the unowned initial-fixture creation was
   found, after the design had already been through several review rounds.
+
+## Continuous integration
+
+`.github/workflows/build-and-test.yml` runs on every push to `main` and on every pull request,
+matrixed over `ubuntu-latest` and `windows-latest` — three jobs, six runs per trigger:
+
+- **`fast`** — `InTest.Architecture.Tests`, `InTest.Cli.Tests` and `InTest.Runtime.Tests`, each
+  built and run from its own `.csproj` rather than the solution, so this job never incidentally
+  rebuilds `InTest.Golden.Tests` or a `samples/` project. Measured cold-cache, three repeats per
+  platform: ~33.5–35.5s end to end.
+- **`golden`** — `InTest.Golden.Tests` alone, in its own parallel job specifically so its
+  ~90–107s cannot delay the verdict `fast` gives in a fraction of that time. CLAUDE.md: it is
+  "the only suite that proves generated code both compiles and runs."
+- **`dogfood`** — `scripts/ci/dogfood.ps1` runs `init` → `generate` (exit 1, fixtures missing —
+  designed behaviour, not a failure) → `fixtures repair` → `generate` → `generate --check`
+  against the three sample specs (`samples/Catalog.Api/Catalog.Api.json`,
+  `samples/Inventory.Api/Inventory.Api.json`, `samples/Orders.Api/Orders.Api.json` —
+  `samples/Identity.Server` is a Duende provider with no spec, so three, not four). Deliberately
+  static: no `dotnet build` of a scaffold and no live API, because starting the samples over real
+  HTTP needs the port/issuer/environment pairing `samples/README.md` documents, and getting that
+  wrong produces 500s and silent 404s rather than an obvious CI failure. Scaffolds under the
+  runner's temp directory, outside the checkout, so nothing this job does can dirty your PR's
+  working tree — the workflow confirms that afterward with `git status --porcelain` rather than
+  trusting the isolation silently.
+
+Both `fast` and `golden` run `scripts/ci/assert-trx-results.ps1` after `dotnet test`: it parses
+the `.trx` and requires each expected assembly's file to exist, report more than zero executed
+tests, report zero failures, and contain a `<TestMethod codeBase>` ending in that assembly's
+`.dll`. A green `dotnet test` step does not by itself prove anything ran — a wrong path or a
+typo'd filter can match nothing and still exit 0 — so this is a second, independent check rather
+than trusting the step's own exit code.
+
+**What a pull request should expect:** six required job runs, all matrixed the same way. Both
+platforms run rather than one standing in for the other — see "Line endings are the same trap in
+a different costume" above for the first thing that distinction actually caught: a hard-coded
+`\n` in a test assertion that passed on every contributor's machine and failed only on
+`windows-latest`.
+
+**What has and has not been verified about this workflow itself — different claims, stated
+separately:** every job's exact command sequence has been run locally on both platforms by hand,
+and the workflow file has been checked with `actionlint`. The GitHub Actions runtime proper —
+scheduling, cache save/restore, matrix fan-out, trigger firing — is a different thing from the
+commands it runs, and is proven only by real runs on GitHub's infrastructure, not by either of
+those checks.
 
 ## Releases
 
