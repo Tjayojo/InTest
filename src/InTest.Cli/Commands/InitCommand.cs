@@ -41,7 +41,7 @@ public static class InitCommand
     /// adopting team | InTest never touches" row of CLAUDE.md's ownership table). `eol=crlf` on
     /// its own already implies `text` for the paths it names, so it needs no help from a blanket
     /// normalization line — confirmed by mutation under the LF-direction predecessor of this
-    /// scaffold: deleting `* text=auto` left GitattributesSurvivesAnAutocrlfTrueCheckout passing;
+    /// scaffold: deleting `* text=auto` left GitattributesSurvivesAnAutocrlfInputCheckout passing;
     /// the three `eol=` lines carry the fix alone, and that mutation result does not depend on
     /// which letter `eol` names.
     /// <para>

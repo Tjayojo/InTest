@@ -31,14 +31,14 @@ public class InitCommandTests
     /// <see cref="Directory.Delete(string, bool)"/>. This is not defensive gold-plating: v1-e's
     /// review originally asserted that <see cref="RemoveDirectory"/>'s plain delete already
     /// proved a force-unlock helper unnecessary, on the theory that _root — which
-    /// GitattributesSurvivesAnAutocrlfTrueCheckout leaves containing a real <c>.git</c>
+    /// GitattributesSurvivesAnAutocrlfInputCheckout leaves containing a real <c>.git</c>
     /// directory — already deletes cleanly today. Confirmed by direct experiment that this is
     /// false on this platform: `git commit` leaves every loose object under
     /// <c>.git/objects/**</c> mode <c>0444</c> (read-only, no write bit) on Windows, and a plain
     /// recursive delete throws <see cref="UnauthorizedAccessException"/> the moment it reaches
     /// one — reproduced by running <see cref="RemoveDirectory"/> unmodified against a scratch
     /// repo, which failed the same way. Both _root and the temporary clone
-    /// GitattributesSurvivesAnAutocrlfTrueCheckout makes go through a real `git init`/`clone` +
+    /// GitattributesSurvivesAnAutocrlfInputCheckout makes go through a real `git init`/`clone` +
     /// commit, so both need this, not just the clone — hence one shared helper backing
     /// <see cref="RemoveDirectory"/> itself rather than a second, clone-only copy.
     /// </summary>
@@ -71,7 +71,7 @@ public class InitCommandTests
         }
     }
 
-    // The spec used by GitattributesSurvivesAnAutocrlfTrueCheckout: `getOrderById`'s path
+    // The spec used by GitattributesSurvivesAnAutocrlfInputCheckout: `getOrderById`'s path
     // parameter needs no fixture to generate successfully (mirrors GenerateCommandTests.Spec —
     // duplicated here rather than shared, matching how each test file in this project already
     // keeps its own local Spec constant), which keeps that test to one `generate` call with no
@@ -89,22 +89,45 @@ public class InitCommandTests
 
     /// <summary>
     /// Proves the scaffolded .gitattributes actually does its job, rather than merely existing.
-    /// "The file on disk contains CRLF" would pass regardless of whether .gitattributes covers
-    /// the right paths — or exists at all — on a machine whose own git config already defaults to
-    /// CRLF. This instead reproduces the v1-e line-endings task's manual measurement as an
-    /// automated round trip, with core.autocrlf forced explicitly rather than left at whatever
-    /// this test happens to run under: commit a real `init` + `generate` scaffold with
-    /// core.autocrlf=true set on the source, then materialize a second working copy with the same
-    /// setting forced on the destination — the two-step path a Windows adopter's own clone goes
-    /// through — and diff the bytes. Every one of InTest's own generated artefacts (Generated/**,
-    /// coverage-report.json, fixtures/**/*.json — a base fixture and a profile overlay alike) must
-    /// come back byte-identical; without .gitattributes pinning them to eol=crlf, an autocrlf
-    /// setting that resolves to LF on some other checkout (core.autocrlf=input, or the
-    /// non-Windows default) would rewrite them, the same class of gap [crlf-everywhere] exists to
-    /// close, direction reversed from what the v1-e manual experiment originally showed.
+    /// "The file on disk contains CRLF" would pass even with .gitattributes missing entirely, or
+    /// with its eol=crlf pins deleted, on a checkout whose own git config already defaults to
+    /// CRLF — Git-for-Windows' core.autocrlf=true is exactly such a config: under
+    /// [crlf-everywhere] its own checkout-time expansion already produces CRLF regardless of any
+    /// pin, so forcing it (as an earlier version of this test did) proves nothing about whether
+    /// the pin itself works. core.autocrlf=false is not hostile either, and for a more subtle
+    /// reason confirmed by direct experiment (git plumbing: `git show HEAD:&lt;path&gt;` on a
+    /// scratch repo) rather than assumed: this scaffold's .gitattributes deliberately carries no
+    /// blanket `* text=auto` line (see GitattributesContent's own doc comment for why), so with no
+    /// attribute at all matching a path and core.autocrlf=false, git performs *no* conversion in
+    /// either direction — the object database stores the working-tree bytes verbatim and checkout
+    /// returns them verbatim. Deleting a path's `eol=crlf` pin under core.autocrlf=false removes
+    /// both the add-time LF-normalization and the checkout-time CRLF-re-expansion the pin was
+    /// doing, and the two cancel out: the round trip stays byte-identical with or without the pin,
+    /// so autocrlf=false cannot distinguish "pinned" from "unpinned" here (confirmed by direct
+    /// experiment: deleting the fixtures/**/*.json line and re-running this test under
+    /// autocrlf=false left it passing). core.autocrlf=input is the setting that actually
+    /// reproduces the hazard [crlf-everywhere] exists to close: it normalizes CRLF to LF on add
+    /// the same as core.autocrlf=true does, auto-detecting text files even with no attribute
+    /// present, but — unlike core.autocrlf=true — does not re-expand LF back to CRLF on checkout.
+    /// Confirmed by the same direct experiment: with no pin and core.autocrlf=input on both ends,
+    /// `git show HEAD:&lt;path&gt;` after commit already reads LF, and the file checked out into a
+    /// fresh clone reads LF too — a genuine, silent flattening of the scaffold's CRLF content, the
+    /// exact defect an adopter with core.autocrlf=input (the common non-Windows default) would hit
+    /// without this .gitattributes. With the pin restored, the same experiment's committed blob is
+    /// still LF (eol=crlf implies text=true, which normalizes storage regardless of autocrlf) but
+    /// checkout re-expands it to CRLF, matching the original bytes. This reproduces the v1-e
+    /// line-endings task's manual measurement as an automated round trip, direction reversed for
+    /// [crlf-everywhere]: commit a real `init` + `generate` scaffold with core.autocrlf=input set
+    /// on the source, then materialize a second working copy with the same setting forced on the
+    /// destination — and diff the bytes. Every one of InTest's own generated artefacts
+    /// (Generated/**, coverage-report.json, fixtures/**/*.json — a base fixture and a profile
+    /// overlay alike) must come back byte-identical; without .gitattributes pinning them to
+    /// eol=crlf, this exact checkout would flatten them to LF, the same class of gap
+    /// [crlf-everywhere] exists to close, direction reversed from what the v1-e manual experiment
+    /// originally showed.
     /// </summary>
     [TestMethod]
-    public async Task GitattributesSurvivesAnAutocrlfTrueCheckout()
+    public async Task GitattributesSurvivesAnAutocrlfInputCheckout()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
         File.WriteAllText(Path.Combine(_root, "orders.json"), SpecNeedingNoFixture);
@@ -133,7 +156,7 @@ public class InitCommandTests
         var beforeCheckout = tracked.ToDictionary(f => f, f => File.ReadAllBytes(Path.Combine(_root, f)));
 
         RunGit(_root, "init -q");
-        RunGit(_root, "config core.autocrlf true");
+        RunGit(_root, "config core.autocrlf input");
         RunGit(_root, "config user.email test@example.com");
         RunGit(_root, "config user.name Test");
         RunGit(_root, "add -A");
@@ -145,12 +168,12 @@ public class InitCommandTests
             // --no-checkout, then set core.autocrlf, then checkout: a plain `clone` applies the
             // destination's config too late for a `-c` override to be trustworthy across git
             // versions (confirmed by direct experiment while measuring Step 1 — a `-c
-            // core.autocrlf=true clone` converted the files correctly but did not persist the
+            // core.autocrlf=input clone` converted the files correctly but did not persist the
             // setting into the clone's own .git/config, which this test does not want to depend
             // on). Splitting the two steps makes the setting unambiguously in effect for the
             // checkout that follows.
             RunGit(Path.GetTempPath(), $"clone -q --no-checkout \"{_root}\" \"{clone}\"");
-            RunGit(clone, "config core.autocrlf true");
+            RunGit(clone, "config core.autocrlf input");
             RunGit(clone, "checkout -q HEAD -- .");
 
             foreach (var file in tracked)
@@ -170,7 +193,7 @@ public class InitCommandTests
 
     /// <summary>
     /// Fails with a message that names both things that can produce this exact symptom — bytes
-    /// differing across a core.autocrlf=true checkout — rather than asserting only one. The naive
+    /// differing across a core.autocrlf=input checkout — rather than asserting only one. The naive
     /// message ("`.gitattributes` did not pin it to CRLF") is true when this test's own
     /// .gitattributes has a gap; it is false, and misleading, when the writer that produced
     /// <paramref name="before"/> already emitted LF before the file was ever committed (a
@@ -201,7 +224,7 @@ public class InitCommandTests
 
         const int previewBytes = 256;
         Assert.Fail(
-            $"{file} changed bytes across a core.autocrlf=true checkout: {before.Length} bytes " +
+            $"{file} changed bytes across a core.autocrlf=input checkout: {before.Length} bytes " +
             $"before, {after.Length} after; {crlfBefore} CRLF sequence(s) before the checkout, " +
             $"{crlfAfter} after. Likely cause: {likelyCause}. First {previewBytes} bytes, hex — " +
             $"before: {Convert.ToHexString(before, 0, Math.Min(before.Length, previewBytes))}; " +
@@ -272,7 +295,7 @@ public class InitCommandTests
             // real `git` binary and has no fallback if one is not on PATH (v1-e review, minor 11).
             Assert.Fail(
                 $"Could not start 'git {arguments}' in \"{workingDirectory}\": {ex.Message}. Is " +
-                "git installed and on PATH? GitattributesSurvivesAnAutocrlfTrueCheckout shells " +
+                "git installed and on PATH? GitattributesSurvivesAnAutocrlfInputCheckout shells " +
                 "out to a real git binary and cannot run without one.");
             throw; // Unreachable — Assert.Fail always throws — but keeps `process` definitely assigned.
         }
@@ -282,11 +305,13 @@ public class InitCommandTests
             // Read both streams concurrently via the async event-based API, not
             // ReadToEnd() on stdout followed by ReadToEnd() on stderr: a child process's stderr
             // pipe is a fixed-size OS buffer (about 4 KB), and `git add -A` on a scaffolded
-            // project under autocrlf=true alone emits over a thousand bytes of "LF will be
-            // replaced by CRLF" warnings — measured at 1549 bytes, 38% of the buffer. Reading
-            // stdout to completion first blocks forever the moment stderr fills, because nothing
-            // is draining it and the child is blocked trying to write to it: a deadlock, not a
-            // slow test (v1-e review, Important 6).
+            // project under autocrlf=input alone emits over a thousand bytes of "CRLF will be
+            // replaced by LF" warnings — measured at 1450 bytes (direction and figure both
+            // reconfirmed for [crlf-everywhere]'s core.autocrlf=input, up from the
+            // [lf-everywhere] predecessor's autocrlf=true "LF will be replaced by CRLF" wording),
+            // 35% of the buffer. Reading stdout to completion first blocks forever the moment
+            // stderr fills, because nothing is draining it and the child is blocked trying to
+            // write to it: a deadlock, not a slow test (v1-e review, Important 6).
             var stdout = new StringBuilder();
             var stderr = new StringBuilder();
             process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
@@ -730,7 +755,7 @@ public class InitCommandTests
     // fully overlaps InTest.Golden.Tests' ~1m40s one, so two independent MSBuild invocations
     // could build scaffolded projects that both ProjectReference the same InTest.Runtime.csproj
     // simultaneously — a known source of intermittent obj/ file-lock failures. (v1-e's
-    // GitattributesSurvivesAnAutocrlfTrueCheckout, added later, shells out to a real `git`
+    // GitattributesSurvivesAnAutocrlfInputCheckout, added later, shells out to a real `git`
     // binary and so is also out-of-process, but it never invokes MSBuild, so the file-lock race
     // this comment describes still does not apply to it.) The assertion
     // itself is unchanged; see ScaffoldCompileVerificationTests there.
