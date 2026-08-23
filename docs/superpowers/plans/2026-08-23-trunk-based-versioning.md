@@ -1,6 +1,14 @@
 # Trunk-based versioning and prerelease
 
-**Status:** plan, rev 3. Nothing built yet.
+**Status:** plan, rev 4. Nothing built yet.
+
+**Revision note — rev 4.** Reviewed; four blocking findings, all corrected here. The review
+reproduced `[version-from-git]`'s table and the shallow-clone silence independently, so those stand.
+What did not: a rev-2 leftover in Task 3 asked to verify a guard against a property that no longer
+exists; the `[shallow-clone-is-a-defect]` guard turned out to be **unbuildable as specified**;
+Task 2's acceptance signal was order-dependent and named a test that has nothing to rewrite; and the
+superseded `[versionprefix-not-version]` still carried two live instructions, one of which is now
+factually wrong.
 
 **Revision note — rev 3.** The owner asked whether this matches how Microsoft does it. Researched
 against guidance, the .NET team's own repositories, and measurement. Two answers changed the plan:
@@ -42,7 +50,7 @@ Each was read in source or run. **Where something is unproven it says so.**
   *"The scaffolded project pins InTest.Runtime 0.1.0, so the packages must pack as 0.1.0; the SDK
   default of 1.0.0 would make the scaffolded restore fail."* **The causality runs backwards** — the
   product's version exists to serve a hardcoded literal in a string template.
-- **`InitCommand.cs:227` hardcodes** `<PackageReference Include="InTest.Runtime" Version="0.1.0" />`.
+- **`InitCommand.cs:232` hardcodes** `<PackageReference Include="InTest.Runtime" Version="0.1.0" />`.
 - **`InitCommand.cs:139` already writes `CliVersion.Current`** into `intestVersion`, twelve lines
   from the hardcoded literal. The value is in hand at the point the `.csproj` string is built.
 - **`CliVersion.cs:47` strips the informational version at the first `+` only**, so a build label is
@@ -116,7 +124,14 @@ product version.
 
 ### `[versionprefix-not-version]` — **superseded by `[version-from-git]`**
 
-> Kept rather than deleted: its measurements are still true and still load-bearing, and it is what
+> **Nothing in this section is an instruction any more.** Rev 4: two directives survived here and
+> both are now void — "the suffix's counter still needs deciding, Task 2 decides" (there is no
+> counter under `[version-from-git]`), and "write these two facts into `CliVersion.cs`". **The
+> second is now false**: under MinVer `AssemblyVersion` is `{Major}.0.0.0` — measured `0.0.0.0`,
+> not `0.1.0.0` — so an implementer following it would write a comment that contradicts the build.
+> Read this section as a record, never as work.
+>
+> Kept rather than deleted: its measurements are still true of *`VersionPrefix`*, and it is what
 > the .NET team actually does — `dotnet/runtime`, `dotnet/aspnetcore` and `dotnet/sdk` all hold
 > `VersionPrefix` (or `MajorVersion`/`MinorVersion`) plus `PreReleaseVersionLabel` and
 > `PreReleaseVersionIteration` in `eng/Versions.props`. It is superseded because it leaves the
@@ -237,10 +252,30 @@ that fails when the resolved version lacks height it should have — the same sh
 `fetch-depth` alone is not enough: it is one line in one file that a future edit can silently drop,
 which is precisely the class of regression this repo builds guards for.
 
-Note also that MinVer outside a git repository emits `MINVER1001` and falls back to
-`0.0.0-alpha.0` — **measured to stay a warning under `TreatWarningsAsErrors`**, because it is an
-MSBuild task warning rather than a compiler one. `scripts/local-e2e-test.ps1` packs from a non-git
-copy, so this path is live here, not hypothetical.
+**The guard is harder to write than it looks, and rev 3 understated it.** Measured under this
+plan's own configuration, three different situations produce the **same version string**:
+
+| Situation | `MINVER1001`? | Resolved version |
+|---|---|---|
+| shallow clone (`--depth 1`) | **no diagnostic at all** | `0.1.0-preview.0` |
+| outside a git repository | yes, a warning | `0.1.0-preview.0` |
+| legitimate untagged root commit | no | `0.1.0-preview.0` |
+
+(Rev 3 said the non-git fallback was `0.0.0-alpha.0`; that is MinVer's raw default —
+`MinVerMinimumMajorMinor` lifts it to `0.1.0-preview.0`. Corrected.)
+
+So **a guard keyed on the version value cannot work**: it would fail `scripts/local-e2e-test.ps1`,
+which packs from a non-git copy by design. And **a guard keyed on `MINVER1001` misses the shallow
+clone entirely**, which is the case that matters most. MinVer exposes no height property, so
+discriminating requires asking git directly — for example, asserting that a repository is present
+*and* that tags are visible, and failing when it is a repository with no visible tags.
+
+**Decide the guard's mechanism before Task 2 runs, not during it.** The self-review's warning is
+literal: if this guard is skipped or written so it cannot fail, this plan makes the repository worse
+than the hand-rolled counter it replaced.
+
+`MINVER1001` itself is **measured to stay a warning under `TreatWarningsAsErrors`**, because it is
+an MSBuild task warning rather than a compiler one — so it will not stop a build on its own.
 
 ### `[prerelease-reference-migration]` — `upgrade` detects and reports; it does not rewrite
 
@@ -333,8 +368,10 @@ future release job will have to undo.
 - [ ] **Step 3:** `Directory.Build.props`' comment now describes the old causality. Correct it.
 - [ ] **Step 4: Prove the whole thing end to end.** Build the CLI at a prerelease version, scaffold
       a project with it, and confirm the generated `.csproj` references that same version.
-      `scripts/local-e2e-test.ps1` is the natural harness — **measured to still pass end to end**
-      against a `VersionPrefix` clone, all nine steps. Note its csproj-patch step
+      `scripts/local-e2e-test.ps1` is the natural harness. It was measured to pass end to end
+      against a **`VersionPrefix`** clone — *not* against the MinVer shape actually being built, and
+      Task 2 Step 5 expects `MINVER1001` to fire there by construction. **Treat it as unproven for
+      this design** and re-measure. Note its csproj-patch step
       (`scripts/local-e2e-test.ps1:328-331`) becomes **redundant** once the scaffold emits the
       running version; remove it deliberately rather than leaving a second mechanism doing the same
       job.
@@ -353,17 +390,25 @@ future release job will have to undo.
       identifiers, auto-increment — and confirm the four rows of `[version-from-git]`'s table
       against a real tag in a scratch clone.
       **Expect exactly two failures** in `PackageVersionCouplingTests`
-      (`InitCommandScaffoldVersionsMatchTheCenter`, `CompileVerificationTestsScaffoldVersionsMatchTheCenter`),
-      whose `ReadRuntimeSelfVersion` reads `<Version>` from `Directory.Build.props`. That is the
-      **acceptance signal**, not a surprise — the guard failing loudly is it working. Task 1 Step 2
-      resolves them.
+      (`InitCommandScaffoldVersionsMatchTheCenter`, `CompileVerificationTestsScaffoldVersionsMatchTheCenter`).
+      Both fail for one reason: `ReadRuntimeSelfVersion` (`PackageVersionCouplingTests.cs:117-128`)
+      asserts `<Version>` exists in `Directory.Build.props`, and Step 1 removes it. That is the
+      **acceptance signal**, not a surprise.
+      **Fix them in this task, not Task 1** — rev 3 said "Task 1 Step 2 resolves them", which is
+      wrong twice over: Tasks run 0→1→2, so `<Version>` is still present during Task 1 and both
+      tests stay green there; and `CompileVerificationTests.cs` references `InTest.Runtime` by
+      **`ProjectReference`, not `PackageReference`** (`CompileVerificationTests.cs:45`), so it has no
+      version literal for Task 1 to rewrite at all. `ReadRuntimeSelfVersion` needs a new source of
+      truth under MinVer — decide what, and keep the guard's other cases intact.
 - [ ] **Step 3:** `fetch-depth: 0` on all three `actions/checkout` steps, **and** the guard from
       `[shallow-clone-is-a-defect]`. **Prove the guard fires** by building from a `--depth 1` clone
       and confirming it fails rather than producing `0.1.0-preview.0` quietly. A guard that has not
       been seen to fail is decoration.
 - [ ] **Step 4:** Confirm `CliVersion.Read()` returns the label intact through the full path —
       build, pack, `init`, read `intestVersion` back. v1-e Task 1 proved the mechanism at
-      `1.0.0-rc.1`; prove it again for MinVer's actual output, which carries `+<sha>`.
+      `1.0.0-rc.1`. Note MinVer alone was **measured to emit no `+<sha>` at all**, with or without a
+      remote — so there may be nothing to strip. Harmless either way, since `CliVersion.cs:47`
+      handles both, but do not assert a `+` is present.
 - [ ] **Step 5:** Run `scripts/local-e2e-test.ps1`. It packs from a **non-git copy**, so
       `MINVER1001` fires there by construction. Decide deliberately whether that fallback is
       acceptable for the local harness or whether the script should pass an explicit version, and
@@ -379,8 +424,14 @@ future release job will have to undo.
 - [ ] **Step 3: Verify the produced artifacts**, do not assume. Unzip and confirm the nuspec version
       and the scaffolded reference agree. **Packing has only ever run on Windows** — this is the
       first time CI would pack, so exercise both platforms or say plainly which was not.
-- [ ] **Step 4:** Prove the tag path can fail: tag a commit whose version disagrees with
-      `VersionPrefix` and confirm CI refuses rather than publishing a mismatch.
+- [ ] **Step 4: Assert the artifact matches the tag.** Rev 3 asked to "tag a commit whose version
+      disagrees with `VersionPrefix` and confirm CI refuses" — **impossible as written**: Task 2
+      removes `<Version>` and nothing introduces `VersionPrefix`, and MinVer accepts *any* tag
+      (measured: tagging `0.0.5` under `MinVerMinimumMajorMinor=0.1` yields `0.0.5`, no warning).
+      There is no mismatch to refuse.
+      The real check is the converse: on a tagged build, assert the produced `.nupkg` version equals
+      the tag exactly, and that it carries **no** prerelease height. Prove it by tagging a scratch
+      commit and inspecting the artifact.
 
 ### Task 4: Documentation
 
