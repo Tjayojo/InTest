@@ -683,7 +683,7 @@ public class UpgradeCommandTests
 
         exitCode.ShouldBe(ExitCode.Ok);
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue();
-        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=lf", Case.Sensitive);
+        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=crlf", Case.Sensitive);
         report.ShouldContain(".gitattributes", Case.Sensitive,
             customMessage: "the report must say a team-owned file was created, not just the two configs");
     }
