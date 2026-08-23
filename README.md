@@ -1,5 +1,7 @@
 # InTest
 
+[![Build and test](https://github.com/Tjayojo/intest/actions/workflows/build-and-test.yml/badge.svg?branch=main)](https://github.com/Tjayojo/intest/actions/workflows/build-and-test.yml)
+
 Generates a complete, owned .NET test project that exercises a deployed API over real HTTP,
 from its OpenAPI document.
 
