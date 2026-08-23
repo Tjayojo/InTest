@@ -72,7 +72,11 @@ SHA — see CONTRIBUTING.md's dependency policy.
   `1.0.0` would break every scaffolded restore.
 - **Package versions are duplicated by design in three places** and must be changed together:
   `Directory.Packages.props`, the scaffolded `.csproj` string in `InitCommand.cs`, and the
-  hand-written test project in `CompileVerificationTests.cs`.
+  hand-written test project in `CompileVerificationTests.cs`. `InTest.Architecture.Tests`'
+  `PackageVersionCouplingTests` enforces this mechanically — it fails, by package name with both
+  versions and both files, if a hardcoded version in either scaffold site disagrees with
+  `Directory.Packages.props` (or, for `InTest.Runtime`, with `Directory.Build.props`' own
+  `Version`, since that package is deliberately not centrally versioned).
 
 ## Architecture
 
