@@ -1,9 +1,11 @@
 # NuGet publish readiness
 
-**Status:** Design · Revision 3
+**Status:** Design · Revision 4
 **Date:** 2026-08-23
-**Supersedes:** Revision 2 — see "What revision 2 got wrong" below. Revision 1 deferred
-`PackageIcon` because no logo existed; revision 2 brought it in scope; it has since **shipped**.
+**Supersedes:** Revision 3 — §7 was an open question; the owner has now decided it (prerelease
+from `develop`, release from `main`), which turns out to block on a scaffold defect §7 now
+describes. Revision 2's errors are recorded below. Revision 1 deferred `PackageIcon`; revision 2
+brought it in scope; it has since **shipped**.
 
 ## What revision 2 got wrong
 
@@ -212,33 +214,82 @@ Harmless on the Runtime today — single TFM, no published baseline to diff — 
 once one exists. `PackageValidationBaselineVersion` is deliberately not set: the baseline check
 needs a *previously published* version. §8 captures it for the release after the first.
 
-## 7. Version: stable or prerelease — decide before publishing
+## 7. Versioning — decided: prerelease from `develop`, release from `main`
 
-versioning.md: **"DO include a prerelease suffix when releasing a nonstable package."** Revision 2
-went straight to `dotnet nuget push` at stable `0.1.0` without raising this, and nuget.org does not
-permit deletion — only unlisting and superseding.
-
-The case for a prerelease suffix is on the record in this repo's own words: `README.md` says
-"v0. Working, but early"; `survey`, `fixtures promote`, `assertions add` and `--emit-plan` are
-unbuilt; `docs/v0-acceptance.md` records that `generate --check` and `upgrade` have no multi-sample
+versioning.md: **"DO include a prerelease suffix when releasing a nonstable package."** The repo's
+own words agree — `README.md` says "v0. Working, but early", four commands are unbuilt, and
+`docs/v0-acceptance.md` records that `generate --check` and `upgrade` have no multi-sample
 acceptance run.
 
-The case against is concrete rather than stylistic: `Directory.Build.props` pins `<Version>0.1.0</Version>`
-because `InitCommand.cs` **hardcodes** `<PackageReference Include="InTest.Runtime" Version="0.1.0" />`
-in the scaffold, and `CLAUDE.md` records that package versions are duplicated in three places and
-must move together. A prerelease version is therefore a **source change**, not a pack-time flag —
-and `PackageVersionCouplingTests` now enforces part of that coupling.
+**The decision:** merges into `develop` produce **prerelease** versions; `main` produces
+**release** versions.
 
-**This is an owner decision and the spec should not proceed without it.** Whichever way it goes, it
-is unfixable afterwards.
+`CliVersion` already supports this. `CliVersion.cs:47` strips the informational version at the
+**first `+` only**, so a SemVer 2 build label is discarded while a prerelease label survives
+(`1.0.0-rc.1+sha` → `1.0.0-rc.1`). Confirmed during v1-e Task 1 by building at
+`-p:Version=1.0.0-rc.1`: `init` wrote that version into `intest.json` and `generate` read it back.
+
+### The defect this decision exposes, which blocks it
+
+`InitCommand.cs:227` **hardcodes** the scaffolded reference:
+
+```xml
+<PackageReference Include="InTest.Runtime" Version="0.1.0" />
+```
+
+A prerelease CLI built as `0.1.0-preview.N` would therefore scaffold a project referencing
+`InTest.Runtime` **0.1.0** — a version that does not exist on nuget.org until the first stable
+release. **The generated project cannot restore.** That is a shipped tool producing unusable
+output, and it is the `[paired]` shape this repository has now hit nine times: a documented path
+with no reachable fix.
+
+**The scaffold must emit the running CLI's own version rather than a literal.** `CliVersion.Current`
+is already the value `init` writes to `intestVersion` (`InitCommand.cs:139`), so the data is in hand
+at the point the `.csproj` string is built.
+
+Note this is *stricter* than §3's compatibility contract, which permits any CLI `N.y` with any
+runtime `N.x`. Emitting the exact version is safe within that contract and removes a hand-maintained
+literal; a looser floor would be defensible but is not required.
+
+### What this touches beyond the scaffold
+
+Each of these is a real consequence, not a checklist item — settle them before implementing:
+
+- **`PackageVersionCouplingTests` compares the scaffold's literal against `Directory.Build.props`'
+  `<Version>`.** Once the scaffold emits `CliVersion.Current`, there is no literal to compare and
+  the guard's `InTest.Runtime` case needs rewriting against the new mechanism. **Do not delete it** —
+  it is what would have caught this defect.
+- **How the suffix is produced.** `Directory.Build.props` holds the base `<Version>`; the suffix
+  has to come from somewhere per-build. A CI-injected `-p:Version=` is the obvious route, but it
+  makes the shipped version differ from the file every test reads, which is exactly the split that
+  makes the coupling guard ambiguous. Decide the mechanism and the label format together.
+- **`develop` does not exist yet** (`git branch -a`). Creating it is step one.
+- **CI triggers on `push: [main]` only.** `develop` must be added, or nothing on it is ever built.
+- **Dependabot has no `target-branch`,** so it opens PRs against `main`. Under this model it should
+  almost certainly target `develop` instead.
+- **`--check`'s `[exact-match]` exits 4 on *any* version difference**, by design. A prerelease
+  channel that moves on every merge means adopters tracking it hit exit 4 frequently and run
+  `upgrade` to clear it. That is the contract working as specified, not a bug — but it is a real
+  ergonomic consequence of publishing a fast-moving prerelease, and it should be documented for
+  anyone who opts into that channel.
+
+### Scope
+
+This section records the decision and its consequences. **Implementing the branching model — the
+branch, the CI triggers, the version mechanism, the Dependabot target — is not part of this
+readiness pass** and should be planned separately; it is a workflow change, not package metadata.
+What *is* in scope here: the scaffold defect above must be fixed before any prerelease is published,
+because publishing a CLI that scaffolds unrestorable projects is worse than not publishing.
 
 ## 8. `CONTRIBUTING.md`: publishing checklist
 
 New subsection between "## Releases" and "## Testing against a local build". None of this is
 performed by this change.
 
-1. Settle §7 — stable or prerelease — and if prerelease, make the version change as a source change
-   across all coupled sites.
+1. §7 is decided — prerelease from `develop`, release from `main`. Before the first prerelease
+   push, confirm the scaffold defect (§7) is fixed: a CLI at `0.1.0-preview.N` must scaffold a
+   `PackageReference` to a runtime version that actually exists, or the generated project cannot
+   restore.
 2. Reserve the `InTest.` **ID prefix** with NuGet (nuget.md's "CONSIDER choosing a package name with
    a prefix that meets NuGet's prefix reservation criteria"). The IDs are unreserved today, and the
    first push claims them.
