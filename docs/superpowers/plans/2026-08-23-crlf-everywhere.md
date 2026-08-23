@@ -12,6 +12,12 @@
 
 ---
 
+## Revision note — Task 5's code quality review
+
+Code quality review of Task 5 found a defect in the plan's own prescribed text (not an execution error — the implementer copied it correctly): `GitattributesSurvivesAnAutocrlfTrueCheckout` forces `core.autocrlf=true` on both the source commit and the destination clone. Under `[lf-everywhere]`, that was the correct hostile condition — `core.autocrlf=true`'s own checkout-time expansion (LF stored → CRLF checkout) fought the desired LF outcome, so the test proved the `eol=lf` pin was doing real work by overriding it. Under `[crlf-everywhere]`, `core.autocrlf=true`'s expansion (LF stored → CRLF checkout) now *coincides* with the desired CRLF outcome — so the test as migrated passes whether or not `.gitattributes` pins anything at all. Verified directly: deleting the `fixtures/**/*.json text eol=crlf` line from `InitCommand.GitattributesContent` and re-running the test, it still passed. The test's own class doc comment already (correctly) named the real risk — "a Linux/macOS clone, or a Windows clone with core.autocrlf set to false/input" — but the test body never forced that condition. Fixed below by forcing `core.autocrlf=false` instead (checkout applies no conversion at all, so an unpinned file comes back exactly as its LF-normalized object-database bytes — the actual failure mode `.gitattributes` exists to prevent), and renaming the test to `GitattributesSurvivesAnAutocrlfFalseCheckout` since a test whose name states the wrong precondition is its own defect in a codebase this precise about naming.
+
+---
+
 ## Revision note
 
 Task 2's implementer caught a gap the plan missed on first write: `tests/InTest.Cli.Tests/TemplateRendererTests.cs` asserts against `TemplateRenderer.Render`'s output using seven hard-coded-`\n` checks across seven test methods, none of which were in this plan's original file list for any task. Flipping `Normalize` to CRLF makes five of them fail outright (an exact-match `ShouldContain` with an embedded `\n` no longer occurs) and silently defangs two more (`ShouldNotContain("\n\n\n")` and `ShouldNotContain("\n\n    }")` become vacuously true against CRLF content — they stop catching the regression they exist to catch, without failing). Folded into Task 2 Step 6 below rather than a separate task, since it is a direct, same-file-family consequence of Step 1's change and leaving it for a later task would mean Task 2's own commit leaves the Cli suite red.
