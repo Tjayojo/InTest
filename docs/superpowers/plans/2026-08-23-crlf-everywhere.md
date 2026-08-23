@@ -685,12 +685,37 @@ with:
 dotnet build InTest.sln
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4 (added by revision): fix `UpgradeCommandTests.ScaffoldsGitattributesWhenAbsent`**
+
+Task 4's implementer found a gap the plan missed on first write, the same class of gap Task 2 found: `tests/InTest.Cli.Tests/UpgradeCommandTests.cs:686` hard-codes the OLD scaffolded `.gitattributes` content. `UpgradeCommand` writes a project's `.gitattributes` (when absent) using the exact same `InitCommand.GitattributesContent` constant Step 1 above just changed, so this assertion breaks the moment Step 1 lands. Find:
+
+```csharp
+        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=lf", Case.Sensitive);
+```
+
+Replace with:
+
+```csharp
+        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=crlf", Case.Sensitive);
+```
+
+Do not touch `NeverOverwritesAnExistingGitattributes` (the neighboring test) — its hand-written `"# adopter customised this file\n*.custom text eol=lf\n"` fixture content simulates an *adopter's own* custom file, unrelated to what `InitCommand`/`UpgradeCommand` scaffold, and correctly stays as arbitrary test input regardless of this project's own convention.
+
+Run:
+```bash
+dotnet build InTest.sln
+dotnet test tests/InTest.Cli.Tests --filter "FullyQualifiedName~UpgradeCommandTests"
+```
+Expected: `ScaffoldsGitattributesWhenAbsent` passes; no other test in this file regresses.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/InTest.Cli/Commands/InitCommand.cs
+git add src/InTest.Cli/Commands/InitCommand.cs tests/InTest.Cli.Tests/UpgradeCommandTests.cs
 git commit -m "feat: init scaffolds every file, including .gitattributes, with CRLF"
 ```
+
+**Expected `dotnet test tests/InTest.Cli.Tests` count at this checkpoint: 409 passing, 1 failing** — same lone `InitCommandTests.GitattributesSurvivesAnAutocrlfTrueCheckout` failure as before this task, though it may now fail on a *different* file inside its byte-comparison (e.g. `fixtures/sample.json` instead of `Generated/OrdersTests.g.cs`, since `InitCommand.Write` (Step 2) started emitting CRLF for adopter-authored-then-committed content ahead of the JSON writers catching up in the test's own hand-written fixtures) — that specific test is Task 5's job to finish, not a new regression as long as it's the only failure and it's byte-mismatch-shaped, not a crash or a different test entirely.
 
 ---
 
