@@ -58,13 +58,14 @@ updates:
       interval: "weekly"
       day: "monday"
     # Five, not the default five-is-implicit-cap-anyway choice made carelessly: with grouping
-    # (below) collapsing the three MSTest.* packages into one PR, this repo's Directory.Packages.props
-    # has 14 - 3 + 1 = 12 independently-updatable entries. A cap of 5 means at most 5 concurrent
-    # open version-update PRs before Dependabot pauses opening more until one is closed — enough
-    # headroom that a normal week's worth of upstream releases isn't silently dropped, without
-    # opening "twenty PRs a week on a repo with one maintainer" (the failure mode this task named
-    # explicitly). Security-update PRs are exempt from this cap by Dependabot's own design and are
-    # not throttled by it.
+    # (below) collapsing the mstest (3), openapi-net (2), dotnet-servicing (8) and nswag (2)
+    # packages down to one PR apiece, this repo's Directory.Packages.props has 22 entries but only
+    # 22 - (3-1) - (2-1) - (8-1) - (2-1) = 11 independently-updatable PR slots. A cap of 5 means at
+    # most 5 concurrent open version-update PRs before Dependabot pauses opening more until one is
+    # closed — enough headroom that a normal week's worth of upstream releases isn't silently
+    # dropped, without opening "twenty PRs a week on a repo with one maintainer" (the failure mode
+    # this task named explicitly). Security-update PRs are exempt from this cap by Dependabot's own
+    # design and are not throttled by it.
     open-pull-requests-limit: 5
     # "chore:" already appears in this repo's history for dependency-adjacent maintenance
     # (`5fccdb4 chore: ownership transfer cleanup ... package metadata`,
@@ -93,6 +94,70 @@ updates:
       mstest:
         patterns:
           - "MSTest.*"
+
+      # Microsoft.OpenApi and Microsoft.OpenApi.YamlReader ship from the same upstream repository
+      # and move together — confirmed, not assumed, by pulling both packages' .nuspec metadata
+      # from the local NuGet cache: both list <repository url="https://github.com/Microsoft/
+      # OpenAPI.NET" ...>, and `curl https://api.nuget.org/v3-flatcontainer/<id>/index.json`
+      # against both ids returns byte-identical version lists back to 2.0.0 — most tellingly, both
+      # skip 3.10.1 identically (3.9.0 -> 3.10.0 -> 3.10.2 for each), which a shared prefix alone
+      # could never explain. Explicit list rather than a `Microsoft.OpenApi*` pattern: unlike
+      # MSTest.* (exclusively microsoft/testfx), the OpenAPI.NET repo is the only thing confirmed
+      # here — a future package merely starting with "Microsoft.OpenApi" was not checked and
+      # should not be silently swept in.
+      openapi-net:
+        patterns:
+          - "Microsoft.OpenApi"
+          - "Microsoft.OpenApi.YamlReader"
+
+      # These eight packages are Microsoft.Extensions.Http, Microsoft.Extensions.Configuration,
+      # Microsoft.Extensions.Configuration.Json, Microsoft.Extensions.Configuration.
+      # EnvironmentVariables, Microsoft.AspNetCore.OpenApi, Microsoft.Extensions.
+      # ApiDescription.Server, Microsoft.EntityFrameworkCore.Sqlite and Microsoft.AspNetCore.
+      # Authentication.JwtBearer. Confirmed, not assumed, by pulling every one of their .nuspec
+      # files from the local NuGet cache: all eight declare <repository url="https://github.com/
+      # dotnet/dotnet" commit="e2f47b0110ed922f21a1522da67279133ce28f32" .../> — the *same* commit
+      # in .NET's unified "VMR" monorepo, not merely the same repository. `curl
+      # https://api.nuget.org/v3-flatcontainer/<id>/index.json` against all eight confirms the
+      # version lists are identical at every one of the last twelve monthly releases (10.0.0
+      # through 10.0.11) — this is .NET's coordinated monthly servicing train, and it always bumps
+      # every one of these together to the same version number. Explicit list rather than
+      # `Microsoft.Extensions.*`/`Microsoft.AspNetCore.*` patterns: those prefixes are not safe
+      # wildcards here. Microsoft.Extensions.AI and Microsoft.Extensions.Http.Resilience both
+      # start with "Microsoft.Extensions." and were checked the same way — their nuget.org version
+      # lists (10.9.0, released on their own monthly cadence unrelated to 10.0.x) prove they are
+      # NOT part of this release train despite the shared prefix, so a wildcard here would have
+      # silently grouped a genuinely-independent package the moment one like it was added to
+      # Directory.Packages.props. System.CommandLine was also checked and deliberately excluded:
+      # its .nuspec points at the identical dotnet/dotnet commit as this group, but its own
+      # version (2.0.11) does not move in lockstep with these packages' 10.0.x numbering — its
+      # stable releases follow their own independent 2.x line (next is 3.0.0-preview.*, not
+      # 10.0.x) — and nothing in this repo (no test, no declared dependency) requires it to match
+      # any of these eight. Same build infrastructure is not the same claim as moving together.
+      dotnet-servicing:
+        patterns:
+          - "Microsoft.Extensions.Http"
+          - "Microsoft.Extensions.Configuration"
+          - "Microsoft.Extensions.Configuration.Json"
+          - "Microsoft.Extensions.Configuration.EnvironmentVariables"
+          - "Microsoft.AspNetCore.OpenApi"
+          - "Microsoft.Extensions.ApiDescription.Server"
+          - "Microsoft.EntityFrameworkCore.Sqlite"
+          - "Microsoft.AspNetCore.Authentication.JwtBearer"
+
+      # NSwag.AspNetCore and NSwag.MSBuild both declare <repository url="https://github.com/
+      # RicoSuter/NSwag.git" .../> in their .nuspec, and their nuget.org version lists are
+      # identical across the last fifteen releases (14.0.5 through 14.7.1) — confirmed the same
+      # way as the other two groups above, not assumed from the matching version number already
+      # in Directory.Packages.props today. NJsonSchema is deliberately NOT in this group despite
+      # sharing an author (RSuter) with NSwag and being an NSwag dependency: its .nuspec points at
+      # a different repository (github.com/RicoSuter/NJsonSchema, not NSwag.git) and its version
+      # (11.6.1) is on a completely different, independently-numbered line from NSwag's (14.7.1) —
+      # same author is not the same release train.
+      nswag:
+        patterns:
+          - "NSwag.AspNetCore"
+          - "NSwag.MSBuild"
 
   # -------------------------------------------------------------------------------------------
   # GitHub Actions: every action build-and-test.yml uses is pinned by commit SHA with a trailing

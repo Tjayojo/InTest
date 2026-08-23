@@ -243,11 +243,17 @@ New dependencies are held to a hard line, because adopters inherit whatever we t
 for two ecosystems: `nuget` (reading `Directory.Packages.props` directly — this repository uses
 central package management with no `packages.lock.json`, which Dependabot's `nuget` updater
 handles natively) and `github-actions` (reading the `uses:` lines in
-`.github/workflows/build-and-test.yml`). The three `MSTest.*` packages
-(`MSTest.TestFramework`, `MSTest.TestAdapter`, `MSTest.Analyzers`) are grouped into a single PR,
-because they ship from the same upstream release train and move together; every other package
-gets its own PR. The file itself carries the fuller reasoning, including how CPM support and
-SHA-pin support were confirmed rather than assumed.
+`.github/workflows/build-and-test.yml`). Four groups of packages that were each confirmed, by
+checking `.nuspec` repository metadata and nuget.org version history rather than assumed from a
+shared name prefix, to ship from one upstream release train and move together are collapsed into
+a single PR apiece: `MSTest.*` (`MSTest.TestFramework`, `MSTest.TestAdapter`,
+`MSTest.Analyzers` — microsoft/testfx), `openapi-net` (`Microsoft.OpenApi`,
+`Microsoft.OpenApi.YamlReader` — Microsoft/OpenAPI.NET), `dotnet-servicing` (eight packages built
+from the same commit in the unified `dotnet/dotnet` monorepo — see the file for the full list)
+and `nswag` (`NSwag.AspNetCore`, `NSwag.MSBuild` — RicoSuter/NSwag). Every other package gets its
+own PR. The file itself carries the fuller reasoning for each group, including the packages that
+were considered and deliberately excluded (`Microsoft.NET.Test.Sdk`, `Shouldly`, `NJsonSchema`,
+`System.CommandLine`) and how CPM support and SHA-pin support were confirmed rather than assumed.
 
 **What Dependabot enforces mechanically:** a version bump proposal against
 `Directory.Packages.props`, nothing more. For `github-actions`, it keeps an action pinned to a
