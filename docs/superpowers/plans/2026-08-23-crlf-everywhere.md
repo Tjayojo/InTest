@@ -12,6 +12,12 @@
 
 ---
 
+## Revision note — final holistic review
+
+The final cross-cutting review (after all 7 tasks landed) found a fourth instance of the same recurring class of gap: two comments this plan deliberately left untouched — `UpgradeCommand.cs:325-330` and `UpgradeCommandTests.cs:232-239`, both explaining why an `intestVersion`-insertion test needs to read a config's own newline convention rather than hard-coding one — state in the present tense that "the scaffolded .gitattributes pins Generated/**, coverage-report.json and fixtures/**/*.json to LF but not intest.json itself." That was true before this plan; `InitCommand.GitattributesContent` (Task 4) now pins those same three paths to CRLF, not LF. The plan's original exclusion of `UpgradeCommand.cs`/`UpgradeCommandTests.cs` from scope was correct about *test behavior* (both still pass — `DetectFileNewline` reads the file's own bytes, never trusts this comment) but didn't anticipate that Task 4's edit elsewhere would make this comment's factual claim stale. Fixed below: the "to LF" framing is replaced with a mechanism that stays true regardless of which letter the three pinned paths use — `intest.json` is never pinned at all, so it follows whatever the checking-out machine's own `core.autocrlf` produces rather than a fixed convention.
+
+---
+
 ## Revision note — Task 6's code quality review
 
 Code quality review of Task 6 found that its `docs/getting-started.md` sentence, and an already-merged Task 4 doc comment in `InitCommand.cs` (lines 53-55) carrying the identical claim, both overclaim relative to what Task 5's own investigation established: they name `core.autocrlf=false` alongside `core.autocrlf=input` as both causing a checkout to flatten CRLF to LF. Task 5 proved `false` does not do this — it applies no conversion in either direction, so a file committed as CRLF (which every InTest writer now produces) round-trips as CRLF regardless of the pin, the same "coincidentally safe" shape `core.autocrlf=true` has under this convention. Only `core.autocrlf=input` demonstrably flattens (normalizes on add, does not re-expand on checkout — verified with a hex-dumped before/after in Task 5). "Linux/macOS" as a named risk has the same problem: its typical default is `core.autocrlf=false`, which is the coincidentally-safe case, not a risk. Both mentions are corrected below to name only `core.autocrlf=input`, matching what was actually demonstrated.
