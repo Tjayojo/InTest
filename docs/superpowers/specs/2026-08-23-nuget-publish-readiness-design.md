@@ -337,7 +337,10 @@ the repo's stated convention. The **SVG genuinely differs** between CRLF and LF 
 packed, but it is the master the PNG is rendered from, so regenerating on a CRLF checkout starts
 from different bytes.
 
-Add `*.png binary` and `*.svg text eol=lf`.
+Add `*.png binary` and `*.svg text eol=crlf`. **Note the repo flipped its line-ending
+convention after revision 3 was written** — `.gitattributes` is now `* text=auto eol=crlf` with
+`*.cs text eol=crlf`, so pinning the SVG to LF would now be the odd one out. The requirement is
+that the byte is *pinned*, not which byte it is.
 
 ## 11. Verification
 
@@ -362,7 +365,8 @@ Add `*.png binary` and `*.svg text eol=lf`.
   item.
 - `src/InTest.Cli/README.md`, `src/InTest.Runtime/README.md` — new.
 - `THIRD-PARTY-NOTICES.md` — correct `Microsoft.OpenApi` to 3.10.2.
-- `.gitattributes` — `*.png binary`, `*.svg text eol=lf`.
+- `.gitattributes` — `*.png binary`, `*.svg text eol=crlf` (matching the repo's current
+  convention — see §10).
 - `CONTRIBUTING.md` — new "Publishing checklist" subsection.
 
 **Not touched, contrary to revision 2:** `Directory.Packages.props` (no SourceLink entry — §2),

@@ -358,7 +358,7 @@ future release job will have to undo.
 
 ### Task 1: `[scaffold-reads-itself]`
 
-- [ ] **Step 1:** `InitCommand.cs:227` emits `CliVersion.Current` instead of `0.1.0`. Decide
+- [ ] **Step 1:** `InitCommand.cs:232` emits `CliVersion.Current` instead of `0.1.0`. Decide
       deliberately how the value reaches the template string and whether anything must escape it.
 - [ ] **Step 2: Rewrite `PackageVersionCouplingTests`' `InTest.Runtime` case — do not delete it.**
       There is no literal left to compare, but the guard is what would have caught this defect.
