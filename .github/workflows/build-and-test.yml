@@ -1,0 +1,155 @@
+name: Build and test
+
+# `[both-platforms]` (docs/superpowers/plans/2026-08-22-intest-ci.md): FixtureDocument's own
+# comment says a Windows CI agent cannot observe the platform list shrinking, and Task 1 found
+# three latent Linux-only defects and one shipped [paired] defect that no Windows-only process
+# would have surfaced. Both triggers run both platforms rather than one doing double duty.
+#
+# `pull_request` (not `pull_request_target`) intentionally runs with the PR head's own
+# permissions and secrets exposure -- this repo has no need for the elevated-base-branch access
+# `pull_request_target` grants, and reaching for it here would widen exactly the supply-chain
+# surface `[pin-actions-by-sha]` exists to narrow.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Neither job writes to the repository, opens issues, or needs any token scope beyond reading
+# the checkout -- least privilege, not a response to a specific incident.
+permissions:
+  contents: read
+
+# Every run step below is PowerShell so the same command text is exercised on both platforms
+# instead of maintaining a bash dialect and a pwsh dialect that could silently drift apart.
+# windows-latest ships PowerShell out of the box; the Linux side was validated locally against
+# mcr.microsoft.com/dotnet/sdk:10.0, which carries pwsh 7.6.4 (see the commit message / task
+# report for exactly what that validation covered and did not).
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  # `[fast-first]`: Architecture + Cli + Runtime is the job every pull request should get a fast
+  # verdict from. Measured (Task 1, cold cache, 3 repeats, both platforms): ~33.5-35.5s end to
+  # end. Kept separate from Golden below so a contributor is not made to wait on Golden's ~90-107s
+  # for feedback these three suites can give in a fraction of that time.
+  fast:
+    name: Architecture + Cli + Runtime (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        # actions/checkout, pinned by commit SHA per [pin-actions-by-sha]: an action runs with
+        # repository secrets in scope, a strictly larger supply-chain surface than a NuGet
+        # package, and CONTRIBUTING.md's dependency policy is explicit that a tag is mutable and
+        # can be repointed after review. Resolved 2026-08-22 via
+        #   gh api repos/actions/checkout/releases/latest --jq '.tag_name'      # -> v7.0.1
+        #   gh api repos/actions/checkout/git/refs/tags/v7.0.1 --jq '.object.sha'
+        # and the resulting commit was fetched and its date/message checked against the release
+        # before use, not trusted on the ref name alone.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET SDK
+        # actions/setup-dotnet, pinned the same way (releases/latest -> v6.0.0 -> refs/tags ->
+        # commit, commit verified). No dotnet-version input: this repo's global.json (added in
+        # Task 1, pinned to 10.0.400 with rollForward: latestFeature, and the reason recorded
+        # there) is the single source of truth for the SDK version. setup-dotnet's own action.yml
+        # documents dotnet-version as "Optional ... If not provided, will install global.json
+        # version when available" -- confirmed by reading action.yml at this pinned commit, not
+        # assumed from the action's name. A second version string here would be exactly the kind
+        # of duplicated-by-accident value CLAUDE.md's package-version rule warns about, just for
+        # the SDK instead of a package.
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        # actions/cache, pinned the same way (releases/latest -> v6.1.0 -> refs/tags -> commit,
+        # commit verified). Deliberate, not absent: restore is a real fraction of the measured
+        # per-job time. Keyed on Directory.Packages.props -- required, this repo's single source
+        # of package versions per CLAUDE.md, and "bitten twice by stale-resolution defects" is
+        # CLAUDE.md's own wording for why a key that can go stale is worse than no cache -- plus
+        # every .csproj (a new PackageReference changes what gets restored without touching
+        # Directory.Packages.props) and Directory.Build.props (TFM and other props that feed
+        # resolution). setup-dotnet has a built-in `cache` input, but it hashes
+        # packages.lock.json, and this repo has none (checked: no packages.lock.json anywhere
+        # under tests/, src/, or samples/) -- it would silently cache nothing useful. Using
+        # actions/cache directly with an explicit key is the only way to satisfy "the key must
+        # include Directory.Packages.props" precisely.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # Each suite is invoked against its own .csproj, not the .sln, so this job only ever
+      # builds Architecture.Tests/Cli.Tests/Runtime.Tests and the two src/ projects they
+      # reference -- never Golden.Tests or the four samples/ projects, which is what keeps this
+      # job fast rather than incidentally rebuilding everything the other job also builds.
+      # --logger's LogFileName is set explicitly so scripts/ci/assert-trx-results.ps1 can find
+      # each result by a name it chose, rather than parsing dotnet test's timestamp-based default
+      # naming (which does not encode which project produced which file -- confirmed by direct
+      # experiment building this workflow: running the whole solution's tests through the default
+      # logger produced two files differing only by a trailing "[1]").
+      - name: Test InTest.Architecture.Tests
+        run: dotnet test tests/InTest.Architecture.Tests/InTest.Architecture.Tests.csproj --logger "trx;LogFileName=InTest.Architecture.Tests.trx" --results-directory ${{ github.workspace }}/TestResults
+
+      - name: Test InTest.Cli.Tests
+        run: dotnet test tests/InTest.Cli.Tests/InTest.Cli.Tests.csproj --logger "trx;LogFileName=InTest.Cli.Tests.trx" --results-directory ${{ github.workspace }}/TestResults
+
+      - name: Test InTest.Runtime.Tests
+        run: dotnet test tests/InTest.Runtime.Tests/InTest.Runtime.Tests.csproj --logger "trx;LogFileName=InTest.Runtime.Tests.trx" --results-directory ${{ github.workspace }}/TestResults
+
+      - name: Assert the suites actually ran
+        # Step 3 of the plan's Task 2: a green `dotnet test` step does not prove anything ran --
+        # see the script's own header for the two source comments and the reasoning this points
+        # at. This is deliberately a separate step from the three above, after all of them, so a
+        # single missing/empty result cannot be masked by the other two succeeding.
+        run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Architecture.Tests, InTest.Cli.Tests, InTest.Runtime.Tests
+
+  # `[fast-first]`: Golden is CLAUDE.md's "only suite that proves generated code both compiles
+  # and runs" -- kept in its own parallel job, not folded into `fast` above, specifically so it
+  # cannot slow down the fast job's verdict while still running on every push and pull request
+  # (provisional per the plan: revisit if it ever exceeds 12 minutes wall clock on the slower
+  # platform -- measured Task 1 worst case was 107.0s on Windows, a 6.7x margin, so the fallback
+  # to a merge-queue-only run is not triggered today).
+  golden:
+    name: Golden (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Identical pins and identical reasoning to the `fast` job above -- see those comments for
+      # how each SHA was resolved. Not factored into a reusable workflow: two jobs is not enough
+      # duplication to justify the indirection, and CONTRIBUTING.md's "one canonical explanation"
+      # rule is about reasoning, not about avoiding all repeated YAML.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        # Same key shape as the `fast` job. Deliberately identical, not job-scoped: both jobs
+        # restoring the same package set on the same OS should hit the same cache entry rather
+        # than each maintaining a redundant copy.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Test InTest.Golden.Tests
+        # InTest.Golden.Tests shells out to `dotnet build`/`dotnet test` on scaffolded temp
+        # projects and runs generated suites against an in-process HTTP stub (CLAUDE.md) -- this
+        # is the ~88-89% of this job's wall clock (GeneratedSuiteExecutionTests, per the plan's
+        # §18 remeasurement), not restore/build of this repo itself.
+        run: dotnet test tests/InTest.Golden.Tests/InTest.Golden.Tests.csproj --logger "trx;LogFileName=InTest.Golden.Tests.trx" --results-directory ${{ github.workspace }}/TestResults
+
+      - name: Assert the suite actually ran
+        run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Golden.Tests
