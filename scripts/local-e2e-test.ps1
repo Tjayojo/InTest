@@ -94,20 +94,29 @@
 #>
 
 # ---------------------------------------------------------------------------------------------
-# Why one script, not two (PowerShell + Bash), even though both are available on this machine:
+# Why one script, not two (PowerShell + Bash):
 #
 # This repository's own convention (CONTRIBUTING.md, "One canonical explanation") is that when
 # the same reasoning has to appear twice, one copy is authoritative and the other points at it --
 # never two copies that must agree by discipline. A bash port of this script would be exactly
 # that: every step above (the version stamp format, the NUGET_PACKAGES redirection, the exact
 # sequence of expected exit codes, the csproj patch, the contrived version-mismatch test) would
-# exist twice, and the two would drift the first time either one changed without the other. Git
-# Bash on this machine can invoke a PowerShell script directly (`pwsh scripts/local-e2e-test.ps1`)
-# with no wrapper needed, so "both shells are available" does not require "both shells host a
-# copy of the logic" -- it only requires that PowerShell's `pwsh`/`powershell` executable is
-# reachable from Git Bash, which it is. CI is not set up yet (CLAUDE.md), so there is no second
-# platform this script needs to run natively on today; if that changes, revisit this decision
-# rather than pre-emptively duplicating it.
+# exist twice, and the two would drift the first time either one changed without the other.
+#
+# PowerShell 7 (`pwsh`) is itself cross-platform -- it ships and runs natively on Linux and macOS,
+# not just Windows -- so "one script" does not mean "Windows contributors get a script and
+# everyone else improvises." It originally meant something narrower than that in practice: this
+# file called out to `robocopy` (Windows-only) in Copy-SourceTree and built several paths with
+# hardcoded backslashes, so a Linux `pwsh` could still not run it end to end even though the
+# interpreter itself was available. That gap -- documented as mandatory in CONTRIBUTING.md while
+# unusable on Linux -- was found and fixed in the same change as this comment; Copy-SourceTree is
+# now a plain PowerShell/.NET file walk and every path is built with `Join-Path`'s multi-segment
+# form, so nothing left in this file assumes a Windows filesystem. Verified by direct experiment
+# in a `mcr.microsoft.com/dotnet/sdk:10.0` Linux container with PowerShell installed alongside the
+# .NET SDK -- see this task's notes for the transcript. CI is not set up yet (CLAUDE.md), so
+# nothing here has run on a Linux *runner* yet, only a Linux container used for this verification;
+# if a runner surfaces a gap this container didn't, revisit this comment rather than leaving it
+# stale.
 # ---------------------------------------------------------------------------------------------
 
 [CmdletBinding()]
@@ -122,7 +131,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 if (-not $Spec) {
-    $Spec = Join-Path $RepoRoot 'samples\Catalog.Api\Catalog.Api.json'
+    $Spec = Join-Path $RepoRoot 'samples' 'Catalog.Api' 'Catalog.Api.json'
 }
 $Spec = (Resolve-Path $Spec).Path
 
@@ -159,28 +168,60 @@ $ScaffoldDir = Join-Path $ScaffoldParent $ProjectName
 New-Item -ItemType Directory -Force -Path $LocalFeed, $NuGetPackagesScratch, $ScaffoldParent, $SrcCopyRoot | Out-Null
 
 # ---- Copy just enough of the repo for InTest.Cli and InTest.Runtime to build exactly as they
-# would in place: the two projects themselves (minus any bin/obj, which robocopy /XD excludes at
-# every depth, not just the top), plus Directory.Build.props and Directory.Packages.props at the
-# same relative depth above them -- both are found by MSBuild's normal walk-up-from-the-project
-# directory search, so preserving the relative layout (scratch-root/Directory.Build.props two
-# levels above scratch-root/src/InTest.Cli/InTest.Cli.csproj, matching the real repo) is what
-# makes that search land on these copies rather than either finding nothing or, worse, finding
-# the real repo's if the scratch root ever happened to sit under it.
+# would in place: the two projects themselves (minus any bin/obj, excluded at every depth, not
+# just the top), plus Directory.Build.props and Directory.Packages.props at the same relative
+# depth above them -- both are found by MSBuild's normal walk-up-from-the-project directory
+# search, so preserving the relative layout (scratch-root/Directory.Build.props two levels above
+# scratch-root/src/InTest.Cli/InTest.Cli.csproj, matching the real repo) is what makes that search
+# land on these copies rather than either finding nothing or, worse, finding the real repo's if
+# the scratch root ever happened to sit under it.
+#
+# This used to shell out to robocopy, which does not exist outside Windows -- a Linux contributor
+# following CONTRIBUTING.md's "use this script" rule could not, since the very first thing the
+# script did after packing would fail with "command not found". Replaced with a pure
+# PowerShell/.NET walk (Get-ChildItem + Copy-Item), which is identical in the property that
+# actually matters here: nothing is written back into the *source* obj/ (only ever read from), so
+# the CS0579 duplicate-attribute failure this copy step exists to avoid (see the header comment
+# above $RunId) cannot reappear -- that failure came from letting concurrent builds share one
+# obj/, not from which tool did the copying. Confirmed by direct experiment on both platforms (see
+# this task's notes): a run against a populated src/InTest.Cli/bin and obj/ still produces a
+# scratch copy with neither directory present.
 function Copy-SourceTree {
     param([Parameter(Mandatory)] [string]$From, [Parameter(Mandatory)] [string]$To)
-    & robocopy $From $To /E /XD bin obj /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed copying '$From' to '$To' (exit $LASTEXITCODE)"
+
+    if (-not (Test-Path -LiteralPath $From)) {
+        throw "Copy-SourceTree source not found: $From"
     }
+
+    $excludedDirNames = @('bin', 'obj')
+    $fromFull = (Resolve-Path -LiteralPath $From).Path
+
+    Get-ChildItem -LiteralPath $fromFull -Recurse -Force |
+        Where-Object {
+            $relative = $_.FullName.Substring($fromFull.Length).TrimStart('/', '\')
+            $segments = $relative -split '[\\/]'
+            -not ($segments | Where-Object { $excludedDirNames -contains $_ })
+        } |
+        ForEach-Object {
+            $relative = $_.FullName.Substring($fromFull.Length).TrimStart('/', '\')
+            $destination = Join-Path $To $relative
+            if ($_.PSIsContainer) {
+                New-Item -ItemType Directory -Force -Path $destination | Out-Null
+            }
+            else {
+                New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent) | Out-Null
+                Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+            }
+        }
 }
 
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'Directory.Build.props') -Destination $SrcCopyRoot
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'Directory.Packages.props') -Destination $SrcCopyRoot
-Copy-SourceTree -From (Join-Path $RepoRoot 'src\InTest.Cli') -To (Join-Path $SrcCopyRoot 'src\InTest.Cli')
-Copy-SourceTree -From (Join-Path $RepoRoot 'src\InTest.Runtime') -To (Join-Path $SrcCopyRoot 'src\InTest.Runtime')
+Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Cli') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Cli')
+Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime')
 
-$CliProject = Join-Path $SrcCopyRoot 'src\InTest.Cli'
-$RuntimeProject = Join-Path $SrcCopyRoot 'src\InTest.Runtime\InTest.Runtime.csproj'
+$CliProject = Join-Path $SrcCopyRoot 'src' 'InTest.Cli'
+$RuntimeProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime' 'InTest.Runtime.csproj'
 
 function Write-Step {
     param([string]$Text)
@@ -249,8 +290,16 @@ try {
         '-o', $LocalFeed
     )
 
-    $cliPackage = Join-Path $LocalFeed "intest.cli.$LocalVersion.nupkg"
-    $runtimePackage = Join-Path $LocalFeed "intest.runtime.$LocalVersion.nupkg"
+    # Filename casing here must match each project's <PackageId> exactly ("InTest.Cli",
+    # "InTest.Runtime") -- `dotnet pack` names the .nupkg after PackageId verbatim, not
+    # lowercased. A lowercase "intest.cli.*" check passed here for a long time only because NTFS
+    # path lookups are case-insensitive; on a case-sensitive filesystem (ext4, the Linux container
+    # this was verified against) Test-Path against the wrong case returns false even though the
+    # file exists one case away. Confirmed by direct experiment: this check failed on Linux before
+    # the fix, immediately after both packs had visibly succeeded and written
+    # "InTest.Cli.<version>.nupkg" / "InTest.Runtime.<version>.nupkg" to the feed.
+    $cliPackage = Join-Path $LocalFeed "InTest.Cli.$LocalVersion.nupkg"
+    $runtimePackage = Join-Path $LocalFeed "InTest.Runtime.$LocalVersion.nupkg"
     if (-not (Test-Path $cliPackage)) {
         throw "Expected package not found: $cliPackage -- the -p:Version override did not take effect as expected."
     }
@@ -413,7 +462,7 @@ finally {
     # ---- Belt-and-suspenders tripwire, not a cleanup step: NUGET_PACKAGES redirection should
     # make this structurally impossible regardless of anything above, so if either package ever
     # shows up here, that is itself a finding worth shouting about rather than silently ignoring.
-    $globalPackages = Join-Path $HOME '.nuget\packages'
+    $globalPackages = Join-Path $HOME '.nuget' 'packages'
     foreach ($pkg in 'intest.cli', 'intest.runtime') {
         $found = Join-Path $globalPackages $pkg
         if (Test-Path $found) {
