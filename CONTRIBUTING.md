@@ -160,6 +160,25 @@ does not use Shouldly's string helpers at all: it compares with
 that to 67 failures. `ShouldlyStringDefaultsTests` pins the six defaults themselves, because every
 one of those annotations stops being load-bearing the moment Shouldly changes them.
 
+**Line endings are the same trap in a different costume, and this repository's first real CI run
+caught it.** `UpgradeCommandTests.NeverBumpsTheManifestFormatVersionOrAnotherToolsPin` set up
+`.config/dotnet-tools.json` from a C# raw string literal and then asserted on the result with
+`after.ShouldContain("\"version\": 1,\n  \"isRoot\": true", ...)` — a hard-coded `\n` standing in
+for "these two values are unchanged." A raw string literal's line endings are whatever bytes sit in
+the `.cs` file at that point, not a fixed constant: on this project's own machines
+`core.autocrlf=input` keeps the checkout LF, so the literal carried LF and the embedded `\n`
+matched. `windows-latest`'s default `core.autocrlf=true` checks the same file out CRLF, the literal
+carried CRLF, and the same bytes the assertion meant to find — `"version": 1` immediately followed
+by `"isRoot": true` — were there, just not joined by a bare `\n` any more. The fix was the same
+shape as the casing fix: split into two `ShouldContain` calls, one per value, so the assertion
+states the claim it actually means ("these two values didn't change") rather than a stronger one it
+does not ("...and stayed joined by this exact byte"). `.gitattributes` also gained a `*.cs
+text eol=lf` entry so the checkout itself stops varying by platform — the mechanical scan behind
+that decision (grep every `\n`/`\r\n` literal compared against source-file-derived content) found
+this to be the only test in the suite with the hazard; the rest either used regular escape
+sequences (fixed bytes regardless of checkout) or compared against output a renderer or JSON writer
+already normalizes.
+
 **A proof living outside the repository is indistinguishable, to everyone downstream, from a
 proof that was never run.** Running the real check once, by hand, and reporting the result in a
 message is genuine evidence in the moment — but it leaves nothing anyone else can find, re-run,

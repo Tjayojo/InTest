@@ -490,8 +490,19 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var after = ReadDotnetTools();
-        after.ShouldContain("\"version\": 1,\n  \"isRoot\": true", Case.Sensitive,
+        // Two separate Contains, not one string spanning the line break between them: the claim is
+        // that these two values are unchanged, not that they stay adjacent across a particular
+        // line ending. The original single assertion embedded a literal "\n" here, which only
+        // matched because this file's own line endings happened to be LF on the machine that wrote
+        // it. CI's windows-latest checks .cs out as CRLF by default, so the setup literal above
+        // carried CRLF there and the embedded "\n" no longer occurred in the text at all, even
+        // though "version": 1 and "isRoot": true were both present and both correct. See
+        // .gitattributes' *.cs entry and CONTRIBUTING.md for the general case this is an instance
+        // of.
+        after.ShouldContain("\"version\": 1,", Case.Sensitive,
             customMessage: "the manifest format version (an unrelated integer under the same key name) must not change");
+        after.ShouldContain("\"isRoot\": true", Case.Sensitive,
+            customMessage: "isRoot must not change");
         after.ShouldContain("\"some-other-tool\": { \"version\": \"3.4.5\"", Case.Sensitive,
             customMessage: "a sibling tool's own pin must be untouched");
         after.ShouldContain($"\"intest.cli\": {{ \"version\": \"{CliVersion.Current}\"", Case.Sensitive);

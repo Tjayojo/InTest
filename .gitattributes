@@ -9,3 +9,22 @@
 # Scriban templates are rendered verbatim into the golden output, so their line endings
 # are part of the generated artifact rather than a local editing preference.
 *.scriban text eol=lf
+
+# [lf-everywhere] pinned generated artifacts (above) but never our own source. A C# raw string
+# literal's line endings are whatever bytes sit in the .cs file at that point — they are data, not
+# editing preference, the same way a Scriban template's are. The first real CI run
+# (windows-latest, core.autocrlf=true default) proved it: UpgradeCommandTests.cs wrote
+# .config/dotnet-tools.json from a multi-line raw string literal and then asserted on the result
+# with a hard-coded "\n" between two of its keys. Locally core.autocrlf=input keeps the checkout
+# LF, so the literal carried LF and the assertion passed; on windows-latest the same file checked
+# out CRLF, the literal carried CRLF, and the assertion failed — not because behaviour differed,
+# but because the checkout did. Confirmed by direct experiment: cloning with
+# `git -c core.autocrlf=true clone` reproduced the failure outside CI.
+#
+# Pinning eol=lf changes nothing already committed — `git show HEAD:<path> | grep -P '\r'` found
+# no CRLF in any tracked .cs blob, because `* text=auto` above already normalizes to LF in the
+# object database; only checkout was ever platform-dependent. The population of clones this
+# affects is days old and small, so this is the cheapest point at which to close the gap. Modern
+# .NET tooling does not care: this repository's own tests already build and run under LF .cs files
+# on Windows via core.autocrlf=input, which is exactly what this line makes universal.
+*.cs text eol=lf
