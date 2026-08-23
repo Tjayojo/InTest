@@ -244,11 +244,31 @@ New dependencies are held to a hard line, because adopters inherit whatever we t
 for two ecosystems: `nuget` (reading `Directory.Packages.props` directly — this repository uses
 central package management with no `packages.lock.json`, which Dependabot's `nuget` updater
 handles natively) and `github-actions` (reading the `uses:` lines in
-`.github/workflows/build-and-test.yml`). The three `MSTest.*` packages
-(`MSTest.TestFramework`, `MSTest.TestAdapter`, `MSTest.Analyzers`) are grouped into a single PR,
-because they ship from the same upstream release train and move together; every other package
-gets its own PR. The file itself carries the fuller reasoning, including how CPM support and
-SHA-pin support were confirmed rather than assumed.
+`.github/workflows/build-and-test.yml`). Four groups of packages that were each confirmed, by
+checking `.nuspec` repository metadata and nuget.org version history, to ship from one upstream
+release train and move together are collapsed into a single PR apiece, each expressed as the
+narrowest name-prefix glob that covers exactly its members and nothing else in
+`Directory.Packages.props` (checked mechanically, package by package — not eyeballed): `MSTest.*`
+(`MSTest.TestFramework`, `MSTest.TestAdapter`, `MSTest.Analyzers` — microsoft/testfx),
+`openapi-net`'s `Microsoft.OpenApi*` (`Microsoft.OpenApi`, `Microsoft.OpenApi.YamlReader` —
+Microsoft/OpenAPI.NET), `dotnet-servicing`'s `Microsoft.Extensions.*` /
+`Microsoft.AspNetCore.*` / `Microsoft.EntityFrameworkCore.*` (eight packages built from the same
+commit in the unified `dotnet/dotnet` monorepo — see the file for the full list), and `nswag`'s
+`NSwag.*` (`NSwag.AspNetCore`, `NSwag.MSBuild` — RicoSuter/NSwag). Every other package gets its
+own PR. The file itself carries the fuller reasoning for each group, including the packages that
+were considered and deliberately excluded (`Microsoft.NET.Test.Sdk`, `Shouldly`, `NJsonSchema`,
+`System.CommandLine`) and how CPM support and SHA-pin support were confirmed rather than assumed.
+
+**`dotnet-servicing`'s globs accept a named future risk in exchange for brevity.**
+`Microsoft.Extensions.*` matches more than the five packages it groups today — if a package like
+`Microsoft.Extensions.AI` or `Microsoft.Extensions.Http.Resilience` (both real packages on their
+own, unrelated release cadence, not in `Directory.Packages.props` today) is ever added, this glob
+would silently sweep it into the group and delay its updates behind the VMR servicing train's.
+The file's own comment on `dotnet-servicing` names this trade explicitly and says what to check
+before adding a `Microsoft.Extensions.*` package. `openapi-net` and `nswag`'s globs do not carry
+this risk today: nothing else in `Directory.Packages.props` starts with `Microsoft.OpenApi` or
+`NSwag.`, and the file's comments explain why (`Microsoft.AspNetCore.OpenApi` shares the substring
+"OpenApi" but not the prefix; `NJsonSchema` does not start with `NSwag.` at all).
 
 **What Dependabot enforces mechanically:** a version bump proposal against
 `Directory.Packages.props`, nothing more. For `github-actions`, it keeps an action pinned to a

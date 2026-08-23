@@ -174,7 +174,11 @@ New-Item -ItemType Directory -Force -Path $LocalFeed, $NuGetPackagesScratch, $Sc
 # search, so preserving the relative layout (scratch-root/Directory.Build.props two levels above
 # scratch-root/src/InTest.Cli/InTest.Cli.csproj, matching the real repo) is what makes that search
 # land on these copies rather than either finding nothing or, worse, finding the real repo's if
-# the scratch root ever happened to sit under it.
+# the scratch root ever happened to sit under it. `assets/` is copied for the same reason, one
+# level shallower: both csproj files pack `../../assets/icon.png` by a relative path, so the
+# scratch copy needs `assets/` sitting at the same two-levels-above-the-project spot the real repo
+# has it, or `dotnet pack` fails with "Could not find a part of the path" -- confirmed by direct
+# experiment, this script failed exactly that way before `assets/` was added here.
 #
 # This used to shell out to robocopy, which does not exist outside Windows -- a Linux contributor
 # following CONTRIBUTING.md's "use this script" rule could not, since the very first thing the
@@ -217,6 +221,7 @@ function Copy-SourceTree {
 
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'Directory.Build.props') -Destination $SrcCopyRoot
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'Directory.Packages.props') -Destination $SrcCopyRoot
+Copy-SourceTree -From (Join-Path $RepoRoot 'assets') -To (Join-Path $SrcCopyRoot 'assets')
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Cli') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Cli')
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime')
 

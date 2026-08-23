@@ -22,5 +22,6 @@
     <Copyright>Copyright (c) 2026 Tjay Ojo</Copyright>
     <PackageProjectUrl>https://github.com/Tjayojo/intest</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Tjayojo/intest.git</RepositoryUrl>
+    <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
 </Project>
