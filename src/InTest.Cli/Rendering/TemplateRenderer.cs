@@ -121,9 +121,16 @@ public sealed class TemplateRenderer
         return Normalize(rendered);
     }
 
-    /// <summary>Normalizes line endings so golden files compare identically on every OS.</summary>
+    /// <summary>
+    /// Normalizes line endings so golden files compare identically on every OS. [crlf-everywhere]:
+    /// collapse to LF first so any already-CRLF input (e.g. a template file checked out CRLF) does
+    /// not double up, then re-expand to CRLF — the direction this project standardizes on for
+    /// every generated artifact. See TemplateRenderer's own callers and CommittedJsonOptions for
+    /// the JSON half of the same decision.
+    /// </summary>
     private static string Normalize(string value)
-        => value.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd() + "\n";
+        => value.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd()
+                .Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
 
     private static string ToPascalMethod(string httpMethod)
         => httpMethod.Length == 0 ? "Get" : char.ToUpperInvariant(httpMethod[0]) + httpMethod[1..].ToLowerInvariant();
