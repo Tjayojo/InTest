@@ -19,5 +19,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="InTest.Cli.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>

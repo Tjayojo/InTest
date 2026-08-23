@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- InTest mark: a generated test (dot) reaching a deployed API (ring) over a dotted call,
+     confirmed by a checkmark. Master vector — regenerate icon.png from this file if it changes. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="256" height="256">
+  <circle cx="6" cy="26" r="2" fill="#161b22"/>
+  <path d="M8 24 Q13 15 19 11" stroke="#161b22" stroke-width="1.6" stroke-dasharray="0,2.2" fill="none" stroke-linecap="round"/>
+  <circle cx="23" cy="9" r="5.2" fill="none" stroke="#161b22" stroke-width="1.6"/>
+  <path d="M20.4 9.2 L22.1 10.9 L25.3 6.8" stroke="#448c56" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,7 +1,8 @@
 # NuGet publish readiness
 
-**Status:** Design · Revision 1
+**Status:** Design · Revision 2
 **Date:** 2026-08-23
+**Supersedes:** Revision 1 — a logo now exists (§9); PackageIcon moved from deferred to in scope.
 
 ## 1. Purpose
 
@@ -40,8 +41,10 @@ state, not assumed.
    reference, no `PublishRepositoryUrl`/`EmbedUntrackedSources`/`ContinuousIntegrationBuild`, no
    `IncludeSymbols`/`SymbolPackageFormat`.
 2. **Missing core metadata.** nuget.md's metadata table: `InTest.Cli` has no `Description`;
-   neither package has `PackageTags`. (`RepositoryType` is *also* in that table, but SourceLink
-   sets it automatically once wired — see §3 below — so it is deliberately not hand-set.)
+   neither package has `PackageTags` or a `PackageIcon`. (`RepositoryType` is *also* in that
+   table, but SourceLink sets it automatically once wired — see §3 below — so it is deliberately
+   not hand-set.) `PackageIcon` was deferred in Revision 1 (no logo existed); §9 covers it now
+   that one does.
 3. **No package-page README.** Not an explicit Do/Consider in the fetched articles, but the
    nuget.md metadata table's `Description` guidance and general NuGet.org practice both point at
    it, and the repo already has the raw material (root README).
@@ -50,10 +53,6 @@ state, not assumed.
 
 ### Explicitly out of scope (asked and answered)
 
-- **PackageIcon.** No logo exists yet; the user intends to design one separately via Claude
-  Design. Not blocking — publish-nuget-package.md doesn't require an icon, and it can be added in
-  a later release without being a breaking change. A separate follow-up can pick this up once a
-  logo exists.
 - **CI publish workflow.** No `.github/workflows/publish.yml`. The actual `dotnet pack` /
   `dotnet nuget push` stays a manual, local step for now, matching the project's existing
   posture (`CONTRIBUTING.md`'s `scripts/local-e2e-test.ps1` rule already treats local
@@ -183,13 +182,45 @@ change performs:
   restore still succeeds end to end. Raw `dotnet pack` is not run by hand, per that section's
   explicit rule.
 
-## 8. Files touched
+## 9. Package icon
 
-- `Directory.Build.props` — SourceLink properties, `EnablePackageValidation`.
+`assets/icon.svg` (32×32-proportioned master, hex colors so it doesn't depend on `oklch()`
+support) and `assets/icon.png` (64×64, RGBA, transparent — rendered from the SVG via headless
+Chrome, verified 64×64/colortype 6) are checked in at repo root, shared by both packages rather
+than duplicated per-project — same rationale as the centrally-set metadata in §2/§3: one file,
+wanted by both.
+
+`Directory.Build.props` gains `<PackageIcon>icon.png</PackageIcon>` in the same centrally-set
+metadata block as `PackageProjectUrl`/`RepositoryUrl` — the icon is identical for both packages,
+so it follows that existing precedent rather than being duplicated per-project.
+
+The file *inclusion*, unlike the property, is scoped to the two packable projects only — matching
+§2's SourceLink placement, not §3's central metadata placement — because a `None`/`Pack="true"`
+item has a real per-project build effect (it puts a file in that project's package), where a
+property is just inert metadata on projects that never pack:
+
+```xml
+<ItemGroup>
+  <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />
+</ItemGroup>
+```
+
+on both `src/InTest.Cli/InTest.Cli.csproj` and `src/InTest.Runtime/InTest.Runtime.csproj`.
+
+Design rationale for the mark itself (concept exploration, color, and connector-style choices)
+lived in a Claude Design canvas during the conversation that produced Revision 2, not in this
+document — the artifact is not durable storage, so if that reasoning needs to survive independent
+of this spec, it should be captured here or dropped; recorded as a known gap, not backfilled
+speculatively.
+
+## 10. Files touched
+
+- `Directory.Build.props` — SourceLink properties, `EnablePackageValidation`, `PackageIcon`.
 - `Directory.Packages.props` — `Microsoft.SourceLink.GitHub` version entry.
 - `src/InTest.Cli/InTest.Cli.csproj` — `Description`, `PackageTags`, `PackageReadmeFile`,
-  SourceLink `PackageReference`.
+  SourceLink `PackageReference`, icon `None` item.
 - `src/InTest.Runtime/InTest.Runtime.csproj` — `PackageTags`, `PackageReadmeFile`, SourceLink
-  `PackageReference`.
+  `PackageReference`, icon `None` item.
 - `src/InTest.Cli/README.md`, `src/InTest.Runtime/README.md` — new.
+- `assets/icon.svg`, `assets/icon.png` — new.
 - `CONTRIBUTING.md` — new "Publishing checklist" subsection.
