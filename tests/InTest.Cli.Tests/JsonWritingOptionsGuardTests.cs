@@ -5,9 +5,9 @@ namespace InTest.Cli.Tests;
 /// <summary>
 /// Guards the recurrence direction the v1-e line-endings defect actually took: a JSON writer
 /// constructing its own <c>System.Text.Json.JsonSerializerOptions { WriteIndented = true }</c>
-/// inline, silently defaulting <c>NewLine</c> to <c>Environment.NewLine</c> (CRLF on Windows)
+/// inline, silently defaulting <c>NewLine</c> to <c>Environment.NewLine</c> (LF on Linux/macOS)
 /// instead of routing through <c>InTest.Cli.Json.CommittedJsonOptions</c>, which pins it to
-/// <c>"\n"</c>. Before that fix three of the four writers repeated the same ~7-line comment
+/// <c>"\r\n"</c>. Before that fix three of the four writers repeated the same ~7-line comment
 /// explaining the same fix instead of sharing the one value that mattered — a convention that
 /// lived only in comments, which is exactly the shape of gap this repository closes
 /// mechanically elsewhere (see <c>TemplateEscapingGuardTests</c>, which enforces the
@@ -85,8 +85,8 @@ public class JsonWritingOptionsGuardTests
             "These files mention 'WriteIndented' outside InTest.Cli.Json.CommittedJsonOptions: " +
             string.Join(", ", offenders.OrderBy(n => n, StringComparer.Ordinal)) + ". A JSON " +
             "writer that constructs its own JsonSerializerOptions here silently defaults NewLine " +
-            "to Environment.NewLine (CRLF on Windows) instead of the pinned \"\\n\" — reference " +
-            "InTest.Cli.Json.CommittedJsonOptions.Value instead, or add the file to " +
+            "to Environment.NewLine (LF on Linux/macOS) instead of the pinned \"\\r\\n\" — " +
+            "reference InTest.Cli.Json.CommittedJsonOptions.Value instead, or add the file to " +
             "JsonWritingOptionsGuardTests.Allowed with a one-line reason if it genuinely is not " +
             "one of the committed artefacts CommittedJsonOptions exists for.");
     }

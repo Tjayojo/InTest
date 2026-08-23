@@ -800,7 +800,7 @@ Orders.ApiTests/
 ├── appsettings*.json
 ├── Orders.ApiTests.runsettings   # named after the project, not the API
 ├── .editorconfig                 # naming style
-├── .gitattributes                # pins Generated/, coverage-report.json, fixtures/**/*.json to LF
+├── .gitattributes                # pins Generated/, coverage-report.json, fixtures/**/*.json to CRLF
 ├── Generated/                    # regenerated wholesale — NEVER hand-edited
 │   ├── OrdersTests.g.cs          # one class per tag; TestHost itself ships in InTest.Runtime,
 │   │                             # not here — TestStartup.cs (below) delegates to it

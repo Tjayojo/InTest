@@ -324,10 +324,12 @@ public static class UpgradeCommand
         var (hasComma, insertAt) = ScanOptionalTrailingComma(configBytes, afterValue);
         // Derived from the file being edited, not hard-coded: a config predating Task 1 — the
         // exact case this insert path exists to migrate — is CRLF whenever it was checked out with
-        // core.autocrlf=true, because the scaffolded .gitattributes pins Generated/**,
-        // coverage-report.json and fixtures/**/*.json to LF but not intest.json itself. A first
-        // review round measured a hard-coded "\n" planting a lone LF line inside an otherwise-CRLF
-        // file; this reads the file's own convention instead.
+        // core.autocrlf=true, because the scaffolded .gitattributes explicitly pins Generated/**,
+        // coverage-report.json and fixtures/**/*.json but never intest.json itself — intest.json's
+        // line endings follow whatever the checking-out machine's own core.autocrlf produces
+        // rather than a fixed convention. A first review round measured a hard-coded "\n" planting
+        // a lone LF line inside an otherwise-CRLF file; this reads the file's own convention
+        // instead.
         var newline = DetectFileNewline(configBytes);
 
         var insertionText = hasComma

@@ -173,9 +173,10 @@ by `"isRoot": true` — were there, just not joined by a bare `\n` any more. The
 shape as the casing fix: split into two `ShouldContain` calls, one per value, so the assertion
 states the claim it actually means ("these two values didn't change") rather than a stronger one it
 does not ("...and stayed joined by this exact byte"). `.gitattributes` also gained a `*.cs
-text eol=lf` entry so the checkout itself stops varying by platform — the mechanical scan behind
-that decision (grep every `\n`/`\r\n` literal compared against source-file-derived content) found
-this to be the only test in the suite with the hazard; the rest either used regular escape
+text eol=crlf` entry (originally `eol=lf`; see `docs/superpowers/plans/2026-08-23-crlf-everywhere.md`
+for why the letter later flipped) so the checkout itself stops varying by platform — the mechanical
+scan behind that decision (grep every `\n`/`\r\n` literal compared against source-file-derived
+content) found this to be the only test in the suite with the hazard; the rest either used regular escape
 sequences (fixed bytes regardless of checkout) or compared against output a renderer or JSON writer
 already normalizes.
 

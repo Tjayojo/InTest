@@ -109,10 +109,10 @@ public static class GenerateCommand
         // The prefix every operation path shares, if any. TestHost uses it to detect a base URL
         // that repeats it; otherwise every request 404s and nothing says why.
         var pathManifest = new JsonObject { ["operationPathPrefix"] = CommonPathPrefix(plan) };
-        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
-        // The trailing "+ \"\\n\"" is the final newline after the closing brace, which indented
-        // JSON serialization never emits on its own.
-        outputs["Generated/spec-paths.json"] = pathManifest.ToJsonString(CommittedJsonOptions.Value) + "\n";
+        // CommittedJsonOptions pins interior line endings to CRLF; see its own doc comment for
+        // why. The trailing "+ \"\r\n\"" is the final newline after the closing brace, which
+        // indented JSON serialization never emits on its own.
+        outputs["Generated/spec-paths.json"] = pathManifest.ToJsonString(CommittedJsonOptions.Value) + "\r\n";
 
         // Not under Generated/: §5's invariant table is explicit that `generate` also writes
         // coverage-report.json at the project root, and §8/[no-write] both require --check to

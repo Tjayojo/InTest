@@ -233,10 +233,11 @@ public class UpgradeCommandTests
     /// Item 4, exercised through the full command rather than just SetIntestVersion directly: the
     /// insert path (no existing intestVersion key — exactly InsertsIntestVersionWhenAbsent's case
     /// above) must derive its newline from the file it is editing rather than hard-coding "\n".
-    /// Reachable in practice because the scaffolded .gitattributes pins Generated/**,
-    /// coverage-report.json and fixtures/**/*.json to LF but not intest.json itself, so a config
-    /// predating Task 1 — this insert path's whole reason to exist — stays CRLF on a
-    /// core.autocrlf=true clone.
+    /// Reachable in practice because the scaffolded .gitattributes explicitly pins Generated/**,
+    /// coverage-report.json and fixtures/**/*.json but never intest.json itself, so intest.json's
+    /// line endings follow whatever the checking-out machine's own core.autocrlf produces rather
+    /// than a fixed convention — a config predating Task 1 — this insert path's whole reason to
+    /// exist — stays CRLF on a core.autocrlf=true clone.
     /// </summary>
     [TestMethod]
     public async Task InsertsIntestVersionUsingTheConfigsOwnCrlfLineEnding()
@@ -683,7 +684,7 @@ public class UpgradeCommandTests
 
         exitCode.ShouldBe(ExitCode.Ok);
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue();
-        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=lf", Case.Sensitive);
+        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=crlf", Case.Sensitive);
         report.ShouldContain(".gitattributes", Case.Sensitive,
             customMessage: "the report must say a team-owned file was created, not just the two configs");
     }
