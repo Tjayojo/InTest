@@ -2574,13 +2574,38 @@ Apache-2.0 · .NET 8 and 9 EOL 10 November 2026 · `WithOpenApi` deprecated in .
 
 Range 179.8–184.8s, ±1.4%. Run 5 is at the earlier commit `4814071`; it sits mid-range, so no regression is evidenced between `4814071` and `b833ab2`. The distribution is stable and not flat, same shape in all four runs: nine tests cluster at 16.1–17.1s, one at ~6.9s, one at ~25s.
 
-`GeneratedSuiteExecutionTests` is ~180s of Golden's ~206s of test time — 87% of the cost in 11 of 28 tests. Per-class breakdown at `b833ab2` (run 2): `GeneratedSuiteExecutionTests` n=11 sum 179.8s · `CompileVerificationTests` n=3 sum 13.9s · `ScaffoldCompileVerificationTests` n=1 sum 6.6s · `MSBuildEvaluationTests` n=2 sum 3.3s · `CliExitCodeTests` n=8 sum 2.5s · `GoldenFileTests` n=3 sum 0.1s. Golden's wall clock is 3m26–3m32 whether the assembly holds 20 tests or 28 — the `CliExitCodeTests` added by the parse-exit chip cost 2.5s in total.
+`GeneratedSuiteExecutionTests` is ~180s of Golden's ~206s of test time — 87% of the cost in 11 of 28 tests. Per-class breakdown at `b833ab2` (run 2): `GeneratedSuiteExecutionTests` n=11 sum 179.8s · `CompileVerificationTests` n=3 sum 13.9s · `ScaffoldCompileVerificationTests` n=1 sum 6.6s · `MSBuildEvaluationTests` n=2 sum 3.3s · `CliExitCodeTests` n=8 sum 2.5s · `GoldenFileTests` n=3 sum 0.1s. Golden's wall clock is 3m26–3m32 whether the assembly holds 20 tests or 28 — the `CliExitCodeTests` added by the parse-exit chip cost 2.5s in total. **The absolute figures in this paragraph do not reproduce — see the 2026-08-22 re-measurement below. The proportion (87%) does reproduce; the magnitude does not.**
 
 Idle was established by measurement, not assumption: CPU-time deltas sampled across every `dotnet`/`MSBuild`/`VBCSCompiler`/`testhost` process over a 5-second window totalled 0.15 CPU-seconds (an earlier check: 0.02), on 22 logical processors.
 
 *Measured on .NET SDK 10.0.400.*
 
 A wall-clock total is not comparable to another without both a per-class breakdown **and repetition**. A per-class breakdown alone is not sufficient — one was available and a wrong conclusion was still drawn from a single run. Repetition is the part that would have caught it: four runs, not one, is what turns "±1.4%, no regression" from an assumption into a measurement.
+
+#### Superseded 2026-08-22 — the 179.8–184.8s figure does not reproduce
+
+CI-plan Task 1 measured Golden fresh, on hosted runners, cold NuGet cache, per-class breakdown from `.trx`, three repeats per platform: `GeneratedSuiteExecutionTests` 81.4s (89%) on Windows / 66.8s (89%) on Linux, Golden total test time ~92s / ~75s, Golden job wall clock (restore+build+test) 107.0s / 91.3s. The *proportion* matches the reading above almost exactly (89% vs 87%), but the *absolute* is ~2.2x lower — same shape, different magnitude, which rules out a units mismatch (a units mismatch would not preserve the proportion) and points at the machine, not the metric.
+
+Re-measured directly, rather than trusting either side: same machine as the original reading (22 logical processors), same SDK (10.0.400), `dotnet test tests/InTest.Golden.Tests --logger trx`, durations read from the `.trx`. Four runs, including one at `b833ab2` itself — the exact commit the 179.8–184.8s table above cites — checked out into a clean worktree and rebuilt from scratch:
+
+| Run | Commit | Golden total test time | `GeneratedSuiteExecutionTests` sum (n=11) | min | median | max |
+|---|---|---|---|---|---|---|
+| A | `47f8194` (HEAD) | 89.55s | 79.59s | 2.18s | 7.32s | 12.01s |
+| B | `47f8194` (HEAD, MSBuild/VBCSCompiler servers shut down first) | 90.45s | 80.52s | 2.15s | 7.39s | 11.78s |
+| C | `47f8194` (HEAD) | 91.07s | 80.96s | 2.19s | 7.34s | 12.14s |
+| D | `b833ab2` — literally the commit the 179.8–184.8s table names, rebuilt fresh | 88.44s | 79.89s | 2.29s | 7.26s | 12.07s |
+
+Range 88.44–91.07s, ±1.5%. Same shape as the original table in every run — nine tests cluster (7.1–7.6s here, 16.1–17.1s there), one low (~2.2s here, ~6.9s there), one high (~12s here, ~25s there) — uniformly ~2.3x smaller across every position in the distribution, not just the sum. `GeneratedSuiteExecutionTests` is consistently 88–89% of Golden's test time here, matching the original 87% and Task 1's 89% — the proportion this file already argued was stable (§18 above) held throughout; only the absolute number was ever wrong.
+
+Run D is the control that isolates the cause. It is the identical commit, on the identical machine, that produced 179.8–184.8s two days before — rebuilt clean, not reusing any cached artefact from that session — and it produces 88.44s. Ruled out by direct comparison rather than argument: **not** a product performance change (`Readiness.cs`, `ReadinessOptions.cs`, and `AssemblyInfo.cs`'s `[assembly: DoNotParallelize]` all diff empty between `b833ab2` and `47f8194`); **not** the test count moving 28→35 (`GeneratedSuiteExecutionTests`, the dominant class, stayed at `n=11` the whole time — the growth is 6 more `CliExitCodeTests`, ~2s total, present in run A/B/C but absent from run D, which still lands in the same range); **not** the SDK version (10.0.400 both times, confirmed by `dotnet --version` and now pinned in `global.json`); **not** `[assembly: DoNotParallelize]` behaviour (unchanged code, and the per-test shape stayed serial and stable in both). MSBuild/Roslyn compiler-server warmth was tested directly and also ruled out — run B shut down `VBCSCompiler` and the MSBuild node-reuse server immediately before a clean rebuild, and landed in the same range as the warm runs (A, C).
+
+**Cause of the original 2026-08-21 reading: not determined.** Its own idle check (0.15 CPU-seconds sampled across `dotnet`/`MSBuild`/`VBCSCompiler`/`testhost` over 5 seconds) was a real measurement, not an assumption, and its four runs were internally consistent (±1.4%) — so this was not one-off noise within that session, but a sustained condition that has left no diagnosable trace since. Antivirus scanning, thermal throttling, and disk contention are plausible candidates; none was confirmed, and no other cause fits the profile (uniform ~2.3x across every test in the distribution, not concentrated in I/O-heavy or CPU-heavy cases specifically) either.
+
+**Corrected baseline, replacing 179.8–184.8s / ~206s:** `GeneratedSuiteExecutionTests` ≈ 80s (min ~2.2s, median ~7.3s, max ~12s) of Golden's ≈ 90s total test time, ~88–89% of the cost, on this machine, confirmed across four runs on 2026-08-22 including a direct rebuild of the commit the retracted figure was measured at.
+
+As a secondary finding, the three quantities CI-plan Task 1 found disagreeing elsewhere did **not** disagree here: external wall clock (`time dotnet test`, includes restore+build) ran 93–98s against a 88–91s `.trx` test-time sum in every local run above — a few seconds of fixed overhead, not a discrepancy. Whatever caused Task 1's three-quantity mismatch elsewhere is not present in this measurement.
+
+*Measured on .NET SDK 10.0.400, 2026-08-22.*
 
 ---
 
