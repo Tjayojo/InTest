@@ -29,58 +29,58 @@ public class GenerateCheckCommandTests
     // body, so FixtureComposer.NeedsFixture is false and no committed fixture is required — the
     // fixture-drift path is exercised separately, by its own spec, below.
     private const string Spec = """
-                                {
-                                  "openapi": "3.0.3",
-                                  "info": { "title": "Orders", "version": "1.0" },
-                                  "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
-                                    "responses": { "200": { "description": "ok", "content": { "application/json": {
-                                      "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
-                                  "components": { "schemas": { "Order": { "type": "object" } } }
-                                }
-                                """;
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+        "responses": { "200": { "description": "ok", "content": { "application/json": {
+          "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
 
     // Two tags, so removing one tag's only operation orphans its whole class file while leaving
     // the other byte-identical — the shape Task 6 Step 3 documents as the only way to reach the
     // stale-file case without also tripping the "any file differs" case first.
     private const string TwoTagSpec = """
-                                      {
-                                        "openapi": "3.0.3",
-                                        "info": { "title": "Orders", "version": "1.0" },
-                                        "paths": {
-                                          "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
-                                            "responses": { "200": { "description": "ok" } } } },
-                                          "/customers/{id}": { "get": { "operationId": "getCustomerById", "tags": ["Customers"],
-                                            "responses": { "200": { "description": "ok" } } } }
-                                        }
-                                      }
-                                      """;
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+          "responses": { "200": { "description": "ok" } } } },
+        "/customers/{id}": { "get": { "operationId": "getCustomerById", "tags": ["Customers"],
+          "responses": { "200": { "description": "ok" } } } }
+      }
+    }
+    """;
 
     // Every operation with a customers tag removed — leaves OrdersTests.g.cs byte-identical to
     // TwoTagSpec's render and drops CustomersTests.g.cs from the fresh render entirely.
     private const string OneTagSpec = """
-                                      {
-                                        "openapi": "3.0.3",
-                                        "info": { "title": "Orders", "version": "1.0" },
-                                        "paths": {
-                                          "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
-                                            "responses": { "200": { "description": "ok" } } } }
-                                        }
-                                      }
-                                      """;
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+          "responses": { "200": { "description": "ok" } } } }
+      }
+    }
+    """;
 
     // A request body, so FixtureComposer.NeedsFixture is true and no fixture exists — the same
     // scenario GenerateDriftTests pins for plain `generate`, reused here to pin the decision that
     // --check shares the same drift check rather than skipping it.
     private const string SpecNeedingAFixture = """
-                                               {
-                                                 "openapi":"3.0.3","info":{"title":"T","version":"1"},
-                                                 "paths":{"/api/products":{"post":{
-                                                   "operationId":"createProduct",
-                                                   "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-                                                     "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
-                                                   "responses":{"201":{"description":"ok"}}}}}
-                                               }
-                                               """;
+    {
+      "openapi":"3.0.3","info":{"title":"T","version":"1"},
+      "paths":{"/api/products":{"post":{
+        "operationId":"createProduct",
+        "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+          "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
+        "responses":{"201":{"description":"ok"}}}}}
+    }
+    """;
 
     private string _root = null!;
 
@@ -111,9 +111,9 @@ public class GenerateCheckCommandTests
             : $"\"intestVersion\": \"{withIntestVersion}\", ";
 
         File.WriteAllText(Path.Combine(_root, "intest.json"), $$"""
-                                                                { "schemaVersion": 1, {{intestVersionLine}}"spec": { "source": "orders.json" },
-                                                                  "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-                                                                """);
+        { "schemaVersion": 1, {{intestVersionLine}}"spec": { "source": "orders.json" },
+          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+        """);
     }
 
     private static Task<int> GenerateAsync(string root, bool check = false) =>
@@ -163,7 +163,7 @@ public class GenerateCheckCommandTests
     {
         var after = SnapshotOwnedFiles();
         after.Keys.ShouldBe(before.Keys, ignoreOrder: true,
-        customMessage: "--check must not create, delete, or rename any file generate owns");
+            customMessage: "--check must not create, delete, or rename any file generate owns");
         foreach (var (path, content) in before)
         {
             after[path].ShouldBe(content, customMessage: $"--check must not modify {path}");
@@ -278,7 +278,7 @@ public class GenerateCheckCommandTests
         report.ShouldContain("coverage-report.json", Case.Sensitive);
         report.ShouldContain("differs from a fresh render");
         report.ShouldNotContain("OrdersTests.g.cs",
-        customMessage: "a title-only spec change must not also claim the untouched class file differs");
+            customMessage: "a title-only spec change must not also claim the untouched class file differs");
         AssertOwnedFilesUntouched(before);
     }
 
@@ -338,8 +338,8 @@ public class GenerateCheckCommandTests
         report.ShouldContain("Generated/CustomersTests.g.cs", Case.Sensitive);
         report.ShouldContain("a fresh render does not produce it");
         report.ShouldNotContain("Generated/OrdersTests.g.cs differs",
-        customMessage: "OrdersTests.g.cs is byte-identical between TwoTagSpec and OneTagSpec " +
-                       "and must not be reported as differing just because a sibling was orphaned");
+            customMessage: "OrdersTests.g.cs is byte-identical between TwoTagSpec and OneTagSpec " +
+                           "and must not be reported as differing just because a sibling was orphaned");
         AssertOwnedFilesUntouched(before);
     }
 
@@ -366,7 +366,7 @@ public class GenerateCheckCommandTests
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
 
         File.Exists(Path.Combine(_root, "Generated", "CustomersTests.g.cs")).ShouldBeFalse(
-        "generate's wholesale delete of Generated/ is what clears an orphan --check reported");
+            "generate's wholesale delete of Generated/ is what clears an orphan --check reported");
         (await CheckAsync(_root)).ExitCode.ShouldBe(ExitCode.Ok);
     }
 
@@ -418,8 +418,8 @@ public class GenerateCheckCommandTests
     {
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
         File.Move(
-        Path.Combine(_root, "Generated", "OrdersTests.g.cs"),
-        Path.Combine(_root, "Generated", "orderstests.g.cs"));
+            Path.Combine(_root, "Generated", "OrdersTests.g.cs"),
+            Path.Combine(_root, "Generated", "orderstests.g.cs"));
 
         var (exitCode, report) = await CheckAsync(_root);
 
@@ -438,14 +438,13 @@ public class GenerateCheckCommandTests
         var expectedLines = OperatingSystem.IsWindows()
             ? new[] { caseDiffersLine, "Run 'intest generate' to update." }
             : new[]
-            {
-                "Generated/OrdersTests.g.cs is missing.",
-                caseDiffersLine,
-                "Run 'intest generate' to update.",
-            };
+              {
+                  "Generated/OrdersTests.g.cs is missing.",
+                  caseDiffersLine,
+                  "Run 'intest generate' to update.",
+              };
 
-        var actualLines = report.Split(
-        Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        var actualLines = report.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
         actualLines.ShouldBe(expectedLines);
     }
 
@@ -482,11 +481,11 @@ public class GenerateCheckCommandTests
         exitCode.ShouldBe(ExitCode.WorkOutstanding);
         report.ToString().ShouldContain("createProduct", Case.Sensitive);
         report.ToString().ShouldContain("Run 'intest fixtures repair'", Case.Sensitive,
-        customMessage: "drift's remedy under --check is still fixtures repair, not generate — " +
-                       "the two exit-1 causes share a code but must not share a message");
+            customMessage: "drift's remedy under --check is still fixtures repair, not generate — " +
+                           "the two exit-1 causes share a code but must not share a message");
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
-        "drift is detected before BuildOutputs runs, in both modes — --check must not render, " +
-        "let alone write, once drift is already reported");
+            "drift is detected before BuildOutputs runs, in both modes — --check must not render, " +
+            "let alone write, once drift is already reported");
     }
 
     // ---- 2: malformed config, unreadable spec — unchanged from plain generate --------------
@@ -543,8 +542,8 @@ public class GenerateCheckCommandTests
 
         exitCode.ShouldBe(ExitCode.VersionMismatch);
         report.ShouldNotContain("differs from a fresh render",
-        customMessage: "a version mismatch must pre-empt the output comparison entirely, not " +
-                       "just win the exit code while still running and reporting it");
+            customMessage: "a version mismatch must pre-empt the output comparison entirely, not " +
+                           "just win the exit code while still running and reporting it");
     }
 
     /// <summary>
@@ -573,9 +572,9 @@ public class GenerateCheckCommandTests
         GenerateCommand.ReportVersionMismatch(report, declaredVersion: "1.0.0", runningVersion: "1.1.0");
 
         report.ToString().ShouldBe(
-        "intest.json was generated by intest 1.0.0; running tool is 1.1.0." + Environment.NewLine +
-        "Regenerate with the pinned version, or run `intest upgrade` to adopt 1.1.0 deliberately." +
-        Environment.NewLine);
+            "intest.json was generated by intest 1.0.0; running tool is 1.1.0." + Environment.NewLine +
+            "Regenerate with the pinned version, or run `intest upgrade` to adopt 1.1.0 deliberately." +
+            Environment.NewLine);
     }
 
     /// <summary>
@@ -591,11 +590,11 @@ public class GenerateCheckCommandTests
         var report = new StringWriter();
 
         GenerateCommand.ReportVersionMismatch(
-        report, declaredVersion: "1.0.0", runningVersion: CliVersion.FallbackVersion);
+            report, declaredVersion: "1.0.0", runningVersion: CliVersion.FallbackVersion);
 
         var text = report.ToString();
         text.ShouldContain("built without version");
         text.ShouldContain("do not run `intest upgrade`", Case.Sensitive,
-        customMessage: "the ordinary remedy is actively wrong here and must not be suggested");
+            customMessage: "the ordinary remedy is actively wrong here and must not be suggested");
     }
 }
