@@ -101,14 +101,24 @@ updates:
       # OpenAPI.NET" ...>, and `curl https://api.nuget.org/v3-flatcontainer/<id>/index.json`
       # against both ids returns byte-identical version lists back to 2.0.0 — most tellingly, both
       # skip 3.10.1 identically (3.9.0 -> 3.10.0 -> 3.10.2 for each), which a shared prefix alone
-      # could never explain. Explicit list rather than a `Microsoft.OpenApi*` pattern: unlike
-      # MSTest.* (exclusively microsoft/testfx), the OpenAPI.NET repo is the only thing confirmed
-      # here — a future package merely starting with "Microsoft.OpenApi" was not checked and
-      # should not be silently swept in.
+      # could never explain.
+      #
+      # A single `Microsoft.OpenApi*` glob covers both members and nothing else in
+      # Directory.Packages.props: no other PackageVersion entry starts with "Microsoft.OpenApi"
+      # (Microsoft.AspNetCore.OpenApi does not — the shared text is "OpenApi", not a shared
+      # prefix). This relies on a trailing `*` matching zero characters, so the bare
+      # "Microsoft.OpenApi" is caught along with "Microsoft.OpenApi.YamlReader". Confirmed by
+      # reading dependabot-core's own matcher, not assumed from GitHub's docs (which say only that
+      # "`*` can be used as a wild card", without saying whether it can match nothing):
+      # `common/lib/wildcard_matcher.rb` in github.com/dependabot/dependabot-core builds
+      # `/^...$/` by `Regexp.quote`-ing the text around every `*` and joining the pieces with
+      # `.*` (which matches an empty string), and its own spec
+      # (`common/spec/dependabot/wildcard_matcher_spec.rb`, "when the wildcard is at the end")
+      # asserts exactly this case: wildcard "bus*" against candidate "bus" — the wildcard
+      # contributing nothing — is expected to be `true`.
       openapi-net:
         patterns:
-          - "Microsoft.OpenApi"
-          - "Microsoft.OpenApi.YamlReader"
+          - "Microsoft.OpenApi*"
 
       # These eight packages are Microsoft.Extensions.Http, Microsoft.Extensions.Configuration,
       # Microsoft.Extensions.Configuration.Json, Microsoft.Extensions.Configuration.
@@ -121,43 +131,59 @@ updates:
       # https://api.nuget.org/v3-flatcontainer/<id>/index.json` against all eight confirms the
       # version lists are identical at every one of the last twelve monthly releases (10.0.0
       # through 10.0.11) — this is .NET's coordinated monthly servicing train, and it always bumps
-      # every one of these together to the same version number. Explicit list rather than
-      # `Microsoft.Extensions.*`/`Microsoft.AspNetCore.*` patterns: those prefixes are not safe
-      # wildcards here. Microsoft.Extensions.AI and Microsoft.Extensions.Http.Resilience both
-      # start with "Microsoft.Extensions." and were checked the same way — their nuget.org version
-      # lists (10.9.0, released on their own monthly cadence unrelated to 10.0.x) prove they are
-      # NOT part of this release train despite the shared prefix, so a wildcard here would have
-      # silently grouped a genuinely-independent package the moment one like it was added to
-      # Directory.Packages.props. System.CommandLine was also checked and deliberately excluded:
-      # its .nuspec points at the identical dotnet/dotnet commit as this group, but its own
-      # version (2.0.11) does not move in lockstep with these packages' 10.0.x numbering — its
-      # stable releases follow their own independent 2.x line (next is 3.0.0-preview.*, not
-      # 10.0.x) — and nothing in this repo (no test, no declared dependency) requires it to match
-      # any of these eight. Same build infrastructure is not the same claim as moving together.
+      # every one of these together to the same version number.
+      #
+      # Three globs — `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*` and
+      # `Microsoft.EntityFrameworkCore.*` — cover exactly these eight and nothing else in
+      # Directory.Packages.props today: checked mechanically against every PackageVersion entry
+      # in the file, the three prefixes match 5 + 2 + 1 = 8 packages with no overlap between the
+      # prefixes and no thirteenth match, i.e. exactly this group's membership. System.CommandLine
+      # was checked and deliberately still excluded: its .nuspec points at the identical
+      # dotnet/dotnet commit as this group, but its own version (2.0.11) does not move in lockstep
+      # with these packages' 10.0.x numbering — its stable releases follow their own independent
+      # 2.x line (next is 3.0.0-preview.*, not 10.0.x). Same build infrastructure is not the same
+      # claim as moving together, and here it also does not start with any of the three prefixes,
+      # so the exclusion is enforced by construction rather than by memory.
+      #
+      # The accepted trade, written down as this task requires: `Microsoft.Extensions.*` is wider
+      # than the five packages it happens to match today. Microsoft.Extensions.AI and
+      # Microsoft.Extensions.Http.Resilience both start with "Microsoft.Extensions." and were
+      # checked the same way as the group members above — their nuget.org version lists (10.9.0 at
+      # last check) show they release on their own cadence, unrelated to this train's 10.0.x
+      # numbering. Neither is in Directory.Packages.props today, so this is a *future* risk, not a
+      # live one: the explicit list this group used to have did not have this exposure, and this
+      # glob form trades that safety for brevity, deliberately, on the owner's instruction. If a
+      # `Microsoft.Extensions.*` package is ever added to Directory.Packages.props, check — the
+      # same way this comment did, via the package's .nuspec `<repository>` and its nuget.org
+      # version history — whether it actually ships from the dotnet/dotnet VMR commit before
+      # assuming this group still covers only its intended members; if it does not, move this
+      # group back to an explicit list rather than adding `exclude-patterns` (this file avoids
+      # exclude-patterns on purpose — inclusion fails safe, an unmatched package just gets its own
+      # PR, while exclusion fails unsafe, a new package silently joins unless someone remembers to
+      # list it) or letting a genuinely-independent package's updates get silently delayed behind
+      # this servicing train.
       dotnet-servicing:
         patterns:
-          - "Microsoft.Extensions.Http"
-          - "Microsoft.Extensions.Configuration"
-          - "Microsoft.Extensions.Configuration.Json"
-          - "Microsoft.Extensions.Configuration.EnvironmentVariables"
-          - "Microsoft.AspNetCore.OpenApi"
-          - "Microsoft.Extensions.ApiDescription.Server"
-          - "Microsoft.EntityFrameworkCore.Sqlite"
-          - "Microsoft.AspNetCore.Authentication.JwtBearer"
+          - "Microsoft.Extensions.*"
+          - "Microsoft.AspNetCore.*"
+          - "Microsoft.EntityFrameworkCore.*"
 
       # NSwag.AspNetCore and NSwag.MSBuild both declare <repository url="https://github.com/
       # RicoSuter/NSwag.git" .../> in their .nuspec, and their nuget.org version lists are
       # identical across the last fifteen releases (14.0.5 through 14.7.1) — confirmed the same
       # way as the other two groups above, not assumed from the matching version number already
-      # in Directory.Packages.props today. NJsonSchema is deliberately NOT in this group despite
+      # in Directory.Packages.props today.
+      #
+      # `NSwag.*` covers both and nothing else. NJsonSchema is deliberately NOT swept in despite
       # sharing an author (RSuter) with NSwag and being an NSwag dependency: its .nuspec points at
       # a different repository (github.com/RicoSuter/NJsonSchema, not NSwag.git) and its version
       # (11.6.1) is on a completely different, independently-numbered line from NSwag's (14.7.1) —
-      # same author is not the same release train.
+      # same author is not the same release train — and, the fact that now matters mechanically,
+      # its package id does not start with "NSwag." at all, so the glob cannot catch it regardless
+      # of how its version happens to move.
       nswag:
         patterns:
-          - "NSwag.AspNetCore"
-          - "NSwag.MSBuild"
+          - "NSwag.*"
 
   # -------------------------------------------------------------------------------------------
   # GitHub Actions: every action build-and-test.yml uses is pinned by commit SHA with a trailing
