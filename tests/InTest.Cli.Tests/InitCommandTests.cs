@@ -89,17 +89,19 @@ public class InitCommandTests
 
     /// <summary>
     /// Proves the scaffolded .gitattributes actually does its job, rather than merely existing.
-    /// "The file on disk contains LF" would pass on Linux, or with core.autocrlf left at its
-    /// non-Windows default, regardless of whether .gitattributes covers the right paths — or
-    /// exists at all. This instead reproduces Step 1 of the v1-e line-endings task's manual
-    /// measurement as an automated round trip: commit a real `init` + `generate` scaffold with
-    /// core.autocrlf=true (the Git-for-Windows default) set on the source, then materialize a
-    /// second working copy with the same setting forced on the destination — the two-step path a
-    /// Windows adopter's own clone goes through — and diff the bytes. Every one of InTest's own
-    /// generated artefacts (Generated/**, coverage-report.json, fixtures/**/*.json — a base
-    /// fixture and a profile overlay alike) must come back byte-identical; without
-    /// .gitattributes pinning them, git's own autocrlf translation would rewrite every LF to
-    /// CRLF on the second checkout, exactly as the manual experiment showed.
+    /// "The file on disk contains CRLF" would pass regardless of whether .gitattributes covers
+    /// the right paths — or exists at all — on a machine whose own git config already defaults to
+    /// CRLF. This instead reproduces the v1-e line-endings task's manual measurement as an
+    /// automated round trip, with core.autocrlf forced explicitly rather than left at whatever
+    /// this test happens to run under: commit a real `init` + `generate` scaffold with
+    /// core.autocrlf=true set on the source, then materialize a second working copy with the same
+    /// setting forced on the destination — the two-step path a Windows adopter's own clone goes
+    /// through — and diff the bytes. Every one of InTest's own generated artefacts (Generated/**,
+    /// coverage-report.json, fixtures/**/*.json — a base fixture and a profile overlay alike) must
+    /// come back byte-identical; without .gitattributes pinning them to eol=crlf, an autocrlf
+    /// setting that resolves to LF on some other checkout (core.autocrlf=input, or the
+    /// non-Windows default) would rewrite them, the same class of gap [crlf-everywhere] exists to
+    /// close, direction reversed from what the v1-e manual experiment originally showed.
     /// </summary>
     [TestMethod]
     public async Task GitattributesSurvivesAnAutocrlfTrueCheckout()
@@ -109,15 +111,15 @@ public class InitCommandTests
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(ExitCode.Ok);
 
         // `generate` alone never writes fixtures/ (only `fixtures repair` does), so write a base
-        // fixture and a profile overlay by hand — pure LF, matching what FixtureDocument's
+        // fixture and a profile overlay by hand — pure CRLF, matching what FixtureDocument's
         // writer now produces. The overlay is the important half: fixtures/{profile}/*.json
         // (FixtureStore.Load's overlay directory) is purely adopter-authored and committed —
         // `fixtures repair` never writes it — which the v1-e review calls out as the strongest
         // case for pinning, not the weakest, so this round trip must exercise
         // fixtures/**/*.json's recursive match, not just the non-recursive fixtures/*.json case.
         Directory.CreateDirectory(Path.Combine(_root, "fixtures", "qa"));
-        File.WriteAllText(Path.Combine(_root, "fixtures", "sample.json"), "{\n  \"sample\": true\n}\n");
-        File.WriteAllText(Path.Combine(_root, "fixtures", "qa", "sample.json"), "{\n  \"sample\": false\n}\n");
+        File.WriteAllText(Path.Combine(_root, "fixtures", "sample.json"), "{\r\n  \"sample\": true\r\n}\r\n");
+        File.WriteAllText(Path.Combine(_root, "fixtures", "qa", "sample.json"), "{\r\n  \"sample\": false\r\n}\r\n");
 
         var tracked = new[]
         {
@@ -168,17 +170,18 @@ public class InitCommandTests
 
     /// <summary>
     /// Fails with a message that names both things that can produce this exact symptom — bytes
-    /// differing across a core.autocrlf=true checkout — rather than asserting only one. The
-    /// original message ("`.gitattributes` did not pin it to LF") is true when this test's own
+    /// differing across a core.autocrlf=true checkout — rather than asserting only one. The naive
+    /// message ("`.gitattributes` did not pin it to CRLF") is true when this test's own
     /// .gitattributes has a gap; it is false, and misleading, when the writer that produced
-    /// <paramref name="before"/> already emitted CRLF before the file was ever committed (a
-    /// <c>JsonSerializerOptions.NewLine</c> or template <c>Normalize</c> regression) — in which
-    /// case the checkout changed nothing and .gitattributes is not the bug. The two are
-    /// distinguished by whether <paramref name="before"/> already contains a CRLF sequence: if it
-    /// does, the checkout did not introduce it. A raw <c>byte[]</c> comparison (Shouldly's
-    /// default <c>ShouldBe</c>) renders on the order of 10 KB of decimal byte codes for a file
-    /// this size before reaching any custom message; hex is at least legible, and the CRLF counts
-    /// alone usually say which half of the diagnosis applies without reading the dump at all.
+    /// <paramref name="before"/> already emitted LF before the file was ever committed (a
+    /// <c>JsonSerializerOptions.NewLine</c> or template <c>Normalize</c> regression back toward
+    /// the pre-[crlf-everywhere] direction) — in which case the checkout changed nothing and
+    /// .gitattributes is not the bug. The two are distinguished by whether
+    /// <paramref name="before"/> already contains a CRLF sequence: if it does not, the checkout
+    /// did not remove one. A raw <c>byte[]</c> comparison (Shouldly's default <c>ShouldBe</c>)
+    /// renders on the order of 10 KB of decimal byte codes for a file this size before reaching
+    /// any custom message; hex is at least legible, and the CRLF counts alone usually say which
+    /// half of the diagnosis applies without reading the dump at all.
     /// </summary>
     private static void AssertByteIdenticalAcrossCheckout(string file, byte[] before, byte[] after)
     {
@@ -189,12 +192,12 @@ public class InitCommandTests
 
         var crlfBefore = CountCrlf(before);
         var crlfAfter = CountCrlf(after);
-        var likelyCause = crlfBefore > 0
-            ? "the writer that produced this file already emitted CRLF before it was committed " +
+        var likelyCause = crlfBefore == 0
+            ? "the writer that produced this file already emitted LF before it was committed " +
               "(JsonSerializerOptions.NewLine, or a template's Normalize step, was not honored) " +
               "— .gitattributes is not at fault here"
-            : ".gitattributes did not pin this file to LF, so the core.autocrlf=true checkout " +
-              "rewrote its LF line endings to CRLF";
+            : ".gitattributes did not pin this file to CRLF, so the checkout stripped its CRLF " +
+              "line endings down to LF";
 
         const int previewBytes = 256;
         Assert.Fail(
