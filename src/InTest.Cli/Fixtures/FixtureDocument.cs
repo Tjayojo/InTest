@@ -129,13 +129,13 @@ public sealed class FixtureDocument
             root["body"] = Body.DeepClone();
         }
 
-        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
-        // The trailing "+ \"\\n\"" is the final newline after the closing brace, which indented
-        // JSON serialization never emits on its own. fixtures/ is written only by `fixtures repair`,
-        // never generated wholesale like Generated/, so a hand-edited value here is read closely
-        // — mixed line endings would bury the one changed line in a whole-file diff, which is the
-        // failure this fix removes.
-        return root.ToJsonString(CommittedJsonOptions.Value) + "\n";
+        // CommittedJsonOptions pins interior line endings to CRLF; see its own doc comment for
+        // why. The trailing "+ \"\r\n\"" is the final newline after the closing brace, which
+        // indented JSON serialization never emits on its own. fixtures/ is written only by
+        // `fixtures repair`, never generated wholesale like Generated/, so a hand-edited value
+        // here is read closely — mixed line endings would bury the one changed line in a
+        // whole-file diff, which is the failure this fix removes.
+        return root.ToJsonString(CommittedJsonOptions.Value) + "\r\n";
     }
 
     /// <summary>

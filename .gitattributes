@@ -1,30 +1,31 @@
-# Normalize to LF in the repository; let git decide the working-tree ending by platform.
-* text=auto
+# Normalize to CRLF in the working tree; the repository object database still stores LF
+# internally (git's `text` attribute always normalizes storage to LF — `eol` only controls
+# checkout), but every checkout on every platform gets CRLF here, deliberately and
+# unconditionally, rather than varying by the checking-out machine's core.autocrlf. See
+# [crlf-everywhere] below for why CRLF was chosen and what breaks if a pin below is removed.
+* text=auto eol=crlf
 
 # Golden files are compared byte-for-byte against renderer output, and TemplateRenderer
-# normalizes to LF. A clone with core.autocrlf=true (the Git-for-Windows default) would
-# otherwise rewrite these to CRLF on checkout and fail the comparison on every line.
-*.g.cs.txt text eol=lf
+# normalizes to CRLF ([crlf-everywhere] — see TemplateRenderer.Normalize). A clone whose
+# checkout would otherwise diverge from that (e.g. core.autocrlf=input, or any non-Windows
+# default) would rewrite these to LF on checkout and fail the comparison on every line.
+*.g.cs.txt text eol=crlf
 
 # Scriban templates are rendered verbatim into the golden output, so their line endings
 # are part of the generated artifact rather than a local editing preference.
-*.scriban text eol=lf
+*.scriban text eol=crlf
 
-# [lf-everywhere] pinned generated artifacts (above) but never our own source. A C# raw string
+# [crlf-everywhere] pinned generated artifacts (above) but never our own source. A C# raw string
 # literal's line endings are whatever bytes sit in the .cs file at that point — they are data, not
-# editing preference, the same way a Scriban template's are. The first real CI run
-# (windows-latest, core.autocrlf=true default) proved it: UpgradeCommandTests.cs wrote
-# .config/dotnet-tools.json from a multi-line raw string literal and then asserted on the result
-# with a hard-coded "\n" between two of its keys. Locally core.autocrlf=input keeps the checkout
-# LF, so the literal carried LF and the assertion passed; on windows-latest the same file checked
-# out CRLF, the literal carried CRLF, and the assertion failed — not because behaviour differed,
-# but because the checkout did. Confirmed by direct experiment: cloning with
-# `git -c core.autocrlf=true clone` reproduced the failure outside CI.
+# editing preference, the same way a Scriban template's are. This project was previously bitten by
+# exactly this in the other direction: local dev on this project historically ran
+# core.autocrlf=input (checkout stays whatever the object database already normalizes to), while
+# CI's windows-latest ran core.autocrlf=true (checkout expands to CRLF) — the two disagreed, and a
+# raw string literal in UpgradeCommandTests.cs carried different bytes on each, breaking a
+# hard-coded "\n" assertion on one but not the other. See CONTRIBUTING.md for the full account.
 #
-# Pinning eol=lf changes nothing already committed — `git show HEAD:<path> | grep -P '\r'` found
-# no CRLF in any tracked .cs blob, because `* text=auto` above already normalizes to LF in the
-# object database; only checkout was ever platform-dependent. The population of clones this
-# affects is days old and small, so this is the cheapest point at which to close the gap. Modern
-# .NET tooling does not care: this repository's own tests already build and run under LF .cs files
-# on Windows via core.autocrlf=input, which is exactly what this line makes universal.
-*.cs text eol=lf
+# The fix was — and, after this reversal, still is — pinning eol explicitly so every checkout
+# agrees regardless of core.autocrlf: only the letter changed, from eol=lf to eol=crlf. Pinning
+# eol=crlf changes nothing already committed — the object database was, and remains, LF-normalized
+# by `* text=auto` above; only checkout was ever platform-dependent, and this makes it uniform.
+*.cs text eol=crlf

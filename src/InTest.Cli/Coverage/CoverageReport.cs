@@ -148,11 +148,11 @@ public static class CoverageReport
             }
         };
 
-        // CommittedJsonOptions pins interior line endings to LF; see its own doc comment for why.
-        // The trailing "+ \"\\n\"" below is separate — indented JSON serialization never emits a
-        // line ending after the final closing brace, so that final newline is still added by
-        // hand here. This is a committed, `--check`-compared artefact, so one line ending
+        // CommittedJsonOptions pins interior line endings to CRLF; see its own doc comment for
+        // why. The trailing "+ \"\r\n\"" below is separate — indented JSON serialization never
+        // emits a line ending after the final closing brace, so that final newline is still added
+        // by hand here. This is a committed, `--check`-compared artefact, so one line ending
         // throughout matters for the same reason it matters in any file a human diffs.
-        return report.ToJsonString(CommittedJsonOptions.Value) + "\n";
+        return report.ToJsonString(CommittedJsonOptions.Value) + "\r\n";
     }
 }

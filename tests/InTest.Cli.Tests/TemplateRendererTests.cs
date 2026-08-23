@@ -177,12 +177,12 @@ public class TemplateRendererTests
         // each template added after v0 would be free to reintroduce the same defect.
         var rendered = Render(Plan(httpMethod: httpMethod));
 
-        rendered.ShouldNotContain("\n\n\n");        // no double blank line anywhere
-        rendered.ShouldNotContain("\n\n    }");     // no blank line before a closing brace
+        rendered.ShouldNotContain("\r\n\r\n\r\n");        // no double blank line anywhere
+        rendered.ShouldNotContain("\r\n\r\n    }");       // no blank line before a closing brace
 
         rendered.ShouldContain(httpMethod == "POST"
-            ? "then 200\")]\n    [DoNotParallelize]\n    public async Task"
-            : "then 200\")]\n    public async Task");
+            ? "then 200\")]\r\n    [DoNotParallelize]\r\n    public async Task"
+            : "then 200\")]\r\n    public async Task");
     }
 
     [TestMethod]
@@ -322,9 +322,9 @@ public class TemplateRendererTests
         // ones. An unclosed '~}}' here leaks its own blank line the same way those did.
         var rendered = Render(PlanDeclaredError());
 
-        rendered.ShouldNotContain("\n\n\n");
-        rendered.ShouldNotContain("\n\n    }");
-        rendered.ShouldContain("    {\n        using var request",
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
+        rendered.ShouldContain("    {\r\n        using var request",
             customMessage: "no RequireFixture line and no leftover blank line ahead of it");
     }
 
@@ -430,10 +430,10 @@ public class TemplateRendererTests
         // where an unclosed '~}}' would leak its own blank line between them.
         var rendered = Render(PlanAuth(403, IdentitySlot.Secondary));
 
-        rendered.ShouldNotContain("\n\n\n");
-        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
         rendered.ShouldContain(
-            "    {\n        RequireMultipleIdentities();\n        using var _ = UseIdentity(IdentitySlot.Secondary);\n\n        using var request",
+            "    {\r\n        RequireMultipleIdentities();\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        using var request",
             customMessage: "guard and override must sit on adjacent lines, with exactly one blank line before the request");
     }
 
@@ -442,10 +442,10 @@ public class TemplateRendererTests
     {
         var rendered = Render(PlanAuth(401, IdentitySlot.None));
 
-        rendered.ShouldNotContain("\n\n\n");
-        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
         rendered.ShouldContain(
-            "    {\n        using var _ = UseIdentity(IdentitySlot.None);\n\n        using var request",
+            "    {\r\n        using var _ = UseIdentity(IdentitySlot.None);\r\n\r\n        using var request",
             customMessage: "no guard line for a 401 case, and no leftover blank line ahead of the override");
     }
 
@@ -540,10 +540,10 @@ public class TemplateRendererTests
     {
         var rendered = Render(PlanAuth(403, IdentitySlot.Secondary, requiredScopes: ["orders.write"]));
 
-        rendered.ShouldNotContain("\n\n\n");
-        rendered.ShouldNotContain("\n\n    }");
+        rendered.ShouldNotContain("\r\n\r\n\r\n");
+        rendered.ShouldNotContain("\r\n\r\n    }");
         rendered.ShouldContain(
-            "    {\n        RequireMultipleIdentities();\n        RequireSecondaryIdentityLacks(\"orders.write\");\n        using var _ = UseIdentity(IdentitySlot.Secondary);\n\n        using var request",
+            "    {\r\n        RequireMultipleIdentities();\r\n        RequireSecondaryIdentityLacks(\"orders.write\");\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        using var request",
             customMessage: "both guards and the override sit on adjacent lines, with exactly one blank line before the request");
     }
 
@@ -555,11 +555,11 @@ public class TemplateRendererTests
         // exactly where Scriban whitespace control breaks (unclosed '~}}' leaks a blank line
         // per tag), so they get their own guard rather than trusting the older test to cover them.
         var withBody = Render(PlanWithBody());
-        withBody.ShouldNotContain("\n\n\n");
-        withBody.ShouldNotContain("\n\n    }");
+        withBody.ShouldNotContain("\r\n\r\n\r\n");
+        withBody.ShouldNotContain("\r\n\r\n    }");
 
         var withQuery = Render(PlanWithQueryParameters("page", "sort"));
-        withQuery.ShouldNotContain("\n\n\n");
-        withQuery.ShouldNotContain("\n\n    }");
+        withQuery.ShouldNotContain("\r\n\r\n\r\n");
+        withQuery.ShouldNotContain("\r\n\r\n    }");
     }
 }
