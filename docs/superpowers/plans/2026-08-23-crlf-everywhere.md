@@ -12,6 +12,12 @@
 
 ---
 
+## Revision note — Task 6's code quality review
+
+Code quality review of Task 6 found that its `docs/getting-started.md` sentence, and an already-merged Task 4 doc comment in `InitCommand.cs` (lines 53-55) carrying the identical claim, both overclaim relative to what Task 5's own investigation established: they name `core.autocrlf=false` alongside `core.autocrlf=input` as both causing a checkout to flatten CRLF to LF. Task 5 proved `false` does not do this — it applies no conversion in either direction, so a file committed as CRLF (which every InTest writer now produces) round-trips as CRLF regardless of the pin, the same "coincidentally safe" shape `core.autocrlf=true` has under this convention. Only `core.autocrlf=input` demonstrably flattens (normalizes on add, does not re-expand on checkout — verified with a hex-dumped before/after in Task 5). "Linux/macOS" as a named risk has the same problem: its typical default is `core.autocrlf=false`, which is the coincidentally-safe case, not a risk. Both mentions are corrected below to name only `core.autocrlf=input`, matching what was actually demonstrated.
+
+---
+
 ## Revision note — Task 5's code quality review
 
 Code quality review of Task 5 found a defect in the plan's own prescribed text (not an execution error — the implementer copied it correctly): `GitattributesSurvivesAnAutocrlfTrueCheckout` forces `core.autocrlf=true` on both the source commit and the destination clone. Under `[lf-everywhere]`, that was the correct hostile condition — `core.autocrlf=true`'s own checkout-time expansion (LF stored → CRLF checkout) fought the desired LF outcome, so the test proved the `eol=lf` pin was doing real work by overriding it. Under `[crlf-everywhere]`, `core.autocrlf=true`'s expansion (LF stored → CRLF checkout) now *coincides* with the desired CRLF outcome — so the test as migrated passes whether or not `.gitattributes` pins anything at all. Verified directly: deleting the `fixtures/**/*.json text eol=crlf` line from `InitCommand.GitattributesContent` and re-running the test, it still passed.
