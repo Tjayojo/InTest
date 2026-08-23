@@ -51,9 +51,12 @@ public static class InitCommand
     /// merges fixtures/{profile}/*.json over fixtures/*.json and both are committed, hand-edited
     /// files — and all of it is now pure-CRLF content (TemplateRenderer.Normalize for the .g.cs
     /// classes, CommittedJsonOptions.NewLine for the JSON writers). Without this file, a clone
-    /// whose checkout would otherwise diverge from CRLF (e.g. a Linux/macOS clone, or a Windows
-    /// clone with core.autocrlf=false or =input) rewrites every one of them to LF on checkout,
-    /// because nothing else tells git these particular paths must stay CRLF. That checkout-time
+    /// with core.autocrlf=input rewrites every one of them to LF on checkout, because nothing else
+    /// tells git these particular paths must stay CRLF — core.autocrlf=false does no such thing
+    /// (it applies no conversion in either direction, so a file this project's writers already
+    /// emit as CRLF round-trips unchanged, coincidentally safe the same way core.autocrlf=true is
+    /// under this convention; see GitattributesSurvivesAnAutocrlfInputCheckout in
+    /// InitCommandTests.cs for the direct experiment that established this). That checkout-time
     /// rewrite is invisible to `fixtures repair` (FixtureDrift.Compare works on parsed
     /// FixtureDocument objects, not bytes) but not to a byte-for-byte comparison such as
     /// `generate --check`.
@@ -62,8 +65,8 @@ public static class InitCommand
     internal const string GitattributesContent = """
     # InTest writes these files with CRLF interior line endings (a template Normalize step for
     # generated .g.cs classes, JsonSerializerOptions.NewLine = "\r\n" for the JSON files). A
-    # clone whose checkout would otherwise diverge from CRLF (e.g. a non-Windows default, or
-    # core.autocrlf=input) would rewrite them on checkout, with nothing on disk to show why.
+    # clone with core.autocrlf=input would rewrite them to LF on checkout, with nothing on disk
+    # to show why.
     Generated/** text eol=crlf
     coverage-report.json text eol=crlf
     fixtures/**/*.json text eol=crlf
