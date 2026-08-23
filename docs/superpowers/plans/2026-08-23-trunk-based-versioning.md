@@ -1,6 +1,12 @@
 # Trunk-based versioning and prerelease
 
-**Status:** plan, rev 1. Nothing built yet.
+**Status:** plan, rev 2. Nothing built yet.
+
+**Revision note — rev 2.** Rev 1 named two risks in its self-review and left them as assertions.
+Both have now been **measured**, and one result inverts what rev 1 hoped for: NuGet selects the
+*lowest* satisfying version, so leaving the scaffolded prerelease reference alone is measurably
+harmful rather than harmless. `[prerelease-reference-migration]` is a new decision section.
+`[versionprefix-not-version]` gained a table and a much stronger argument than rev 1 gave it.
 
 **Spec:** `docs/superpowers/specs/2026-08-23-nuget-publish-readiness-design.md` §7 — which currently
 records a **superseded** decision (`develop`/`main`) and is corrected by Task 0 here.
@@ -108,10 +114,88 @@ Rejected: injecting a whole `-p:Version=` string from CI. It works, but it makes
 differ from the file every test reads, which is precisely the split that makes
 `PackageVersionCouplingTests` ambiguous about which value it is guarding.
 
-**The suffix's counter needs deciding, not defaulting.** `github.run_number` is monotonic and sorts
-correctly under SemVer's numeric-identifier rule (`preview.9` < `preview.10`), but it resets if the
-workflow is renamed or recreated. Alternatives are a commit count or a date stamp. Task 2 decides
-and records why.
+**Measured, on SDK 10.0.400, both packages** — rev 1 asserted this composition; here it is:
+
+| Case | `Version` | `PackageVersion` | `AssemblyVersion` | `InformationalVersion` | nuspec | `CliVersion.Read()` |
+|---|---|---|---|---|---|---|
+| Today, `<Version>0.1.0</Version>` | `0.1.0` | `0.1.0` | `0.1.0.0` | `0.1.0` | `0.1.0` | `0.1.0` |
+| `<VersionPrefix>`, no suffix | `0.1.0` | `0.1.0` | `0.1.0.0` | `0.1.0` | `0.1.0` | `0.1.0` |
+| `<VersionPrefix>` + `-p:VersionSuffix=preview.7` | `0.1.0-preview.7` | `0.1.0-preview.7` | `0.1.0.0` | `0.1.0-preview.7` | `0.1.0-preview.7` | `0.1.0-preview.7` |
+
+Row 2 is **byte-identical to row 1 on every column** — the no-regression case holds. `InTest.Cli`
+and `InTest.Runtime` produced identical numbers throughout; there is no tool/library difference.
+
+**The strongest argument for this decision is what the current mechanism does when you try to use
+it.** With `<Version>` set explicitly, `-p:VersionSuffix=preview.7` is *accepted*, `VersionSuffix`
+evaluates, and `Version` stays `0.1.0` — **0 warnings, 0 errors, build succeeded.** CI would ship a
+package stamped `0.1.0` while believing it shipped a preview. That silent failure, not tidiness, is
+the cost of not making this change.
+
+**Two facts worth writing into the code, both measured:**
+
+- `AssemblyVersion` and `FileVersion` stay `0.1.0.0` for **every** prerelease of `0.1.0` — assembly
+  identity cannot distinguish `preview.6` from `preview.7`. And the derivation rule is not the
+  obvious one: it is **`$(Version)` with the label stripped and padded**, not "from `VersionPrefix`"
+  — building at `-p:Version=9.9.9-x` with `VersionPrefix` still `0.1.0` yields `AssemblyVersion`
+  `9.9.9.0`.
+- **`CliVersion` reads the one property of the seven that carries the label.** Reading
+  `Assembly.GetName().Version` instead would collapse every prerelease to `0.1.0` and make
+  `[exact-match]` permanently blind. `CliVersion.cs` should say so.
+
+**The suffix's counter still needs deciding, not defaulting.** `github.run_number` is monotonic and
+sorts correctly under SemVer's numeric-identifier rule (`preview.9` < `preview.10`), but it resets
+if the workflow is renamed or recreated. Alternatives are a commit count or a date stamp. Task 2
+decides and records why.
+
+### `[prerelease-reference-migration]` — `upgrade` detects and reports; it does not rewrite
+
+Rev 1's self-review hoped NuGet resolution would make this harmless. **Measured against real local
+feeds, it does not.**
+
+| Feed holds | Reference | Resolves to |
+|---|---|---|
+| `0.1.0-preview.7` **and** `0.1.0` | `0.1.0-preview.7` | **`0.1.0-preview.7`** |
+| `0.1.0` only | `0.1.0-preview.7` | `0.1.0` + warning NU1603 |
+| `0.1.0-preview.7` only | `0.1.0` | **NU1102 — restore fails** |
+| both | `0.1.0-*` | `0.1.0` |
+
+**NuGet selects the lowest satisfying version**, so a scaffolded `Version="0.1.0-preview.7"` keeps
+resolving the prerelease after stable ships — indefinitely, with a green build and zero warnings.
+And `upgrade` never opens the `.csproj`: verified end to end, it bumped `intest.json` and the tool
+pin to `0.1.0` and left the reference at `0.1.0-preview.7`, reporting success. `generate --check`
+compares only `intestVersion` against `CliVersion.Current` (`GenerateCommand.cs:170`), so **no
+InTest command can observe the runtime's version at all.** An adopter who believes they moved to
+stable runs a green suite against prerelease runtime bits.
+
+**Rejected, each measured rather than argued:**
+
+- *Leave it — NuGet handles it.* False. Row 1 above.
+- *Scaffold the stable base version instead of the running one.* NU1102, restore fails during the
+  entire prerelease window — reproducing the exact defect `[scaffold-reads-itself]` removes.
+- *Scaffold a floating `0.1.0-*`.* Genuinely self-migrating — measured, it resolves the prerelease
+  while only prereleases exist and jumps to stable the moment one does, with no `upgrade` change at
+  all. Rejected because it makes a committed test project's restore non-deterministic and silently
+  floating, which is the opposite of what `[exact-match]` is built on. Recorded because it is the
+  option a reviewer will propose.
+
+**Decided: `upgrade` reads the scaffolded `.csproj`, and if the `InTest.Runtime` reference differs
+from `CliVersion.Current`, appends a line naming the file, the current value and the exact
+replacement.** Pure read, no ownership crossing, and a failed match means "say nothing extra"
+rather than "corrupt a build".
+
+> The ownership comparison rev 1 would have reached for — `.gitattributes` — is the wrong one. The
+> closer precedent is `upgrade`'s own Decision 1: surgical single-value replacement inside
+> adopter-owned `intest.json` and `.config/dotnet-tools.json`, deliberately refusing to
+> reparse-and-rewrite. Rewriting one attribute is the same *kind* of crossing. **The material
+> difference is blast radius, not ownership**: a `.csproj` is the adopter's build, and a matcher
+> that is good enough on the scaffold InTest emits can misfire on a real one — attributes reordered,
+> `VersionOverride`, central package management, the reference moved to `Directory.Packages.props`.
+> Promoting detection to a rewrite is a small step **once the matcher has seen real projects**;
+> doing it first ships an untested XML surgeon into adopter builds.
+
+**This mitigates, it does not close.** The durable fix is for `generate --check` to learn the
+runtime's version — a change to `[exact-match]` in the spec, out of scope here, and the reason this
+decision is a report rather than a guarantee.
 
 ### `[publish-stays-manual]` — this plan produces correct versions, it does not publish
 
@@ -150,13 +234,25 @@ This plan makes CI produce **correctly versioned artifacts** and proves they are
 - [ ] **Step 3:** `Directory.Build.props`' comment now describes the old causality. Correct it.
 - [ ] **Step 4: Prove the whole thing end to end.** Build the CLI at a prerelease version, scaffold
       a project with it, and confirm the generated `.csproj` references that same version.
-      `scripts/local-e2e-test.ps1` already packs at `0.1.0-local.<timestamp>` and restores — which
-      makes it the natural harness, and means it is also the thing most likely to break. Check it.
+      `scripts/local-e2e-test.ps1` is the natural harness — **measured to still pass end to end**
+      against a `VersionPrefix` clone, all nine steps. Note its csproj-patch step
+      (`scripts/local-e2e-test.ps1:328-331`) becomes **redundant** once the scaffold emits the
+      running version; remove it deliberately rather than leaving a second mechanism doing the same
+      job.
+- [ ] **Step 5:** Implement `[prerelease-reference-migration]`'s detect-and-report in `upgrade`, and
+      prove it fires: scaffold with a prerelease CLI, upgrade with a stable one, confirm the message
+      names the file and the exact edit. Confirm a non-matching `.csproj` produces silence, not a
+      crash.
 
 ### Task 2: `[versionprefix-not-version]`
 
 - [ ] **Step 1:** Replace `<Version>` with `<VersionPrefix>`. Confirm `dotnet build` with no suffix
       still yields exactly `0.1.0` — assembly informational version *and* packed nuspec.
+      **Expect exactly two failures** in `PackageVersionCouplingTests`
+      (`InitCommandScaffoldVersionsMatchTheCenter`, `CompileVerificationTestsScaffoldVersionsMatchTheCenter`),
+      whose `ReadRuntimeSelfVersion` matches `<Version>([^<]+)</Version>`. That is the **acceptance
+      signal** for the swap, not a surprise — the guard failing loudly is it working. Task 1 Step 2
+      is what resolves them.
 - [ ] **Step 2:** Decide the suffix counter and record why, per `[versionprefix-not-version]`.
 - [ ] **Step 3:** Confirm `CliVersion.Read()` returns the prerelease label intact through the full
       path — build, pack, `init`, read `intestVersion` back. v1-e Task 1 proved the mechanism at
@@ -186,21 +282,34 @@ This plan makes CI produce **correctly versioned artifacts** and proves they are
 
 ## Self-review
 
-**Where a reviewer should push.** `[versionprefix-not-version]` is the decision most likely to be
-subtly wrong, because MSBuild version composition has more inputs than this plan names —
-`VersionPrefix`, `VersionSuffix`, `Version`, `PackageVersion`, `AssemblyVersion`,
-`FileVersion` and `InformationalVersion` do not all derive the same way, and `CliVersion` reads
-exactly one of them. Task 2 Step 3 exists to catch that, but the plan asserts the composition works
-before measuring it — the same shape that produced `[major-only]` in the v1-e plan and had to be
-retracted.
+**Rev 1's two risks are now measured and decided** — see `[versionprefix-not-version]`'s table and
+`[prerelease-reference-migration]`. Rev 1 asserted the version composition worked before measuring
+it, which is the shape that produced `[major-only]` in the v1-e plan and had to be retracted; this
+time the measurement came first and confirmed the fix while producing a *better* argument for it
+than rev 1 had.
 
-**`[scaffold-reads-itself]` has a consequence this plan does not resolve.** Once the scaffold emits
-the running version, a project scaffolded by a *prerelease* CLI references a *prerelease* runtime —
-so an adopter who tries the prerelease channel and later moves to stable has a reference that
-`upgrade` must migrate. `upgrade` already rewrites `intestVersion` and the tool pin; whether it
-also rewrites the scaffolded `PackageReference` is not currently specified anywhere, and the
-scaffold is in `Generated/`-adjacent territory that `upgrade` does not own. **That is a real gap and
-this plan does not close it** — name it, decide it before the first prerelease is published.
+**Where a reviewer should push now.**
+
+`[prerelease-reference-migration]` chooses detection over rewriting, which leaves the adopter one
+manual edit and **does not help someone who ignores the message**. That is a deliberate trade — a
+misfiring regex inside an adopter's build is worse than a message they skipped — but it is a real
+limitation and a reviewer may reasonably argue the rewrite should ship first. The counter-argument
+is evidence-based rather than principled: InTest has never read an adopter's `.csproj`.
+
+**The durable gap, named rather than closed:** no InTest command can observe the runtime package's
+version. `generate --check` compares `intestVersion` to `CliVersion.Current` and nothing else, so
+runtime drift is structurally invisible. Closing it means teaching `[exact-match]` about the
+runtime — a spec change, out of scope here, and worth deciding before the prerelease channel has
+adopters on it.
+
+**One thing measured that belongs to the readiness spec, not this plan:** neither `dotnet pack`
+invocation produced a `.snupkg` in this configuration. The readiness spec plans for `IncludeSymbols`
+and `SymbolPackageFormat`; whoever implements that should confirm symbols are actually produced
+rather than assuming the properties suffice.
+
+**Unmeasured, and it matters operationally:** whether an *unlisted* prerelease still satisfies a
+floor that names it. "Unlist the previews once stable ships" is the obvious lever and it cannot be
+confirmed without a real nuget.org account. Inferred, not measured — do not rely on it.
 
 **What this plan does not do.** It does not publish, does not reserve NuGet IDs, and does not close
 the Phase 8 gap where `dotnet tool restore` cannot resolve `intest.cli` from a bare clone. All three
