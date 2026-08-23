@@ -1,0 +1,119 @@
+# Dependabot version-update configuration.
+#
+# Two ecosystems only — the two this repository actually has:
+#   - `nuget`: Directory.Packages.props (central package management, no packages.lock.json).
+#   - `github-actions`: the SHA-pinned actions in .github/workflows/build-and-test.yml.
+#
+# What this file does NOT cover, on purpose: `global.json` pins the .NET SDK at 10.0.400
+# ([pin-the-sdk], docs/superpowers/plans/2026-08-22-intest-ci.md). Dependabot has no
+# `dotnet-sdk`/`global.json` ecosystem (checked against GitHub's supported-ecosystems list,
+# 2026-08-23 — `nuget` updates PackageReference/PackageVersion entries, not the SDK pin). A
+# runner-image SDK bump is exactly what `global.json` exists to prevent from happening silently
+# (Directory.Build.props sets TreatWarningsAsErrors=true and LangVersion=latest — see
+# `[pin-the-sdk]`), so bumping it must stay a deliberate, reviewed edit by a human, not something
+# a bot can propose here. See CONTRIBUTING.md's "Automated dependency updates" section for the
+# full accounting of what this file can and cannot enforce against the dependency policy.
+#
+# Confirmed before writing this file, not assumed:
+#   - CPM support: dependabot-core's nuget updater reads Directory.Packages.props directly
+#     (confirmed via GitHub's own supported-ecosystems documentation and multiple dependabot-core
+#     issues that presuppose CPM support while reporting narrower edge cases — multiple
+#     Directory.Packages.props files in one repo, and packages.lock.json reconciliation under CPM
+#     — neither of which applies here: this repo has exactly one Directory.Packages.props and no
+#     packages.lock.json anywhere, confirmed by `git ls-files | grep -i packages.lock` returning
+#     nothing).
+#   - SHA-pin support: GitHub's own changelog ("Dependabot now supports pinned actions that use a
+#     full-length commit SHA", 2022-08-09) and ("Dependabot now updates comments in GitHub Actions
+#     workflows referencing action versions", 2022-10-31) confirm Dependabot keeps a SHA-pinned
+#     action pinned to a SHA — it does not rewrite the pin to a mutable tag — and rewrites the
+#     trailing `# vX.Y.Z` comment to match the new SHA's release. This is exactly the shape
+#     build-and-test.yml already uses, so [pin-actions-by-sha] (same plan) is not silently
+#     undone by turning this ecosystem on.
+#   - What was NOT independently confirmed: whether Dependabot's nuget updater withholds
+#     prerelease/preview versions by default unless a package is already pinned to one. This is
+#     commonly described as Dependabot's general behaviour, but no direct GitHub-docs quote
+#     confirming it for the `nuget` ecosystem specifically was found in the research for this
+#     change. Every package pinned today in Directory.Packages.props is a stable release, so this
+#     is currently moot in practice — but it is not something this config can be relied on to
+#     enforce, and CONTRIBUTING.md says so explicitly. See its "Automated dependency updates"
+#     section.
+
+version: 2
+
+updates:
+  # -------------------------------------------------------------------------------------------
+  # NuGet: Directory.Packages.props at the repo root is the single source of every package
+  # version (CLAUDE.md, "Build configuration"). `directory: "/"` is where Dependabot looks for
+  # it; CPM means there is exactly one file to scan rather than one per .csproj.
+  # -------------------------------------------------------------------------------------------
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      # Weekly, not daily: this repository's own commit log (`git log --oneline`) shows a small
+      # number of maintainers and no history of multiple merges per day. A daily schedule on a
+      # low-traffic repo just produces stale, re-triggered PRs sitting for most of the week
+      # ([open-pull-requests-limit] below is the second half of that same restraint). Monday is
+      # arbitrary but deliberate: it puts a fresh batch at the start of a work week rather than
+      # right before a weekend.
+      interval: "weekly"
+      day: "monday"
+    # Five, not the default five-is-implicit-cap-anyway choice made carelessly: with grouping
+    # (below) collapsing the three MSTest.* packages into one PR, this repo's Directory.Packages.props
+    # has 14 - 3 + 1 = 12 independently-updatable entries. A cap of 5 means at most 5 concurrent
+    # open version-update PRs before Dependabot pauses opening more until one is closed — enough
+    # headroom that a normal week's worth of upstream releases isn't silently dropped, without
+    # opening "twenty PRs a week on a repo with one maintainer" (the failure mode this task named
+    # explicitly). Security-update PRs are exempt from this cap by Dependabot's own design and are
+    # not throttled by it.
+    open-pull-requests-limit: 5
+    # "chore:" already appears in this repo's history for dependency-adjacent maintenance
+    # (`5fccdb4 chore: ownership transfer cleanup ... package metadata`,
+    # `546904b chore: solution skeleton with pinned dependencies`) — reusing it here follows the
+    # existing convention rather than introducing a new prefix this log has never used.
+    commit-message:
+      prefix: "chore"
+    groups:
+      # MSTest.TestFramework, MSTest.TestAdapter and MSTest.Analyzers ship from the same upstream
+      # release train and move together — grouping by the `MSTest.*` name pattern is what makes
+      # that true mechanically, not a hand-maintained list that can drift from it. Without this,
+      # a single upstream MSTest release becomes three separate PRs, each failing
+      # PackageVersionCouplingTests.InitCommandScaffoldVersionsMatchTheCenter for the same reason.
+      # Grouped, it is one failing PR instead of three — see CONTRIBUTING.md's "Automated
+      # dependency updates" section for what a maintainer does with it.
+      #
+      # Deliberately NOT extended to Microsoft.NET.Test.Sdk or Shouldly, even though both are
+      # also covered by PackageVersionCouplingTests (Microsoft.NET.Test.Sdk in the three-way
+      # check; Shouldly in the two-way check): "coupled by this repo's guard" and "released
+      # together upstream" are different facts, and only the second is a real reason to group.
+      # Microsoft.NET.Test.Sdk ships from the vstest team's own repository on its own cadence, and
+      # Shouldly is an unrelated project entirely — folding either into this group would be
+      # asserting an upstream release relationship that was never checked, exactly the kind of
+      # unverified assumption CONTRIBUTING.md's "Ask the thing that decides" asks this project not
+      # to make. They stay as individual PRs, each still hitting the same guard on its own.
+      mstest:
+        patterns:
+          - "MSTest.*"
+
+  # -------------------------------------------------------------------------------------------
+  # GitHub Actions: every action build-and-test.yml uses is pinned by commit SHA with a trailing
+  # `# vX.Y.Z` comment, per [pin-actions-by-sha] (docs/superpowers/plans/2026-08-22-intest-ci.md).
+  # `directory: "/"` scans .github/workflows/ for `uses:` lines; there is only one workflow file
+  # today (build-and-test.yml) and all three actions it uses (actions/checkout, actions/setup-
+  # dotnet, actions/cache) are already SHA-pinned, so there is nothing here for Dependabot to
+  # convert away from a tag — see the file header above for how the SHA-pin/comment-update
+  # behaviour was confirmed.
+  # -------------------------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # Three actions total, all independent (no coupling guard, no shared upstream release train
+    # the way MSTest.* has) — a cap of 5 is already more headroom than the ecosystem can use.
+    open-pull-requests-limit: 5
+    # "ci:" is this repo's existing prefix for changes to build-and-test.yml itself
+    # (`7841bf3 ci: build-and-test workflow ...`, `b508853 ci: dogfood workflow ...`,
+    # `2535805 ci: pin SDK at 10.0.400 ...`) — a Dependabot action bump is exactly that kind of
+    # change, so it keeps the same prefix rather than introducing "chore:" here too.
+    commit-message:
+      prefix: "ci"

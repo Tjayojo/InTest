@@ -77,6 +77,13 @@ SHA — see CONTRIBUTING.md's dependency policy.
   versions and both files, if a hardcoded version in either scaffold site disagrees with
   `Directory.Packages.props` (or, for `InTest.Runtime`, with `Directory.Build.props`' own
   `Version`, since that package is deliberately not centrally versioned).
+- `.github/dependabot.yml` proposes weekly version bumps to `Directory.Packages.props` and to the
+  SHA-pinned actions in `.github/workflows/build-and-test.yml`. It only ever edits
+  `Directory.Packages.props`, so a bump to `MSTest.TestFramework`, `MSTest.TestAdapter`,
+  `Microsoft.NET.Test.Sdk`, `MSTest.Analyzers` or `Shouldly` is expected to fail
+  `PackageVersionCouplingTests` — that is the guard working as designed, not a broken config. See
+  CONTRIBUTING.md's "Automated dependency updates" section for what to do with such a PR and for
+  what the config can and cannot enforce against the dependency policy below.
 
 ## Architecture
 

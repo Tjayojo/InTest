@@ -237,6 +237,55 @@ New dependencies are held to a hard line, because adopters inherit whatever we t
   is mutable and can be repointed after review. See "Continuous integration" below for how each
   pin was resolved and verified.
 
+### Automated dependency updates (Dependabot)
+
+`.github/dependabot.yml` opens weekly pull requests, capped at five open at a time per ecosystem,
+for two ecosystems: `nuget` (reading `Directory.Packages.props` directly — this repository uses
+central package management with no `packages.lock.json`, which Dependabot's `nuget` updater
+handles natively) and `github-actions` (reading the `uses:` lines in
+`.github/workflows/build-and-test.yml`). The three `MSTest.*` packages
+(`MSTest.TestFramework`, `MSTest.TestAdapter`, `MSTest.Analyzers`) are grouped into a single PR,
+because they ship from the same upstream release train and move together; every other package
+gets its own PR. The file itself carries the fuller reasoning, including how CPM support and
+SHA-pin support were confirmed rather than assumed.
+
+**What Dependabot enforces mechanically:** a version bump proposal against
+`Directory.Packages.props`, nothing more. For `github-actions`, it keeps an action pinned to a
+commit SHA (it does not rewrite the pin to a mutable tag) and updates the trailing `# vX.Y.Z`
+comment to match — confirmed against GitHub's own changelog entries for that feature, so
+[pin-actions-by-sha] survives Dependabot being turned on rather than being silently undone by it.
+
+**What stays a human review step, because Dependabot cannot check it:** every other line of the
+dependency policy above — licence, deprecation status, and vulnerability metadata beyond what
+GitHub's own security-alert pipeline already covers (a separate, repository-level setting, not
+something `dependabot.yml` controls). Whether the `nuget` ecosystem withholds prerelease versions
+by default was not independently confirmed while writing this config (see the file's own header
+for exactly what was and was not established); every package pinned today is a stable release, so
+it does not currently matter in practice, but do not rely on Dependabot to enforce "no preview or
+prerelease" — check it by hand the same way you would for a manually-proposed dependency. The pull
+request template's "If this adds or changes a dependency" checklist is exactly this list, and it
+applies to a Dependabot PR the same as any other.
+
+**A Dependabot PR that bumps `MSTest.TestFramework`, `MSTest.TestAdapter`,
+`Microsoft.NET.Test.Sdk`, `MSTest.Analyzers`, or `Shouldly` will fail CI.** This is expected, not
+a bug in the config. `PackageVersionCouplingTests`
+(`tests/InTest.Architecture.Tests/PackageVersionCouplingTests.cs`, described in CLAUDE.md's
+"Build configuration" section) enforces that those versions stay identical across
+`Directory.Packages.props`, the scaffold string in `InitCommand.cs`, and — for the three-way
+subset — the hand-written project in `CompileVerificationTests.cs`. Dependabot only ever edits
+`Directory.Packages.props`, so any of those five packages moving puts the other site(s) out of
+sync by construction, and the guard exists precisely to make that failure loud instead of silent.
+To merge such a PR: read the failing test's message (it names both files and both versions),
+hand-edit the scaffold string(s) it points at to match, and re-run
+`dotnet test tests/InTest.Architecture.Tests` before pushing. This is the behaviour the guard was
+built for — see `PackageVersionCouplingTests`' own doc comment, which names Dependabot explicitly
+as the reason the coupling needed to become mechanical rather than a matter of discipline.
+
+**Not covered by any ecosystem:** `global.json` pins the .NET SDK at `10.0.400`
+([pin-the-sdk], `docs/superpowers/plans/2026-08-22-intest-ci.md`). Dependabot has no
+`dotnet-sdk`/`global.json` ecosystem, so that pin is not part of this automation at all — bumping
+it remains a deliberate, hand-made edit, same as before this file existed.
+
 ## Scope requests
 
 Two are expected often enough to answer up front:
