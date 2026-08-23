@@ -153,3 +153,86 @@ jobs:
 
       - name: Assert the suite actually ran
         run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Golden.Tests
+
+  # `[dogfood]` (docs/superpowers/plans/2026-08-22-intest-ci.md, Task 3): the three sample specs
+  # under samples/ (Catalog.Api.json, Inventory.Api.json, Orders.Api.json) are the only
+  # real-world-shaped, hand-authored, multi-producer OpenAPI documents in this repository, and no
+  # automated test in this repo's suites runs the generator against any of them --
+  # InTest.Golden.Tests uses Specs/orders.json, Specs/hostile-text.json and inline string specs,
+  # and touches samples/ nowhere. CliExitCodeTests.CheckFlagIsWiredThroughToGenerate already
+  # exercises init -> generate -> --check -> mutate -> --check through the real CLI, but on a
+  # trivial inline spec -- what this job adds is coverage of the documents, not the flow. Rev 1 of
+  # the plan justified this job differently ("catches a template change that leaves the committed
+  # output of a real project stale"); that was invented -- this repo commits no generated output
+  # anywhere -- and is withdrawn. samples/Identity.Server is a Duende provider with no spec, so
+  # three sample directories are dogfooded here, not four.
+  #
+  # Scope limit, decided in the plan: no running API, and no `dotnet build` of the scaffolded
+  # projects. `generate` and `--check` are static, reading only the spec and the committed
+  # Generated/ output; starting the samples over real HTTP needs the port/issuer/environment
+  # pairing samples/README.md documents, where getting it wrong produces 500s and silent 404s
+  # rather than an obvious failure -- exactly the kind of flake the most-run job in this
+  # repository should not carry. Proving a scaffold actually *compiles* against InTest.Runtime is
+  # `golden`'s job above, not this one's.
+  dogfood:
+    name: Dogfood the sample specs (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Identical pins and identical reasoning to the `fast` job above -- see those comments for
+      # how each SHA was resolved.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        # Same key shape as the other two jobs, and deliberately identical rather than job-scoped
+        # -- see the `golden` job's comment above for why a shared cache entry is preferred to a
+        # redundant per-job one. This job only restores InTest.Cli's own dependencies (it never
+        # builds a scaffolded project), a strict subset of what `fast` and `golden` already
+        # restore, so it always hits an entry one of the other two jobs populates rather than
+        # needing its own.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # Built once, at Release, so scripts/ci/dogfood.ps1 can invoke the same binary directly
+      # (`dotnet <dll>`) for all five commands x three specs -- 15 separate `dotnet run` builds of
+      # the identical binary would just be repeated MSBuild evaluation for no new information.
+      - name: Build InTest.Cli
+        run: dotnet build src/InTest.Cli/InTest.Cli.csproj -c Release
+
+      # Scaffolds under runner.temp, which GitHub Actions guarantees exists and sits outside
+      # github.workspace (the checkout) on every runner -- so nothing this step does can dirty the
+      # working tree, the same isolation every v1-e acceptance run and scripts/local-e2e-test.ps1
+      # already use. See scripts/ci/dogfood.ps1's own header for the full sequence and exit-code
+      # reasoning per spec.
+      - name: Dogfood the three sample specs
+        run: >-
+          ./scripts/ci/dogfood.ps1
+          -RepoRoot ${{ github.workspace }}
+          -ScaffoldRoot ${{ runner.temp }}/intest-dogfood
+          -CliDll ${{ github.workspace }}/src/InTest.Cli/bin/Release/net10.0/InTest.Cli.dll
+
+      - name: Confirm the working tree is still clean
+        # Task 3 Step 3. Belt-and-suspenders on top of scaffolding outside the checkout: this is
+        # what would actually catch a regression if some future change made init/generate write
+        # somewhere inside the checkout by mistake, rather than trusting that isolation silently.
+        # Verified during implementation to actually go non-empty and fail this step on a real
+        # dirty tree, not just written to look like it would (see the task's own commit message).
+        run: |
+          $status = git status --porcelain
+          if ($status) {
+            Write-Host "::error::Working tree is not clean after the dogfood run:"
+            Write-Host $status
+            exit 1
+          }
+          Write-Host "Working tree clean."
