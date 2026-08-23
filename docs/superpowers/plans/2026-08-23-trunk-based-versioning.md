@@ -1,6 +1,16 @@
 # Trunk-based versioning and prerelease
 
-**Status:** plan, rev 2. Nothing built yet.
+**Status:** plan, rev 3. Nothing built yet.
+
+**Revision note — rev 3.** The owner asked whether this matches how Microsoft does it. Researched
+against guidance, the .NET team's own repositories, and measurement. Two answers changed the plan:
+the branching model and the property shape **do** match .NET practice, but the counter does not and
+**cannot** — .NET's comes from Arcade's `OfficialBuildId`, an internal Azure DevOps input. And
+`versioning.md` says a CI build number belongs in the **`AssemblyFileVersion` revision**, not in the
+prerelease suffix, which dissolves the question rev 2 was agonising over. `[versionprefix-not-version]`
+is **superseded by `[version-from-git]`** — its measurements stand and are kept. Two new decisions:
+`[version-from-git]` and `[shallow-clone-is-a-defect]`. `[tag-is-the-release]` gained the
+artifact-versus-publishable distinction.
 
 **Revision note — rev 2.** Rev 1 named two risks in its self-review and left them as assertions.
 Both have now been **measured**, and one result inverts what rev 1 hoped for: NuGet selects the
@@ -57,8 +67,14 @@ been exercised on Windows. Both are recorded in the readiness spec; neither bloc
 
 ### `[tag-is-the-release]` — one branch; the tag carries the release signal
 
-`main` is protected, continuous, and always buildable. Every merge produces a **prerelease**. A tag
-produces a **release**.
+`main` is protected, continuous, and always buildable. **Every merge produces a versioned
+artifact; every tag produces a publishable one.**
+
+Rev 1 said "every merge produces a prerelease", implying publication. That is wrong for two
+measured reasons. A height-bearing version signals *"should not be released"* — MinVer's own stated
+semantics — and **nuget.org versions are permanent and undeletable**, so publishing one per merge
+burns the version space of a package that has not shipped once. When a preview should be
+installable, tag it: `git tag 0.1.0-preview.1`. That is more faithful to this decision, not less.
 
 A second long-lived branch would encode the same fact the tag already encodes, and two sources of
 truth for "is this released?" can disagree — a commit on `main` that has not been tagged is neither
@@ -98,7 +114,15 @@ floor would be defensible but buys nothing here.
 product version is pinned to serve the template literal. After this, the template follows the
 product version.
 
-### `[versionprefix-not-version]` — compose the version, do not overwrite it
+### `[versionprefix-not-version]` — **superseded by `[version-from-git]`**
+
+> Kept rather than deleted: its measurements are still true and still load-bearing, and it is what
+> the .NET team actually does — `dotnet/runtime`, `dotnet/aspnetcore` and `dotnet/sdk` all hold
+> `VersionPrefix` (or `MajorVersion`/`MinorVersion`) plus `PreReleaseVersionLabel` and
+> `PreReleaseVersionIteration` in `eng/Versions.props`. It is superseded because it leaves the
+> **counter** unsolved, not because it is wrong. Read it for the silent-failure measurement below,
+> which still governs: anything that sets `<Version>` explicitly makes `-p:VersionSuffix` a no-op
+> with zero warnings.
 
 `<Version>` set explicitly **overrides** MSBuild's `VersionPrefix` + `VersionSuffix` composition, so
 the suffix mechanism has to replace it rather than sit alongside it:
@@ -146,6 +170,77 @@ the cost of not making this change.
 sorts correctly under SemVer's numeric-identifier rule (`preview.9` < `preview.10`), but it resets
 if the workflow is renamed or recreated. Alternatives are a commit count or a date stamp. Task 2
 decides and records why.
+
+### `[version-from-git]` — MinVer derives the version; there is no counter to decide
+
+**Measured on SDK 10.0.400**, MinVer 7.0.0 with `MinVerMinimumMajorMinor=0.1`,
+`MinVerDefaultPreReleaseIdentifiers=preview.0`, `MinVerAutoIncrement=minor`:
+
+| Situation | Version |
+|---|---|
+| untagged commits on `main` | `0.1.0-preview.0.1`, `0.1.0-preview.0.2`, … |
+| exactly on tag `0.1.0` | **`0.1.0`** |
+| commit after that tag | `0.2.0-preview.0.1` |
+| tagged `0.2.0-preview.1` | `0.2.0-preview.1` |
+
+That is exactly the three behaviours `[tag-is-the-release]` specifies, **with no CI logic and no
+counter to choose.** It deletes rev 2's Task 2 rather than implementing it.
+
+`[scaffold-reads-itself]` is unaffected: MinVer stamps `InformationalVersion` as
+`0.2.0-preview.0.1+<sha>`, and `CliVersion.cs:47` strips at the first `+` — the case v1-e Task 1
+already proved at `1.0.0-rc.1`.
+
+**Why not Nerdbank.GitVersioning**, despite the stronger pedigree — it is owned by the `dotnet` org,
+MIT, actively maintained, used across `microsoft/vs-*`, and **named in Microsoft's own
+`AssemblyVersionAttribute` documentation** as *"a better approach… derive the assembly or file
+version from the `HEAD` commit SHA"*. It is version-**file**-driven: a release is cut by *committing*
+a change to `version.json`, and `publicReleaseRefSpec` makes the version depend on which branch you
+are on. Both re-introduce exactly what `[tag-is-the-release]` was chosen to eliminate. That is a
+structural conflict with the model, not a preference — and it is the one place this plan knowingly
+declines a Microsoft-named tool. If the owner later weights failure-loudness above model fit (see
+`[shallow-clone-is-a-defect]`), NBGV is the defensible other answer.
+
+**Why not keep hand-rolling.** Every counter candidate is flawed, and rev 2 named only one of the
+flaws. `github.run_number` **does not exist outside GitHub Actions**, so no local build, fork, or
+future migration can reproduce a version CI produced — and its reset-on-rename behaviour is
+community-reported, *not* documented, so rev 2 should not have stated it flatly. A date stamp needs
+a builds-per-day revision that Arcade's pipeline supplies and GitHub Actions does not. Commit height
+is what MinVer already implements. Hand-rolling ends in writing MinVer, worse.
+
+> **Two guidance items this plan knowingly declines**, both `CONSIDER` rather than `DO`:
+> *"only including a major version in the AssemblyVersion"* — MinVer gives `{Major}.0.0.0`, which
+> satisfies it for free; and *"including a continuous integration build number as the
+> `AssemblyFileVersion` **revision**"*, which remains unmet under any scheme here. Both exist chiefly
+> to reduce .NET Framework binding-redirect pain; InTest is not strong-named and targets `net10.0`.
+> Record the decline rather than leaving it to look like an oversight.
+
+**Prerelease label:** `preview`, dotted. Measured with NuGet's own comparer: `preview.9 < preview.10`
+is **true**, `preview9 < preview10` is **false** — the dot is load-bearing. `ci` and `dev` are
+reserved by Arcade for unpublished builds; `beta` sorts *before* `preview`, so moving from preview
+to beta later is impossible. Build metadata cannot be the counter: `0.1.0-preview.1+abc` and
+`+zzz` compare **equal**, and NuGet strips it on publish.
+
+### `[shallow-clone-is-a-defect]` — MinVer's one bad failure mode, bought back with a guard
+
+**In a shallow clone MinVer sees no tags, computes height 0, and silently produces
+`0.1.0-preview.0` for every commit — no warning, no error.** Verified: our workflow has **three
+`actions/checkout` call sites and zero `fetch-depth` settings**, so all three are the default
+depth-1 clone. Adopting MinVer today would hit this on the first run.
+
+That behaviour is this repository's named anti-pattern, verbatim from `CLAUDE.md`: *"Never
+substitute plausible defaults that let a suite pass while asserting nothing."* NBGV hard-errors here
+instead, with an accurate message, and that is genuinely better engineering.
+
+**So buy the loudness back.** Set `fetch-depth: 0` on all three checkout steps, **and** add a guard
+that fails when the resolved version lacks height it should have — the same shape as
+`NeutralityTests`, `JsonWritingOptionsGuardTests` and `PackageVersionCouplingTests`. The
+`fetch-depth` alone is not enough: it is one line in one file that a future edit can silently drop,
+which is precisely the class of regression this repo builds guards for.
+
+Note also that MinVer outside a git repository emits `MINVER1001` and falls back to
+`0.0.0-alpha.0` — **measured to stay a warning under `TreatWarningsAsErrors`**, because it is an
+MSBuild task warning rather than a compiler one. `scripts/local-e2e-test.ps1` packs from a non-git
+copy, so this path is live here, not hypothetical.
 
 ### `[prerelease-reference-migration]` — `upgrade` detects and reports; it does not rewrite
 
@@ -206,6 +301,10 @@ owner's.
 This plan makes CI produce **correctly versioned artifacts** and proves they are correct. Wiring
 `dotnet nuget push` remains deferred until there is something to publish to.
 
+Rev 3's refinement to `[tag-is-the-release]` makes this cheaper to keep, not harder: since a merge
+now produces an *artifact* rather than a *published prerelease*, deferring the push costs nothing a
+future release job will have to undo.
+
 ---
 
 ## Tasks
@@ -244,19 +343,31 @@ This plan makes CI produce **correctly versioned artifacts** and proves they are
       names the file and the exact edit. Confirm a non-matching `.csproj` produces silence, not a
       crash.
 
-### Task 2: `[versionprefix-not-version]`
+### Task 2: `[version-from-git]` and `[shallow-clone-is-a-defect]`
 
-- [ ] **Step 1:** Replace `<Version>` with `<VersionPrefix>`. Confirm `dotnet build` with no suffix
-      still yields exactly `0.1.0` — assembly informational version *and* packed nuspec.
+- [ ] **Step 1:** Add MinVer as a build-time-only reference (`PrivateAssets="all"`), version pinned
+      in `Directory.Packages.props`, and remove `<Version>` from `Directory.Build.props`. **Confirm
+      nothing ships**: unzip both packages and check the nuspec dependency group is empty. Measured
+      to be so, but verify rather than inherit the claim.
+- [ ] **Step 2:** Configure it for this repo's shape — minimum major/minor, default prerelease
+      identifiers, auto-increment — and confirm the four rows of `[version-from-git]`'s table
+      against a real tag in a scratch clone.
       **Expect exactly two failures** in `PackageVersionCouplingTests`
       (`InitCommandScaffoldVersionsMatchTheCenter`, `CompileVerificationTestsScaffoldVersionsMatchTheCenter`),
-      whose `ReadRuntimeSelfVersion` matches `<Version>([^<]+)</Version>`. That is the **acceptance
-      signal** for the swap, not a surprise — the guard failing loudly is it working. Task 1 Step 2
-      is what resolves them.
-- [ ] **Step 2:** Decide the suffix counter and record why, per `[versionprefix-not-version]`.
-- [ ] **Step 3:** Confirm `CliVersion.Read()` returns the prerelease label intact through the full
-      path — build, pack, `init`, read `intestVersion` back. v1-e Task 1 proved the mechanism at
-      `1.0.0-rc.1`; prove it again for the format actually chosen.
+      whose `ReadRuntimeSelfVersion` reads `<Version>` from `Directory.Build.props`. That is the
+      **acceptance signal**, not a surprise — the guard failing loudly is it working. Task 1 Step 2
+      resolves them.
+- [ ] **Step 3:** `fetch-depth: 0` on all three `actions/checkout` steps, **and** the guard from
+      `[shallow-clone-is-a-defect]`. **Prove the guard fires** by building from a `--depth 1` clone
+      and confirming it fails rather than producing `0.1.0-preview.0` quietly. A guard that has not
+      been seen to fail is decoration.
+- [ ] **Step 4:** Confirm `CliVersion.Read()` returns the label intact through the full path —
+      build, pack, `init`, read `intestVersion` back. v1-e Task 1 proved the mechanism at
+      `1.0.0-rc.1`; prove it again for MinVer's actual output, which carries `+<sha>`.
+- [ ] **Step 5:** Run `scripts/local-e2e-test.ps1`. It packs from a **non-git copy**, so
+      `MINVER1001` fires there by construction. Decide deliberately whether that fallback is
+      acceptable for the local harness or whether the script should pass an explicit version, and
+      record which.
 
 ### Task 3: CI produces the versions
 
@@ -277,18 +388,35 @@ This plan makes CI produce **correctly versioned artifacts** and proves they are
       to cut a release. `CLAUDE.md` if the commands change.
 - [ ] The readiness spec's §8 checklist assumes a manual local pack; reconcile it with CI-produced
       artifacts.
+- [ ] Record the two declined `CONSIDER` items from `versioning.md` (major-only `AssemblyVersion`,
+      CI build number in the `AssemblyFileVersion` revision) where a future reader will find them —
+      declining guidance deliberately is fine; leaving it looking like an oversight is not.
 
 ---
 
 ## Self-review
 
-**Rev 1's two risks are now measured and decided** — see `[versionprefix-not-version]`'s table and
-`[prerelease-reference-migration]`. Rev 1 asserted the version composition worked before measuring
-it, which is the shape that produced `[major-only]` in the v1-e plan and had to be retracted; this
-time the measurement came first and confirmed the fix while producing a *better* argument for it
-than rev 1 had.
+**Rev 1's two risks are measured and decided** — see the superseded
+`[versionprefix-not-version]`'s table and `[prerelease-reference-migration]`. Rev 1 asserted the
+version composition worked before measuring it, the shape that produced `[major-only]` in the v1-e
+plan and had to be retracted; rev 2 measured first, which both confirmed the mechanism and produced
+a better argument than rev 1 had.
+
+**Rev 3's lesson is different and worth naming.** Rev 2's mechanism was correct, matched what the
+.NET team actually does, and was measured — and was still the wrong thing to build, because a tool
+already solved the part it left open. Being right about a mechanism is not the same as that
+mechanism being worth writing. Nothing in rev 1 or rev 2 would have surfaced that; only asking what
+the ecosystem already does did.
 
 **Where a reviewer should push now.**
+
+`[version-from-git]` takes a dependency where a Microsoft-named alternative exists and is declined
+on model fit. That is a defensible call and it is argued, but it is the decision most exposed to a
+reviewer disagreeing about which property matters more — failure-loudness or model fit.
+`[shallow-clone-is-a-defect]` is the mitigation, and it is only as good as the guard Task 2 Step 3
+builds. **If that guard is skipped or written so it cannot fail, this plan has made the repository
+worse**, because MinVer's silent wrong version is more dangerous than a hand-rolled counter that is
+merely inelegant.
 
 `[prerelease-reference-migration]` chooses detection over rewriting, which leaves the adopter one
 manual edit and **does not help someone who ignores the message**. That is a deliberate trade — a
