@@ -1,5 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography;
+using System.Security.Authentication;
+using System.Net.Security;
 using System.Net.Http.Headers;
 using System.Text;
 using InTest.Cli.Spec;
@@ -297,6 +301,99 @@ public class SpecFetcherTests
     }
 
     /// <summary>
+    /// A redirect whose <c>Location</c> cannot be parsed as a URI. <c>SocketsHttpHandler</c>
+    /// raises <see cref="UriFormatException"/> while resolving it — a <see cref="FormatException"/>,
+    /// so neither the transport clauses nor <c>GenerateCommand</c>'s catches see it, and it
+    /// reaches <c>Program</c>'s crash floor as "intest: unexpected failure: UriFormatException".
+    /// <para>
+    /// Real socket, not the stub: the stub replaces <c>SocketsHttpHandler</c> wholesale, so no
+    /// redirect resolution happens inside it and this exception can never be raised there. That
+    /// is the same blind spot that let a vacuous redirect test sit in this file passing.
+    /// </para>
+    /// <para>
+    /// The values that trigger it are the ones with no parseable host. <c>file:///etc/passwd</c>
+    /// does <i>not</i> — that resolves and comes back as a curated 405 — which is worth recording
+    /// because it is the obvious thing to reach for and it proves nothing. No local file is read
+    /// on either path: resolution fails before any request is issued.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    [Timeout(60_000)]
+    [DataRow("///", DisplayName = "three slashes, no host")]
+    [DataRow("//", DisplayName = "two slashes, no host")]
+    public async Task ReportsAMalformedLocationHeaderRatherThanCrashing(string location)
+    {
+        using var server = new RedirectingServer(location);
+
+        var reason = (await Should.ThrowAsync<SpecLoadException>(
+            () => SpecFetcher.FetchAsync(server.Url, transport: null, CancellationToken.None))).Message;
+
+        reason.ShouldNotContain("unexpected failure",
+            customMessage: "a server's malformed header is not a defect in the tool");
+        reason.ShouldContain(server.Url, Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Answers <c>302</c> with a caller-chosen <c>Location</c> on the first path, and a valid
+    /// document on anything else — so a redirect that <i>is</i> followed resolves rather than
+    /// hanging the test.
+    /// </summary>
+    private sealed class RedirectingServer : IDisposable
+    {
+        private readonly TcpListener _listener;
+        private readonly CancellationTokenSource _stop = new();
+
+        public RedirectingServer(string location)
+        {
+            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener.Start();
+            Url = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}/redirect";
+            _ = ServeAsync(location);
+        }
+
+        public string Url { get; }
+
+        private async Task ServeAsync(string location)
+        {
+            try
+            {
+                while (!_stop.IsCancellationRequested)
+                {
+                    using var client = await _listener.AcceptTcpClientAsync(_stop.Token);
+                    var stream = client.GetStream();
+                    var buffer = new byte[8192];
+                    var read = await stream.ReadAsync(buffer, _stop.Token);
+                    var request = Encoding.ASCII.GetString(buffer, 0, read);
+
+                    // Raw bytes rather than a server abstraction, because a malformed Location is
+                    // precisely what a well-behaved server will refuse to send.
+                    const string Body = "{\"openapi\":\"3.0.3\",\"paths\":{}}";
+                    var response = request.StartsWith("GET /redirect", StringComparison.Ordinal)
+                        ? $"HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        : $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {Body.Length}\r\n" +
+                          $"Connection: close\r\n\r\n{Body}";
+
+                    await stream.WriteAsync(Encoding.ASCII.GetBytes(response), _stop.Token);
+                    await stream.FlushAsync(_stop.Token);
+                }
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException
+                                          or ObjectDisposedException)
+            {
+                // Disposal, or the client giving up first.
+            }
+        }
+
+        public void Dispose()
+        {
+            _stop.Cancel();
+            _listener.Dispose();
+            _stop.Dispose();
+        }
+    }
+
+
+    /// <summary>
     /// Answers a well-formed response head and a partial body, then either stalls indefinitely or
     /// drops the connection. A raw <see cref="TcpListener"/> rather than anything higher-level
     /// because both behaviours are protocol violations that a well-behaved HTTP server will not
@@ -432,33 +529,167 @@ public class SpecFetcherTests
         (await SpecFetcher.FetchAsync(Url, transport, CancellationToken.None)).ShouldBe(body);
     }
 
+    // ---- redirects, over a real TLS loopback ---------------------------------------------------
+    //
+    // These replace a stub-based test that asserted the same claim and proved nothing. StubTransport
+    // derives from HttpMessageHandler and REPLACES SocketsHttpHandler wholesale, so redirect
+    // resolution never runs inside it: the old test returned a 302 from the stub and asserted the
+    // message said "302" — true whether or not the handler would have followed it. The safety
+    // property it claimed to pin rested entirely on the comment beside it.
+    //
+    // Testing it for real needs the actual handler, which the seam already allows: FetchAsync takes
+    // any HttpMessageHandler, so a test can hand it a real SocketsHttpHandler configured to trust a
+    // self-signed certificate and let the redirect logic run against a TLS loopback.
+
     /// <summary>
-    /// The https→http downgrade refusal that justifies leaving <c>AllowAutoRedirect</c> on. An
-    /// earlier comment in <see cref="SpecFetcher"/> claimed a test of this name already pinned
-    /// this; it did not exist, so the safety property rested on the comment alone. It exists now.
+    /// <b>The control arm, and the reason the next test means anything.</b> An https→https redirect
+    /// IS followed and the document comes back — so redirect resolution demonstrably runs here.
+    /// Without this, "the downgrade was not followed" is indistinguishable from "no redirect was
+    /// ever attempted", which is exactly the hole the stub-based test fell into.
+    /// </summary>
+    [TestMethod]
+    [Timeout(120_000)]
+    public async Task FollowsARedirectThatStaysOnHttps()
+    {
+        using var server = new TlsRedirectingServer(toPlaintext: false);
+        using var transport = TrustingTransport();
+
+        var fetched = await SpecFetcher.FetchAsync(server.Url, transport, CancellationToken.None);
+
+        fetched.ShouldContain("openapi",
+            customMessage: "an https->https redirect must be followed, or the next test proves nothing");
+    }
+
+    /// <summary>
+    /// The https→http downgrade is <b>not</b> followed. This is what justifies leaving
+    /// <c>AllowAutoRedirect</c> at its default in <see cref="SpecFetcher"/>: a redirect that would
+    /// silently drop TLS from a fetch the adopter asked to be secure is refused by
+    /// <see cref="SocketsHttpHandler"/> itself, which surfaces the 3xx rather than following it.
     /// <para>
-    /// <see cref="SocketsHttpHandler"/> refuses to follow a redirect that drops TLS, and surfaces
-    /// the 3xx to the caller instead of following it — so InTest reports the status rather than
-    /// silently fetching the spec over plaintext.
+    /// Read with <see cref="FollowsARedirectThatStaysOnHttps"/>: that one shows redirects are
+    /// followed here, this one shows this particular redirect is not.
     /// </para>
     /// </summary>
     [TestMethod]
+    [Timeout(120_000)]
     public async Task DoesNotFollowAnHttpsToHttpRedirect()
     {
-        using var transport = new StubTransport(request =>
-        {
-            var response = new HttpResponseMessage(HttpStatusCode.Found);
-            response.Headers.Location = new Uri("http://insecure.example.com/openapi.json");
-            return response;
-        });
+        using var server = new TlsRedirectingServer(toPlaintext: true);
+        using var transport = TrustingTransport();
 
-        var message = (await Should.ThrowAsync<SpecLoadException>(
-            () => SpecFetcher.FetchAsync(Url, transport, CancellationToken.None))).Message;
+        var reason = (await Should.ThrowAsync<SpecLoadException>(
+            () => SpecFetcher.FetchAsync(server.Url, transport, CancellationToken.None))).Message;
 
-        message.ShouldNotContain("unexpected failure");
-        message.ShouldContain("302",
-            customMessage: "the redirect is reported, not followed down to plaintext");
+        reason.ShouldNotContain("unexpected failure");
+        reason.ShouldContain("302",
+            customMessage: "the downgrade is surfaced as a status, never followed to plaintext");
     }
+
+    /// <summary>
+    /// A <b>real</b> <see cref="SocketsHttpHandler"/> — the type production uses, so redirect and
+    /// TLS policy are the real ones — with certificate validation relaxed for the self-signed
+    /// loopback certificate. Relaxing validation is what lets the test reach the redirect logic at
+    /// all, and does not weaken the assertion: the property under test is the redirect's
+    /// <i>scheme</i>, not certificate trust.
+    /// </summary>
+    private static SocketsHttpHandler TrustingTransport() => new()
+    {
+        SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true },
+    };
+
+    /// <summary>
+    /// An HTTPS loopback server on a self-signed certificate. <c>/swagger.json</c> answers 302 —
+    /// either down to plaintext http or across to https on this same server — and <c>/real.json</c>
+    /// answers the document.
+    /// </summary>
+    private sealed class TlsRedirectingServer : IDisposable
+    {
+        private const string Document = "{\"openapi\":\"3.0.3\",\"paths\":{}}";
+
+        private readonly TcpListener _listener;
+        private readonly X509Certificate2 _certificate;
+        private readonly CancellationTokenSource _stop = new();
+
+        public TlsRedirectingServer(bool toPlaintext)
+        {
+            _certificate = CreateLoopbackCertificate();
+            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener.Start();
+
+            var port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            Url = $"https://127.0.0.1:{port}/swagger.json";
+
+            // Port 1 for the plaintext arm: nothing listens there, so if the downgrade were ever
+            // followed this would fail on a connection error rather than quietly passing.
+            var location = toPlaintext
+                ? "http://127.0.0.1:1/plain.json"
+                : $"https://127.0.0.1:{port}/real.json";
+
+            _ = ServeAsync(location);
+        }
+
+        public string Url { get; }
+
+        private static X509Certificate2 CreateLoopbackCertificate()
+        {
+            using var key = RSA.Create(2048);
+            var request = new CertificateRequest(
+                "CN=127.0.0.1", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+
+            var alternativeNames = new SubjectAlternativeNameBuilder();
+            alternativeNames.AddIpAddress(IPAddress.Loopback);
+            request.CertificateExtensions.Add(alternativeNames.Build());
+            request.CertificateExtensions.Add(
+                new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], critical: false));
+
+            using var ephemeral = request.CreateSelfSigned(
+                DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+
+            // Exported and reloaded through PKCS#12 so the private key is usable for server
+            // authentication on every platform — a CreateSelfSigned handle is not, on Windows.
+            return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx), password: null);
+        }
+
+        private async Task ServeAsync(string location)
+        {
+            try
+            {
+                while (!_stop.IsCancellationRequested)
+                {
+                    using var client = await _listener.AcceptTcpClientAsync(_stop.Token);
+                    await using var tls = new SslStream(client.GetStream(), leaveInnerStreamOpen: false);
+                    await tls.AuthenticateAsServerAsync(
+                        _certificate, clientCertificateRequired: false, checkCertificateRevocation: false);
+
+                    var buffer = new byte[8192];
+                    var read = await tls.ReadAsync(buffer, _stop.Token);
+                    var request = Encoding.ASCII.GetString(buffer, 0, read);
+
+                    var response = request.StartsWith("GET /swagger.json", StringComparison.Ordinal)
+                        ? $"HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        : $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {Document.Length}\r\n" +
+                          $"Connection: close\r\n\r\n{Document}";
+
+                    await tls.WriteAsync(Encoding.ASCII.GetBytes(response), _stop.Token);
+                    await tls.FlushAsync(_stop.Token);
+                }
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException
+                                          or ObjectDisposedException or AuthenticationException)
+            {
+                // Disposal, or the client giving up first.
+            }
+        }
+
+        public void Dispose()
+        {
+            _stop.Cancel();
+            _listener.Dispose();
+            _certificate.Dispose();
+            _stop.Dispose();
+        }
+    }
+
 
     // ---- TryValidateUrl -----------------------------------------------------------------------
 

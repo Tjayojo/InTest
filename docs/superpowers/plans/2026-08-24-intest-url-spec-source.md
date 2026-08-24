@@ -103,6 +103,29 @@ with its own "never log this" review) and a `spec.headers` map in `intest.json` 
 a committed file, cutting directly against getting-started's own "anything with a credential in it"
 ignore guidance).
 
+### `[any-address]` — no address is blocked, and the containment is stated rather than assumed
+
+`spec.source` may name `localhost`, a private range, or a link-local address such as a cloud
+metadata endpoint, and `generate` will fetch it. Blocking those was considered and rejected:
+`http://localhost:5001/swagger.json` is the single most common shape this feature will ever be
+pointed at, so a private-range block would break the loopback and intranet cases that are the whole
+reason most teams want a URL source.
+
+The reason that is acceptable is worth writing down, because "we thought about it" and "it happened
+to be fine" are indistinguishable a year later:
+
+- `spec.source` is a value the adopter writes into their own `intest.json`. It is not
+  attacker-supplied input, and only a developer running `generate` on a branch triggers a fetch —
+  `--check` and `fixtures repair` never do (`[no-refetch]`).
+- The response must parse as an OpenAPI document declaring at least one operation *before* anything
+  is written (`[snapshot-is-input]` puts the parse strictly before the write), so a metadata
+  endpoint's credentials response cannot come to rest in a committed `spec.json`.
+- No failure message echoes the response body; a failed fetch reports a status code.
+
+This stops holding the moment InTest gains authenticated fetching (`[anonymous]` is the current
+decision) or fetches from a value it did not get from the adopter. At that point an allowlist is
+the right answer, and this decision should be reopened deliberately rather than rediscovered.
+
 ### `[reprinted]` — the snapshot is re-emitted indented, CRLF, with the relaxed encoder
 
 The fetched bytes are not written verbatim. They are parsed and re-emitted through a dedicated

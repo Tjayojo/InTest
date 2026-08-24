@@ -21,6 +21,30 @@ namespace InTest.Cli.Spec;
 /// <c>fixtures repair</c> both read the committed snapshot instead, so CI stays hermetic and a
 /// command that only writes <c>fixtures/</c> never gets an opinion about what the spec now says.
 /// </para>
+/// <para>
+/// <b>No address is out of bounds, and that is a decision rather than an oversight.</b>
+/// <c>spec.source</c> may name <c>localhost</c>, a private range, or a link-local address such as
+/// a cloud metadata endpoint, and this type will fetch it. Restricting those was considered and
+/// rejected: <c>http://localhost:5001/swagger.json</c> is the single most common shape this
+/// feature will ever be pointed at, and a private-range block would break the loopback and
+/// intranet cases that are the entire point of a URL source for most teams.
+/// </para>
+/// <para>
+/// What makes that acceptable is that the reachable damage is small <i>by construction</i> rather
+/// than by luck. <c>spec.source</c> is a value the adopter writes into their own
+/// <c>intest.json</c> — not attacker-supplied input — and only a developer running <c>generate</c>
+/// on a branch triggers a fetch. Whatever comes back must parse as an OpenAPI document declaring
+/// at least one operation before anything is written, so a metadata endpoint's credentials
+/// response cannot land in <c>spec.json</c>: it fails <see cref="SpecLoader.LoadFromTextAsync"/>
+/// first, and <c>GenerateCommand.ResolveSpecAsync</c> parses strictly before it writes. No failure
+/// message echoes the response body either — a failed fetch reports a status code, not content.
+/// </para>
+/// <para>
+/// If InTest ever gains authenticated fetching (<c>[anonymous]</c> is the current decision), or
+/// starts fetching from a value it did not get from the adopter, this reasoning stops holding and
+/// an allowlist becomes the right answer. It is written down so that change is made deliberately
+/// rather than discovered.
+/// </para>
 /// </summary>
 public static class SpecFetcher
 {
@@ -239,6 +263,29 @@ public static class SpecFetcher
             // sentence that describes all of them equally well.
             throw new SpecLoadException(
                 $"spec.source '{url}' could not be fetched: {ex.Message}", ex);
+        }
+        catch (UriFormatException ex)
+        {
+            // A redirect whose Location header cannot be parsed as a URI. SocketsHttpHandler
+            // raises this while resolving the redirect, and it derives from FormatException — so
+            // it slips past every clause here that is about transports, and past
+            // GenerateCommand's catches too, landing on Program's crash floor as "intest:
+            // unexpected failure: UriFormatException". A server sending a bad header is not a
+            // defect in this tool, and must not be reported as one.
+            //
+            // Measured, because the obvious repro does not work: `Location: file:///etc/passwd`
+            // resolves fine and comes back as a curated 405. What actually triggers it is a
+            // Location with no parseable host — `//` or `///` — giving "Invalid URI: The hostname
+            // could not be parsed."
+            //
+            // Nothing is read from a local path on either route: resolution fails before any
+            // request is issued, so this is a message-quality fix rather than a security one.
+            // Caught as UriFormatException specifically rather than FormatException, which would
+            // swallow unrelated parsing bugs in this method's own future.
+            throw new SpecLoadException(
+                $"spec.source '{url}' redirected to a location InTest could not parse: {ex.Message} " +
+                "Check that the URL names the OpenAPI document directly — a redirect through a " +
+                "login page or a load balancer can send a Location header no client can follow.", ex);
         }
         catch (IOException ex)
         {
