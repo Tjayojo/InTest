@@ -52,9 +52,11 @@ name: Release
 # change what the workflow *does*, but cannot forge the `environment` claim without also satisfying
 # whatever protection rules the repository owner attaches to the `nuget-release` environment on
 # GitHub (required reviewers, deployment branch/tag policies, wait timers) -- configured in repo
-# settings, not in this file, and therefore not editable by a pull request. **The repository owner
-# has not yet confirmed this environment exists or is configured** -- see this task's report for
-# what still needs doing in repo settings.
+# settings, not in this file, and therefore not editable by a pull request. **Confirmed configured**
+# by the 0.1.0-preview.1 tag push: the environment exists, the OIDC exchange succeeded, and nuget.org
+# accepted the push (docs/v0-acceptance.md's publish record). A required-reviewer rule on the
+# environment itself is still recommended and still not confirmed configured -- CONTRIBUTING.md's
+# Publishing checklist step 5 tracks that separately from "does the environment exist at all".
 #
 # ---- Why this tag pattern, not pack.yml's `['*']` -----------------------------------------------
 # pack.yml intentionally accepts any tag shape, because its job is only to pack-and-verify an
@@ -98,6 +100,41 @@ name: Release
 # remain manual, one-time, human edits performed after the publish this workflow performs, not
 # before it.
 #
+# ---- The `release` job: GitHub Release, deliberately AFTER publish, deliberately separate --------
+# `release` creates the GitHub Release for the tag: title, notes drawn from CHANGELOG.md's section
+# for this version, both packages' .nupkg/.snupkg attached. Two decisions, both deliberate:
+#
+# 1. AFTER publish, not before and not in parallel (`needs: [pack, publish]`). A GitHub Release is a
+#    public, human-facing claim that a version shipped. Creating it before `publish` runs, or racing
+#    it in parallel, risks a published Release page for a version nuget.org never actually received
+#    if `publish` then fails -- a misleading, irreversible-feeling artifact is worse than a delayed
+#    one. The cost of running strictly after is small: `release` only needs the tag's CHANGELOG.md
+#    section and the artifacts `pack` already uploaded, neither of which changes based on whether
+#    `publish` succeeded. If `publish` fails, `release` is skipped by the same default GitHub Actions
+#    gives every job with unmet `needs:` -- no explicit `if:` required -- and re-running `publish`
+#    (or the whole workflow) once the underlying problem is fixed re-evaluates `release` normally.
+#    If `publish` succeeds but `release` itself fails afterward (a transient GitHub API error, a
+#    missing CHANGELOG.md section), the package is still correctly on nuget.org -- only the Release
+#    page is missing, which is a small, visible, re-runnable gap, not a broken publish.
+#
+# 2. `contents: write` lives ONLY on this job, never alongside `id-token: write`. That permission
+#    pair is exactly the one this file's own security reasoning above ("The security shape") warns
+#    against letting coexist -- `id-token: write` can mint a nuget.org publish credential, and
+#    `contents: write` can push arbitrary repository content (including, in principle, tags and
+#    releases). Keeping them in separate jobs means a bug or a future edit to one job's steps cannot
+#    reach the other permission by accident. `release` carries `contents: write` and nothing else;
+#    `publish` (above) carries `id-token: write` plus `contents: read` and nothing else.
+#
+# `release` uses the GitHub CLI (`gh`, preinstalled on GitHub-hosted runners) authenticated with the
+# workflow's own ${{ github.token }}, rather than a third-party release-creation action -- there is
+# no new action to pin here, and one fewer third-party action with repository-content write access
+# in scope is strictly less supply-chain surface for the same result ([pin-actions-by-sha]'s spirit
+# extended: the cheapest pin to audit is the one that does not exist).
+#
+# Note the human still creates the tag. [tag-is-the-release] is unchanged by this job -- `release`
+# only runs once a tag has already been pushed by a human (CONTRIBUTING.md's "Cutting a release"),
+# and does nothing that could be mistaken for cutting one itself.
+#
 # Action pins follow [pin-actions-by-sha] (CONTRIBUTING.md's dependency policy, extended to
 # actions): every third-party action here is pinned by commit SHA, resolved the same way as every
 # existing pin in this repository -- `gh api .../releases/latest` for the tag, then
@@ -132,8 +169,10 @@ jobs:
     # InTest.Runtime version (Task 3 Step 3 of the versioning plan) -- re-proving cross-platform
     # parity here would duplicate that job for no new evidence. What THIS job needs is one
     # verified-correct artifact set to hand to the publish job, and ubuntu-latest is the cheaper
-    # runner minute for that. If pack.yml's cross-platform proof is ever found to not hold (see
-    # "What remains unexercised" in this task's report -- pack.yml has never completed a real run),
+    # runner minute for that. pack.yml's cross-platform proof itself is no longer purely local
+    # exercise, either -- the 0.1.0-preview.1 tag push triggered pack.yml for real (its own
+    # `on.push.tags` matches any tag), matrixed over both platforms, and that run went green
+    # too (docs/v0-acceptance.md). If pack.yml's cross-platform proof is ever found to not hold,
     # revisit this choice.
     runs-on: ubuntu-latest
     steps:
@@ -204,11 +243,12 @@ jobs:
     runs-on: ubuntu-latest
     # This is the control "The security shape" above depends on. The value here ("nuget-release")
     # must be typed identically into the Environment field of the nuget.org trusted-publishing
-    # policy the repository owner creates -- see this task's report for exactly what that setup
-    # still requires. Configure required reviewers and/or a deployment tag policy on this
-    # environment in the repository's own Settings > Environments; that configuration is what
-    # makes the `environment` claim in the OIDC token mean something an attacker cannot self-grant
-    # by editing this file.
+    # policy the repository owner creates -- confirmed done and matching by the 0.1.0-preview.1
+    # push (docs/v0-acceptance.md's publish record). Configure required reviewers and/or a
+    # deployment tag policy on this environment in the repository's own Settings > Environments;
+    # that configuration is what makes the `environment` claim in the OIDC token mean something
+    # an attacker cannot self-grant by editing this file -- still recommended, still not confirmed
+    # configured (CONTRIBUTING.md's Publishing checklist step 5).
     environment: nuget-release
     # Scoped to this job only, not the workflow -- the pack job above has no need of it, and
     # putting it at the workflow level would grant it to a job that never uses it, widening the
@@ -245,8 +285,8 @@ jobs:
       # sensitive -- NuGet/login's own README prints an example username in plain text -- so a
       # `vars` reference is the right visibility level, and keeping it out of this file means
       # rotating the publishing account later is a repo-settings change, not a workflow edit. The
-      # repository owner must add this variable before the first tag push reaches this job; see
-      # this task's report.
+      # repository owner added this variable before the 0.1.0-preview.1 tag push -- confirmed by
+      # that push's own OIDC exchange succeeding (docs/v0-acceptance.md's publish record).
       - name: Log in to nuget.org (OIDC trusted publishing)
         id: nuget_login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
@@ -256,11 +296,11 @@ jobs:
       # dotnet nuget push resolves a sibling .snupkg automatically when it sits alongside its
       # .nupkg in the same push -- no separate `dotnet nuget push *.snupkg` step, per NuGet's own
       # documented behavior. --skip-duplicate turns "this exact version already exists on
-      # nuget.org" from a hard failure into a no-op push, which matters because this step has never
-      # run before (see "What remains unexercised" in this task's report) -- a transient failure
-      # partway through re-running this job should not be blocked by the first package having
-      # already landed. It does NOT allow re-publishing different content under an existing
-      # version; nuget.org itself refuses that regardless of this flag.
+      # nuget.org" from a hard failure into a no-op push -- confirmed working end to end by the
+      # 0.1.0-preview.1 push (docs/v0-acceptance.md), and kept so a transient failure partway
+      # through re-running this job is never blocked by the first package having already landed.
+      # It does NOT allow re-publishing different content under an existing version; nuget.org
+      # itself refuses that regardless of this flag.
       - name: Push to nuget.org
         run: >-
           dotnet nuget push
@@ -268,3 +308,83 @@ jobs:
           --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
+
+  release:
+    name: Create GitHub Release
+    # Deliberately AFTER publish, not before it and not in parallel with it -- see this file's
+    # header comment ("The `release` job") for why. This default `needs:` gate is also what makes
+    # `release` skip cleanly if `publish` fails -- no `if:` needed for that.
+    needs: [pack, publish]
+    runs-on: ubuntu-latest
+    # contents: write ONLY. Never alongside id-token: write -- that pairing is exactly what this
+    # file's "The security shape" section above warns against letting coexist in one job. This job
+    # cannot mint a nuget.org credential; the publish job above cannot push repository content.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        # Needed to read CHANGELOG.md at the tagged commit -- github.token below only grants API
+        # access, not a working tree. Same pin as every other checkout in this file.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download packed artifacts
+        # Same artifact the publish job downloaded above -- built once by `pack`, reused by both
+        # downstream jobs rather than re-packed.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: intest-release-packages
+          path: ${{ runner.temp }}/intest-release-pack
+
+      # CHANGELOG.md is the source of truth for what a release's notes say -- CONTRIBUTING.md's
+      # Changelog section requires the Unreleased section to become a dated version heading BEFORE
+      # the tag is pushed, so by the time this job runs, the section this regex looks for must
+      # already exist on the tagged commit. A missing section fails loudly here rather than
+      # publishing a Release with empty or wrong notes -- the same "fail loudly, no plausible
+      # default" discipline CLAUDE.md asks for everywhere else in this repository. The lookahead's
+      # second alternative stops before the file's trailing Keep-a-Changelog link-reference lines
+      # (`[0.1.0-preview.1]: https://...`) so they never leak into a Release's notes body.
+      - name: Extract this version's changelog notes
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $changelog = Get-Content -Raw -Path CHANGELOG.md
+          $pattern = "(?ms)^## \[$([regex]::Escape($tag))\][^\r\n]*\r?\n(.*?)(?=\r?\n## \[|\r?\n\[[^\]]+\]:\s|\z)"
+          $match = [regex]::Match($changelog, $pattern)
+          if (-not $match.Success) {
+            Write-Host "::error::No CHANGELOG.md section found for tag '$tag' -- CONTRIBUTING.md's Changelog section requires 'Unreleased' to be renamed to '## [$tag] - <date>' and committed before the tag is pushed."
+            exit 1
+          }
+          $notes = $match.Groups[1].Value.Trim()
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            Write-Host "::error::CHANGELOG.md's '## [$tag]' section is empty."
+            exit 1
+          }
+          Set-Content -Path release-notes.md -Value $notes -NoNewline
+          Write-Host "Release notes ($($notes.Length) chars):"
+          Write-Host $notes
+
+      # gh (GitHub CLI) is preinstalled on GitHub-hosted runners and authenticates from GH_TOKEN --
+      # no third-party action to pin for this step (see this file's header comment for why that is
+      # a deliberate choice, not an oversight). A prerelease tag (anything with a `-<label>`, e.g.
+      # `0.1.0-preview.1`) is marked as a GitHub prerelease too, so it does not show as "Latest
+      # release" on the repository's front page ahead of an actual stable version.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $dir = '${{ runner.temp }}/intest-release-pack'
+          $assets = Get-ChildItem -Path "$dir/*.nupkg", "$dir/*.snupkg"
+          if ($assets.Count -ne 4) {
+            Write-Host "::error::Expected 4 release assets (InTest.Cli/InTest.Runtime x .nupkg/.snupkg), found $($assets.Count) in $dir."
+            exit 1
+          }
+
+          $ghArgs = @('release', 'create', $tag) + $assets.FullName + @(
+            '--title', $tag,
+            '--notes-file', 'release-notes.md'
+          )
+          if ($tag -match '-') {
+            $ghArgs += '--prerelease'
+          }
+
+          & gh @ghArgs

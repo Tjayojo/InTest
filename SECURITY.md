@@ -17,10 +17,13 @@ than a service level.
 
 ## Supported versions
 
-While the project is at design stage there is nothing published and nothing to patch.
+`InTest.Cli` and `InTest.Runtime` `0.1.0-preview.1` are published to nuget.org (see
+`docs/v0-acceptance.md`). It is a v0 prerelease: expect breaking changes before a `0.1.0`
+stable release, and report anything you find against it.
 
-Once packages ship, security fixes go to the current major and to the previous major for the
-12 months it remains supported (see §3 of the design spec). Older versions are not patched.
+The current-major/previous-major, 12-months-supported policy (§3 of the design spec) starts to
+apply once a `1.x` major exists. Until then there is no previous major to patch — fixes go to
+whatever the current `0.x` prerelease is.
 
 ## Scope
 

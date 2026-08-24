@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 InTest generates a committed, owned MSTest project that exercises a **deployed** API over real
 HTTP, from its OpenAPI document. Two shipped packages (`InTest.Cli`, `InTest.Runtime`), four
-sample APIs used as fixtures, four test suites. Nothing is published to NuGet; build from source.
+sample APIs used as fixtures, four test suites. `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1`
+are published to nuget.org (prerelease, via `release.yml`'s trusted-publishing push) — build
+from source for anything past that tag.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
@@ -46,10 +48,11 @@ Running the sample APIs requires specific environment variables (ports, issuer/a
 `ASPNETCORE_ENVIRONMENT=Development`). See `samples/README.md`; getting them wrong produces
 500s or silent 404s rather than an obvious failure.
 
-Nothing is published to NuGet, so exercising Phase 8 of `docs/getting-started.md` (`dotnet tool
-restore`, `generate --check`, `upgrade`) needs a local pack-and-restore — never improvise this by
-hand, NuGet's global package cache never invalidates a locally-built version number (see
-CONTRIBUTING.md's "Testing against a local build"). Use:
+Exercising Phase 8 of `docs/getting-started.md` (`dotnet tool restore`, `generate --check`,
+`upgrade`) against the **published** `0.1.0-preview.1` now works from a bare clone with no local
+feed at all. Testing an **unpublished** change still needs a local pack-and-restore — never
+improvise this by hand, NuGet's global package cache never invalidates a locally-built version
+number (see CONTRIBUTING.md's "Testing against a local build"). Use:
 
 ```bash
 pwsh scripts/local-e2e-test.ps1

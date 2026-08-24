@@ -1,14 +1,26 @@
 # NuGet publish readiness
 
-**Status:** Implemented · Revision 8
+**Status:** Implemented · Revision 9
 **Date:** 2026-08-24
-**Supersedes:** Revision 7 — §7's explicit scope note ("CI publish workflow... stays manual and
-local") and §8's checklist assumed publishing would stay a manual `dotnet nuget push` indefinitely.
-That premise is superseded: `.github/workflows/release.yml` now performs the push automatically on
-a tag push, using NuGet Trusted Publishing (OIDC) rather than a stored API key. See "Implemented —
-revision 8" below for what changed and why the two premises that made manual publishing look
-necessary (no ID reserved, no safe place for the owner's key) turned out not to hold. Revision 7's
-§2–§6 and §10 work is unaffected and remains as verified there.
+**Supersedes:** Revision 8 — §2's "Not established" note on whether nuget.org accepts a
+`.snupkg` whose PDBs sit under `tools/` rather than `lib/` is resolved, not just narrowed: the
+`0.1.0-preview.1` tag push exercised `release.yml` for real and nuget.org accepted both `.snupkg`
+files without complaint. See "Implemented — revision 9" below. Revision 8's own change (the
+trusted-publishing push itself) is otherwise unaffected and remains as verified there.
+
+## Implemented — revision 9
+
+**What changed from revision 8:** the first real tag push, `0.1.0-preview.1` on `35056b8`, ran
+both `pack.yml` and `release.yml` on GitHub Actions for real — trigger firing, matrix fan-out,
+cross-job artifact transfer, the OIDC exchange and the `nuget-release` environment gate all fired,
+both jobs went green, and nuget.org accepted all four artifacts (`InTest.Cli`/`InTest.Runtime`,
+`.nupkg` plus `.snupkg` each). That closes §2's open question below: nuget.org does accept a
+`.snupkg` whose PDBs sit under `tools/` rather than `lib/` — there was no reason to expect
+rejection, and there was, in fact, none. `docs/v0-acceptance.md`'s publish record has the full
+account, including what this one run does and does not prove (one tag, one platform's runners,
+prereleases only — not a claim that every future tag push or a stable-version tag behaves
+identically). `CONTRIBUTING.md`'s Publishing checklist and "Branching and how a release is cut"
+sections carry the maintained, operational updates for this; this section is the design record.
 
 ## Implemented — revision 8
 
@@ -251,10 +263,11 @@ the `.snupkg` duplicates a file that ships either way. Revision 2 claimed the si
 Keep `IncludeSymbols` on both anyway — a 22 KB duplicate is cheaper than a second divergent
 configuration — but do not claim a benefit the tool package does not get.
 
-> Not established: whether nuget.org accepts a snupkg whose PDBs sit under `tools/` rather than
-> `lib/`. symbol-packages-snupkg.md's stated constraints (extension, portable PDB, compiler
-> version) are all satisfied and it does not require `lib/`, so there is no reason to expect
-> rejection — but it is unprovable without pushing. **§8 checks it at first publish.**
+> **Resolved by revision 9:** nuget.org accepts a snupkg whose PDBs sit under `tools/` rather
+> than `lib/`. symbol-packages-snupkg.md's stated constraints (extension, portable PDB, compiler
+> version) are all satisfied and it does not require `lib/`, which is why rejection was never
+> expected — and the `0.1.0-preview.1` push confirmed it for real: both packages' `.snupkg`
+> files were pushed and accepted. See "Implemented — revision 9" above.
 
 ## 3. Package metadata
 

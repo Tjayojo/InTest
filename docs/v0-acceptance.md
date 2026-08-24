@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase and v1-e Task 6
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6 and the 0.1.0-preview.1 publish
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -12,6 +12,7 @@ forward" list at the end is always the current one.
 | v1-c | 2026-08-19 (UTC) | `f09f2d5` + this commit | Orders live against a real Duende identity server: 401s real, write-scope 403s real (**F8 closed for real**), a dead identity server fails by name, not as a readiness timeout (**F10 closed for real**). Two new findings the live run — not the unit suite — exposed: 4 of 7 wrong-scope 403 tests cannot pass against the sample's only identity pair, because read operations need no scope the read-only identity lacks (**F11**); a mis-scoped write request 415s, not the 400 Task 8 Step 3 predicted (**F12**). Catalog **13 of 13 twice**, Inventory **9 of 9 twice**, neither gains an auth test — v1-b's guarantee survives |
 | F11 | 2026-08-21 | `0cf649a` | Orders live against a real Duende identity server, correctly scoped: **20 passed, 0 failed, 4 skipped**, all 4 skips bottoming out in `RequireSecondaryIdentityLacks` with a stated reason, the 3 write-scope 403s running and passing (**F11 closed**). Independently reproduced from scratch by a second agent with its own suite, provider, fixtures and ports — both runs agree exactly. A negative control (declared `Scopes` set to `null`) reproduces the original F11 failure on demand: 4 failed, not skipped. Catalog **13 of 13 twice**, Inventory **9 of 9 twice**, neither gains an auth test |
 | v1-e Task 6 | 2026-08-22 | `cc43714` + this commit | The verdict run for `generate --check` and `intest upgrade`. `dotnet tool restore` — Phase 8's first line, never exercised before this run because every earlier acceptance run substituted `dotnet run --project` or a `ProjectReference` — made to work for real via a temporary local NuGet feed, not substituted around; a stale `InTest.Runtime 0.1.0` in the global package cache (built one commit behind HEAD) was found and cleared, not packed over. All 5 steps ran against live `samples/Orders.Api` + `samples/Identity.Server`: spec-edit drift (exit 1), a true orphaned-file case built by removing every `/api/customers` operation (exit 1, extra file named, sibling class byte-identical), a contrived version mismatch pre-empting a simultaneous diff (exit 4, §8's exact message), `intest upgrade` resolving it and the suite passing again (20/0/4), and a real `core.autocrlf=true` cross-platform checkout — proved both ways: `.gitattributes` present keeps every byte LF and `--check` clean, absent it every generated file corrupts to CRLF and fails on every line, and `upgrade`'s migration path (scaffold `.gitattributes` if absent) fixes it live. One new finding: bare `intest …`, as shown in every code block in `getting-started.md`, does not run against a locally-restored tool — needs `dotnet intest …` (**F13**) |
+| 0.1.0-preview.1 publish | 2026-08-24 | `35056b8` (tagged) | First real tag push. `pack.yml` and `release.yml` both ran on GitHub Actions for real — trigger firing, matrix fan-out, cross-job artifact transfer, the OIDC exchange and the `nuget-release` environment gate all previously unexercised. Both jobs green; nuget.org accepted all four artifacts. Phase 8's `dotnet tool restore` now works from a bare clone for the first time — previously every acceptance run had to substitute something. The `.snupkg`-under-`tools/` question (open since readiness spec revision 2) is answered: nuget.org accepts it |
 
 ---
 
@@ -2104,5 +2105,111 @@ duplicating it a third time, per this repository's "one canonical explanation" r
 |---|---|---|---|
 | 1 | Document the stale-global-package-cache trap (`dotnet nuget locals global-packages --clear`, or clear just the affected package, before trusting a freshly published version number that was ever built locally under the same number) | `CONTRIBUTING.md`'s "Releases" section, or wherever local-build instructions live | Open — recorded above, not fixed here |
 | 2 | F13 — `getting-started.md` shows bare `intest …` throughout; every invocation needs `dotnet intest …` or `dotnet tool run intest …` against a local-tool manifest | next phase touching `getting-started.md` | **Closed** — verified independently (pack + restore against a real local manifest, cross-shell) and fixed in `docs/getting-started.md` (Phase 2 explains why, Phase 4/5/8 commands corrected) and `README.md`; `init` and pre-adoption `survey` are left bare, deliberately — see Phase 2's note for why those two differ |
-| 3 | Publish `InTest.Cli`/`InTest.Runtime`, or document a contributor-facing local-feed setup, so Phase 8 is runnable from a bare clone without the scaffolding this run built by hand | pre-v1 release readiness | Open — recorded above, not fixed here |
+| 3 | Publish `InTest.Cli`/`InTest.Runtime`, or document a contributor-facing local-feed setup, so Phase 8 is runnable from a bare clone without the scaffolding this run built by hand | pre-v1 release readiness | **Closed** — `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` published to nuget.org; see "0.1.0-preview.1 publish acceptance run" below |
 | 4 | §5's command-surface table gave no way to distinguish shipped commands from designed-only ones | v1-e Task 6 | **Closed** — `Ships today` column added, see above |
+
+---
+
+# 0.1.0-preview.1 publish acceptance run
+
+**Date:** 2026-08-24 · **Commit:** `35056b8` (tagged `0.1.0-preview.1`, tag pushed by the repository
+owner — [tag-is-the-release] stays a human decision; nothing in this run or in `release.yml` cut the
+tag itself)
+**Task:** the first real tag push since `.github/workflows/release.yml` (NuGet Trusted Publishing)
+was written and `docs/superpowers/specs/2026-08-23-nuget-publish-readiness-design.md` revision 8
+shipped. Every earlier record of this workflow — CONTRIBUTING.md's "one honest gap", the readiness
+spec's own revision-8 note, `release.yml`'s and `pack.yml`'s header comments — said the same thing:
+every command sequence had been run locally by hand and passed `actionlint`, but the GitHub Actions
+runtime itself (trigger firing, matrix fan-out, cross-job artifact transfer, the OIDC exchange, the
+environment gate) had never fired for real. This run is that first firing.
+
+## What was exercised
+
+| Step | What | Result |
+|---|---|---|
+| 1 | `git tag 0.1.0-preview.1` on `35056b8`, pushed | Triggered both `pack.yml` (branch: `main`, tag push) and `release.yml` (tag push only) |
+| 2 | `release.yml`'s `pack` job: checkout, restore, `scripts/ci/pack-and-verify.ps1 -ExpectedTag '0.1.0-preview.1'`, upload both `.nupkg` and `.snupkg` for both packages | Green |
+| 3 | `release.yml`'s `publish` job: `environment: nuget-release` gate, `NuGet/login` OIDC exchange, `dotnet nuget push` | Green |
+| 4 | nuget.org accepts the push | All four artifacts created |
+| 5 | Install the published tool into a scratch directory | Resolves and registers cleanly |
+
+nuget.org's own response, for the record:
+
+```
+InTest.Cli.0.1.0-preview.1.nupkg / .snupkg      Created  Your package was pushed.
+InTest.Runtime.0.1.0-preview.1.nupkg / .snupkg  Created  Your package was pushed.
+```
+
+Both packages are live and installable, confirmed by installing `InTest.Cli` from the public feed
+into a scratch directory outside the repository and getting a working tool registration — not just
+a green Actions run trusted on its own exit code, the same "ask the thing that decides" discipline
+CONTRIBUTING.md's own ground rules ask for elsewhere in this repository.
+
+Published via NuGet Trusted Publishing (OIDC): the `publish` job's OIDC token was exchanged for a
+short-lived nuget.org API key at push time. No `NUGET_API_KEY` secret exists anywhere in this
+repository, before this run or after — confirming `release.yml`'s own header comment's central claim
+rather than merely trusting it.
+
+## Three things this closes
+
+**Phase 8's `dotnet tool restore` now works from a bare clone, for real, for the first time.**
+Every earlier acceptance run in this document — v1-a, v1-b, v1-c, F11, v1-e Task 6 — had to
+substitute something for this line: a `ProjectReference` in place of the scaffolded
+`PackageReference`, or v1-e Task 6's own temporary local NuGet feed built by hand. A bare clone
+pointed at the default nuget.org source can now genuinely resolve `InTest.Cli`/`InTest.Runtime`
+`0.1.0-preview.1` and restore against them — nothing about this run's steps 4–5 above required
+any local feed, `nuget.config` override, or pre-seeded package cache.
+
+**The `.snupkg`-under-`tools/` question, open since the readiness spec's revision 2, is answered.**
+`InTest.Cli` packs as a tool (`PackAsTool`), which puts its PDB under `tools/net10.0/any/` rather
+than `lib/`. Whether nuget.org's symbol-package intake accepts a `.snupkg` built that way was
+unprovable without pushing — revision 8 of the readiness spec still called it "not established" and
+pointed at this exact event ("§8 checks it at first publish"). It does. Both `.snupkg` files were
+accepted alongside their `.nupkg` siblings, confirmed on both packages, not inferred from one.
+See the readiness spec's revision 9 for the design-record close and `CONTRIBUTING.md`'s Publishing
+checklist item 9 for the operational one.
+
+**`pack.yml` and `release.yml` have now completed real Actions runs.** Trigger firing on a tag push,
+the two-job matrix, cross-job artifact upload/download between `pack` and `publish`, the OIDC token
+exchange, and the `nuget-release` environment gate enforcing that `id-token: write` only ever ran in
+a job scoped to that environment — all of it was previously "exercised locally, on both platforms
+where applicable, by hand" and nothing more. All of it fired for real this run and all of it went
+green.
+
+## What this run does not claim
+
+Stated directly, because overstating it is exactly the failure mode this document exists to avoid:
+
+- **One tag, one push.** This is one data point, not a claim that every future tag push behaves
+  identically — a stable (non-preview) tag, a tag carrying a version bump across a major, or a
+  second push after this one, are all still unexercised.
+- **One platform's runners.** `release.yml`'s `publish` job runs `ubuntu-latest` only, by design
+  (see that file's own comment on the choice — `pack.yml`'s own matrix already proves cross-platform
+  packing parity, and re-proving it here would duplicate that job for no new evidence). This run
+  says nothing new about `windows-latest` runners specifically publishing anything.
+- **Prereleases only.** `0.1.0-preview.1` is a prerelease; nothing about a `0.1.0` stable tag's
+  publish path has been exercised differently from what this run already covers, but "stable" also
+  carries different adopter expectations this run does not speak to.
+- **This is not a full adoption-path acceptance pass.** It proves the publish mechanism and the CI
+  plumbing behind it. It says nothing new about `generate --check`/`upgrade`'s own behaviour (v1-e
+  Task 6, above, already covers that against a local build), about `survey`/YAML/variation tests
+  (still unbuilt), or about a fresh adopter's experience running Phase 0–Phase 8 end to end against
+  the published packages for the first time — that walkthrough has not been re-run against the
+  published version specifically.
+- **The Publishing checklist's remaining human steps are unaffected.** ID-prefix reservation
+  benefit aside (the push itself already claimed the `InTest.` prefix as a side effect —
+  `CONTRIBUTING.md` step 2 is about the prefix-protection benefit, not a publishing prerequisite),
+  a required-reviewer gate on the `nuget-release` environment remains recommended and not confirmed
+  configured, and `PackageValidationBaselineVersion` is deliberately deferred to the release *after*
+  this one (`CONTRIBUTING.md` step 11).
+
+## 0.1.0-preview.1 publish actions
+
+| # | Action | Owner phase | Status |
+|---|---|---|---|
+| 1 | Stop every doc claiming nothing is published — README, getting-started, CLAUDE.md, CONTRIBUTING.md, SECURITY.md all asserted the pre-publish state | this run | **Closed** — see this run's own commit for the full file list |
+| 2 | Record `.snupkg`-under-`tools/` as resolved rather than open | readiness spec | **Closed** — revision 9, see above |
+| 3 | Add a `CHANGELOG.md` and a standing changelog practice | this run | **Closed** — see `CHANGELOG.md` and `CONTRIBUTING.md`'s "Changelog" section |
+| 4 | Create a GitHub Release from `release.yml` on a tag push, without letting `contents: write` and `id-token: write` coexist in one job | this run | **Closed** — see `release.yml`'s `release` job |
+| 5 | Confirm a required-reviewer gate is configured on the `nuget-release` environment | repository owner, GitHub Settings | Open — recommended, not confirmed configured, same gap the readiness spec and `CONTRIBUTING.md` already name |
+| 6 | Re-run the full Phase 0–Phase 8 adopter walkthrough against the published `0.1.0-preview.1` specifically, rather than a local build | pre-v1 release readiness | Open — not attempted this run |

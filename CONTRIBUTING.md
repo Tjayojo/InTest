@@ -2,13 +2,15 @@
 
 Thanks for looking. InTest is a working tool with an incomplete command surface. `intest init`,
 `generate`, `fixtures repair`, `generate --check` and `upgrade` run end to end today, with a
-documented walkthrough in [`docs/getting-started.md`](docs/getting-started.md); `init`,
-`generate` and `fixtures repair` are also verified against three sample APIs
-([`docs/v0-acceptance.md`](docs/v0-acceptance.md)) — `generate --check` and `upgrade` shipped
-after that acceptance run and are not yet covered by it. `survey`, `fixtures promote`,
+documented walkthrough in [`docs/getting-started.md`](docs/getting-started.md), and all five are
+verified against live sample APIs — `init`/`generate`/`fixtures repair` by the v0/v1-a/v1-b/v1-c
+runs, `generate --check`/`upgrade` by v1-e Task 6 — see
+[`docs/v0-acceptance.md`](docs/v0-acceptance.md) for both. `survey`, `fixtures promote`,
 `assertions add` and `generate --emit-plan` don't exist yet — that doc's own preamble tracks the
-gap precisely, and is the source of truth if this file and it ever disagree. Nothing is published
-to NuGet, so building from source is still how anyone tries it. The
+gap precisely, and is the source of truth if this file and it ever disagree.
+`InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org as a prerelease
+(see "Branching and how a release is cut" below); building from source is still how you try
+anything past that tag. The
 [design spec](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md) remains the
 reference for why things are built the way they are.
 
@@ -333,6 +335,8 @@ that is useful data.
   path. It is deliberately a full end-to-end trace rather than a summary, because walking it is
   what catches gaps — reading it top to bottom is how the unowned initial-fixture creation was
   found, after the design had already been through several review rounds.
+- Add an entry under `CHANGELOG.md`'s `Unreleased` section for anything a changelog reader
+  would want to know — see "Changelog" below for what qualifies and where it goes.
 
 ## Continuous integration
 
@@ -377,6 +381,33 @@ and the workflow file has been checked with `actionlint`. The GitHub Actions run
 scheduling, cache save/restore, matrix fan-out, trigger firing — is a different thing from the
 commands it runs, and is proven only by real runs on GitHub's infrastructure, not by either of
 those checks.
+
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): an
+`Unreleased` section at the top, version sections below it once cut, each grouped into
+`Added`/`Changed`/`Deprecated`/`Removed`/`Fixed`/`Security` subsections (only the ones that
+apply — an entry with nothing to say under a heading omits the heading, it does not leave it
+empty).
+
+**What goes in `Unreleased`.** Anything a changelog reader — someone deciding whether to
+upgrade, not someone reading the diff — would want to know: a new command or flag, a changed
+exit code or JSON shape, a fixed defect that shipped in a previous release, a removed or
+deprecated capability. Add the entry in the **same PR** as the change, the same discipline
+this file already asks for the spec and `docs/getting-started.md` above — a changelog
+written after the fact from `git log` is exactly the kind of proof-outside-the-repository
+this file's "One canonical explanation" section already warns against; it survives only if
+the PR that made the change is also the PR that records it. What does **not** qualify:
+internal refactors, test-only changes, and anything already covered by "Not covered by
+semver" in "Releases" below (failure message text, the internal `TestPlan` JSON, template
+internals) — those are free to change without a changelog reader needing to know.
+
+**When `Unreleased` becomes a version heading.** At release-cut time, **before** the tag is
+pushed — see "Cutting a release, end to end" below, where this is its own numbered step. The
+tag is the release ([tag-is-the-release]), so the changelog entry for a version has to exist
+before that version does, not be backfilled once nuget.org already has it. Renaming
+`Unreleased` to the version and date, and opening a fresh empty `Unreleased` above it, is the
+entire operation — entries do not move or get rewritten, the heading above them does.
 
 ## Releases
 
@@ -433,29 +464,38 @@ it.
 **Cutting a release, end to end, as this repository defines it today:**
 
 1. Merge whatever should ship into `main`.
-2. Tag that commit and push the tag: `git tag 0.1.0-preview.1 && git push origin 0.1.0-preview.1`
+2. Move `CHANGELOG.md`'s `Unreleased` section to a new version heading ("Changelog" above) and
+   commit it to `main` — **before** tagging, since the tag is the release and the changelog
+   entry has to exist before the version it describes does.
+3. Tag that commit and push the tag: `git tag 0.1.0-preview.1 && git push origin 0.1.0-preview.1`
    (or `0.1.0` for a stable release). Use a plain SemVer shape — `release.yml`'s trigger only fires
    on `X.Y.Z` or `X.Y.Z-<label>`; see its header comment for exactly what its tag-filter glob does
    and does not accept.
-3. `pack.yml` packs and verifies both packages at exactly that tag's version and uploads them as
+4. `pack.yml` packs and verifies both packages at exactly that tag's version and uploads them as
    workflow artifacts on the resulting Actions run — unchanged from before, still never publishes.
-4. `release.yml` runs in parallel (same tag push triggers both workflows independently): its own
+5. `release.yml` runs in parallel (same tag push triggers both workflows independently): its own
    `pack` job re-packs and re-verifies the same commit — including the artifact-content assertions
    below — then its `publish` job, gated on the `nuget-release` environment, pushes both the
-   `.nupkg` and `.snupkg` to nuget.org.
-5. The Publishing checklist below still names real one-time and per-release human steps that
+   `.nupkg` and `.snupkg` to nuget.org. Once `publish` succeeds, a third job, `release`, creates
+   the GitHub Release for the tag — notes drawn from the `CHANGELOG.md` section step 2 just cut,
+   both packages' `.nupkg`/`.snupkg` attached. It runs after `publish`, in `contents: write`
+   only, never in the same job as the `id-token: write` `publish` carries — see `release.yml`'s
+   own header comment for why that separation is non-negotiable.
+6. The Publishing checklist below still names real one-time and per-release human steps that
    automation does not perform — ID-prefix reservation, account hygiene, flipping the README
    status callout, and (recommended, not yet configured) a required-reviewer gate on the
    `nuget-release` environment so a human still looks before an irreversible push happens.
 
-**One honest gap in this path today:** neither `pack.yml` nor `release.yml` has completed a real
-run on GitHub Actions. Every command sequence in both files was exercised locally, on both
-platforms where applicable, by hand, and both workflow files pass `actionlint` — but the GitHub
-Actions runtime itself (trigger firing, matrix fan-out, artifact upload/download between jobs, the
-OIDC token exchange, environment-gate enforcement) is unexercised, and there is no green run or
-badge for either. Treat the first real tag push as the first genuine test of this path, not as
-something already proven — that is true for `pack.yml` as it was before, and it is equally true,
-for the same reason, of the new `publish` job `release.yml` adds on top of it.
+**Closed by the `0.1.0-preview.1` tag push:** both `pack.yml` and `release.yml` have now
+completed real runs on GitHub Actions — trigger firing, matrix fan-out, cross-job artifact
+upload/download, the OIDC token exchange and the `nuget-release` environment gate all fired for
+real, both jobs went green, and nuget.org accepted all four artifacts (`InTest.Cli` and
+`InTest.Runtime`, `.nupkg` plus `.snupkg` each). See `docs/v0-acceptance.md`'s publish record for
+the full account. **What this one run does not prove:** that every future tag push behaves
+identically, that a stable (non-preview) tag packs and publishes the same way, or anything about
+the `publish` job on a second OS — it runs `ubuntu-latest` only, by design (see `release.yml`'s
+own comment on that choice). Treat the next tag push as still worth watching, not as a foregone
+conclusion.
 
 **Patching an old major.** There are zero shipped releases today, so nothing needs this yet.
 Once one exists, cut `release/N.x` **on demand**, from the relevant tag, rather than maintaining a
@@ -527,8 +567,10 @@ push itself remains a real, one-time or per-release, human step — see `docs/su
 3. One-time nuget.org account hygiene: sign in with a Microsoft account, enable two-factor
    authentication, enable "email me when a package is published".
 4. **Create the NuGet Trusted Publishing policy** on the nuget.org account that will own these
-   packages (Trusted Publishing is a gradual rollout — **not yet confirmed to be available on this
-   account**; if the menu item is missing, that gates everything below it). The policy needs:
+   packages (Trusted Publishing is a gradual rollout — **confirmed available on this account**:
+   the policy exists and the `0.1.0-preview.1` push exchanged its OIDC token successfully; if the
+   menu item is ever missing on a different account, that gates everything below it). The policy
+   needs:
    Repository Owner and Repository set to this repo, **Workflow File set to the file name only**
    (`release.yml` — not a path, not a job name), **Environment set to `nuget-release`**, and a
    Package owner selected from the dropdown. Every field must match `release.yml` exactly — the
@@ -565,21 +607,26 @@ push itself remains a real, one-time or per-release, human step — see `docs/su
    job mid-run.
 9. `release.yml` packs and pushes both the `.nupkg` and the `.snupkg` automatically — no manual
    `dotnet nuget push` needed or expected. Confirm the run went green and the version now appears
-   on nuget.org. Whether nuget.org accepts a `.snupkg` whose PDBs sit under `tools/` (a tool
-   package) rather than `lib/` was unproven before the first real push — this is where that gets
-   confirmed, for real, for the first time.
-10. Flip `README.md`'s "Status: v0 … nothing published yet" callout.
+   on nuget.org. **Confirmed by the `0.1.0-preview.1` push:** nuget.org accepts a `.snupkg` whose
+   PDBs sit under `tools/` (a tool package) rather than `lib/` — all four artifacts (two packages
+   times `.nupkg`/`.snupkg`) were pushed and accepted; see `docs/v0-acceptance.md`.
+10. Flip `README.md`'s status callout to name the just-published version. **Done for
+    `0.1.0-preview.1`** — the banner now reads "`0.1.0-preview.1` is published to nuget.org as a
+    prerelease" instead of "nothing is published yet"; a future release only needs the version
+    string bumped, not this rewritten from scratch.
 11. Starting with the release *after* the first: add `<PackageValidationBaselineVersion>` to
     `InTest.Runtime`'s project file, pointing at the version just published. (`InTest.Cli` never
     participates in package validation — the SDK hard-disables it for tool packages.)
 
 ## Testing against a local build
 
-Nothing is published to NuGet yet, so trying the documented adoption path
-(`docs/getting-started.md` Phase 8 — `dotnet tool restore`, `generate --check`, `upgrade`) means
-packing `InTest.Cli` and `InTest.Runtime` yourself and restoring a scaffolded project against
-them. **Use `scripts/local-e2e-test.ps1` for this. Do not improvise a `dotnet pack` +
-`dotnet restore` by hand.**
+`InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org, but only for that
+exact tagged commit. Trying the documented adoption path (`docs/getting-started.md` Phase 8 —
+`dotnet tool restore`, `generate --check`, `upgrade`) against anything you changed locally —
+which, while contributing, is the common case — still means packing `InTest.Cli` and
+`InTest.Runtime` yourself and restoring a scaffolded project against them. **Use
+`scripts/local-e2e-test.ps1` for this. Do not improvise a `dotnet pack` + `dotnet restore` by
+hand.**
 
 **Why this is a rule and not a suggestion:** NuGet's package cache (`~/.nuget/packages/`) is
 keyed by exact version, machine-wide, and is never invalidated by a newer local build carrying

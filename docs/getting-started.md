@@ -27,7 +27,9 @@ integration test suite running as a post-deployment gate.
 > (Phase 0), `fixtures promote` (Phase 5), `assertions add`, `generate --emit-plan`,
 > variation tests, and YAML input — from a file or a URL alike. A URL `spec.source` **is** built
 > (Phase 1): `generate` snapshots it to a committed `spec.json`.
-> Nothing is published to NuGet, so build from source for now.
+> `InTest.Cli` and `InTest.Runtime` `0.1.0-preview.1` are published to nuget.org as a
+> prerelease — see the Prerequisites and Phase 2 below for what that does and does not change
+> about this walkthrough.
 >
 > The walkthrough is kept whole rather than trimmed to what ships, because tracing it end to end
 > is what finds gaps — it is how the unowned creation of the first fixture files was caught, and
@@ -47,6 +49,11 @@ Running example: an `Orders` API using Swashbuckle, deployed to a `staging` envi
 | Test framework | MSTest. xUnit and NUnit are not supported in v1 |
 | Spec | OpenAPI 3.x, JSON — a **local file**, or a URL InTest can reach anonymously. YAML is not built yet |
 | API | Deployed and reachable from wherever the tests run |
+
+`InTest.Cli` and `InTest.Runtime` `0.1.0-preview.1` are published to nuget.org as a prerelease
+— a global `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1` gets you a working
+`intest` on `PATH` for Phase 0/2 without building anything. Building from source is still how
+you get any change past that tag.
 
 ---
 
@@ -165,9 +172,10 @@ tool run` since .NET 7); `dotnet tool run intest …` is the longer equivalent, 
 version this project just pinned, where a stray global copy on `PATH` would not (**F13, closed**;
 see [`v0-acceptance.md`](v0-acceptance.md) for the experiment). `init` above is the one exception,
 shown bare: it is what *creates* the manifest, so there is nothing yet to restore against.
-Getting a working `intest` on `PATH` to run `init` at all — a global install, or building from
-source today, since nothing is published to NuGet yet (see the banner above) — is a separate,
-still-open gap; `v0-acceptance.md` tracks it and this note does not resolve it.
+Getting a working `intest` on `PATH` to run `init` at all is now an ordinary global install —
+`dotnet tool install -g InTest.Cli --version 0.1.0-preview.1` resolves against the published
+prerelease on nuget.org, no local feed required (see `docs/v0-acceptance.md`'s publish record).
+Building from source remains the only way to pick up anything past that tag.
 
 ---
 
@@ -640,9 +648,12 @@ once a fixture has registered at least one `OnCleanup`, and look for
 run (above), that line does reach both the console at that verbosity and the `.trx`'s last test
 result — so seeing neither means cleanup did not run, not that it succeeded quietly.
 
-**A stale local package cache can shadow a fresh build.** Nothing is published to NuGet yet
-(Prerequisites), so a scaffolded project resolves `InTest.Runtime` from wherever you point NuGet
-— typically a local feed you `dotnet pack` yourself. NuGet does not overwrite an
+**A stale local package cache can shadow a fresh build.** This is specifically a trap for
+testing an *unpublished* change: `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published
+to nuget.org now, so an ordinary Phase 2 restore against a released version no
+longer needs a local feed at all. Iterating on a change ahead of the last published tag still
+does — a scaffolded project resolving `InTest.Runtime` from wherever you point NuGet, typically
+a local feed you `dotnet pack` yourself. NuGet does not overwrite an
 already-cached version: an older `InTest.Runtime 0.1.0` left in `~/.nuget/packages/intest.runtime`
 by an earlier local build resolves ahead of a freshly packed one carrying the identical version
 number, and the scaffolded project fails to compile against members that plainly exist in the
@@ -657,10 +668,9 @@ is cached.
 Phase 8 by hand at all. Run `scripts/local-e2e-test.ps1` (see `CONTRIBUTING.md`'s "Testing
 against a local build") — it packs at a version that can never collide with a real release and
 redirects the whole run's restores away from your real package cache, so this cannot happen in
-the first place. It is not a substitute for Phase 8 being runnable from a bare clone once
-`InTest.Cli`/`InTest.Runtime` are actually published (still an open gap — see
-`docs/v0-acceptance.md`), but it is the current answer to "how do I try any of this before it
-ships."
+the first place. Phase 8 being runnable from a bare clone against a *published* version is no
+longer an open gap — see `docs/v0-acceptance.md`'s publish record — but this script is still the
+current answer to "how do I try a change I haven't tagged and pushed yet."
 
 **This is for pre-production.** InTest adds no guard rails against being pointed at production,
 deliberately. Pointing it there is your decision and your consequences.

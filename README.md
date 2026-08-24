@@ -9,7 +9,7 @@ The output is a normal MSTest project. You commit it, edit it, and run it with `
 like any other test project. InTest is a development-time tool — it generates on your machine
 or in a pull request, never as part of the deployment pipeline.
 
-> **Status: v0. Working, but early — and nothing is published to NuGet yet.**
+> **Status: v0. Working, but early — `0.1.0-preview.1` is published to nuget.org as a prerelease.**
 >
 > `intest init`, `intest generate` and `intest fixtures repair` work: together they produce a
 > compiling MSTest project whose contract tests pass against a live API. That has been verified
@@ -39,8 +39,13 @@ or in a pull request, never as part of the deployment pipeline.
 >
 > **Not yet built:** variation tests, `intest survey`, `intest fixtures promote`,
 > `intest assertions add`, `intest generate --emit-plan`, and YAML input — from a file or a URL
-> alike; a URL serving YAML is refused by name rather than failing as a parse error. Packages are
-> unpublished and the IDs are not reserved, so you cannot install this yet — build from source.
+> alike; a URL serving YAML is refused by name rather than failing as a parse error.
+>
+> **Installable today:** `InTest.Cli` and `InTest.Runtime` `0.1.0-preview.1` are live on
+> nuget.org — `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1` resolves and
+> installs cleanly (verified by installing it into a scratch directory right after the push
+> went live). This is a v0 prerelease: breaking changes are still expected before a `0.1.0`
+> stable release. Building from source is still how you get anything past that tag.
 >
 > The design spec is still the source of truth and is worth reading before the code:
 > [`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md)

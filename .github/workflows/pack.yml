@@ -140,6 +140,8 @@ jobs:
 # release.yml's narrower tag-pattern trigger and its `environment: nuget-release` gate are both
 # built to keep off the merge-to-main path -- see release.yml's own header for the full reasoning.
 # This workflow's job remains only to prove an artifact packs and matches its scaffold; whether
-# nuget.org actually accepts what gets pushed (including the .snupkg-under-tools/ question the
-# readiness spec flags as open) is exercised by release.yml's real push, not by this file, and
-# release.yml's own header records exactly how much of that is still unexercised as of this task.
+# nuget.org actually accepts what gets pushed is exercised by release.yml's real push, not by this
+# file. The 0.1.0-preview.1 tag push confirmed it, including the .snupkg-under-tools/ question the
+# readiness spec had flagged open since revision 2 -- see docs/v0-acceptance.md's publish record
+# and the readiness spec's revision 9 for the close, and release.yml's own header for what that one
+# run does and does not prove about every future tag push.
