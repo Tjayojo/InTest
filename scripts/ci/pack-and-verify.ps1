@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     Task 3 of docs/superpowers/plans/2026-08-23-trunk-based-versioning.md ("CI produces the
-    versions"). Three things are proven here that a green `dotnet pack` alone does not prove:
+    versions"), extended by the NuGet-trusted-publishing task with a fourth check. Four things are
+    proven here that a green `dotnet pack` alone does not prove:
 
     1. [scaffold-reads-itself] (Task 1) end to end against a *packed* build, not just a `dotnet
        run` build the way scripts/local-e2e-test.ps1 already covers it: the InTest.Runtime
@@ -24,13 +25,32 @@
        the whole check -- MinVer only appends a ".<height>" suffix to commits that are *not* an
        exact tag match (measured in the plan's own table), so an exact-match failure and a
        height-leak failure are the same failure here, not two things to check separately.
+    4. The packaged *contents* look right, not merely that packing exited 0. The readiness spec's
+       §8 (CONTRIBUTING.md's "Publishing checklist", "Verify, then tag" step, as revision 7 numbered
+       it before trusted publishing renumbered the list) describes this as a human unzipping both
+       .nupkg before pushing; that human step is fine as designed for a manual `dotnet nuget push`,
+       but the release workflow this script now also runs under (.github/workflows/release.yml)
+       publishes automatically on a tag push, with no human in that gap to catch a regression.
+       `Assert-PackageArtifactContents` below is the automated substitute for that specific check,
+       not a replacement for the rest of that step (which still includes an actual
+       `dotnet tool install` + `intest --help` smoke test that stays manual).
+       It confirms: `README.md` and `icon.png` present in both packages; `THIRD-PARTY-NOTICES.md`
+       present in InTest.Cli (it bundles third-party DLLs -- readiness spec §5) and *absent* from
+       InTest.Runtime (it does not, and packing it there would be a copy-paste regression, not a
+       feature); and a non-empty `<repository … commit="…">` in both nuspecs, confirming Source
+       Link actually stamped a commit rather than emitting an empty attribute (readiness spec §2).
 
-    Deliberately does NOT push anywhere. [publish-stays-manual]: no NuGet ID is reserved for
-    either package and the API key is the owner's alone, so `dotnet nuget push` is not invoked by
-    this script, by the workflow that calls it, or by anything else in this repository. That step
-    stays entirely unexercised by this task -- see the workflow's own comment and this task's
-    report for what that leaves unproven (whether nuget.org actually accepts these artifacts,
-    including the .snupkg question the readiness spec already flags as open).
+    Deliberately does NOT push anywhere. [publish-stays-manual] governed this script's own history
+    -- no NuGet ID was reserved and the API key was the owner's alone -- but that premise has since
+    been superseded (see docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's
+    [publish-stays-manual] section and this task's own report): NuGet Trusted Publishing removed
+    the API-key blocker, and .github/workflows/release.yml now performs the actual
+    `dotnet nuget push`, using this script's pack step as its own -- but that push happens entirely
+    in that workflow's separate `publish` job, never in this script. This script itself still never
+    invokes `dotnet nuget push` and still cannot: it has no OIDC token, no API key, and no
+    knowledge of which job is calling it. Whether nuget.org actually accepts what this script packs
+    (including the .snupkg-under-tools/ question the readiness spec flags as open) is proven only
+    by release.yml's real push, not by anything in this file.
 
     Packs from the real checkout in place (github.workspace), unlike
     scripts/local-e2e-test.ps1, which deliberately copies src/ to a non-git location first so it
@@ -104,11 +124,20 @@ function Invoke-Dotnet {
     }
 }
 
-function Get-NuspecVersion {
+# Opens a .nupkg once and returns both things every check below needs from it: the full list of
+# zip entry names (to check a file is/isn't present at the package root) and the parsed .nuspec
+# XML (to check <version> and <repository commit="...">). Factored out of what used to be
+# Get-NuspecVersion's own zip-open block so that block does not get copy-pasted a second time for
+# Assert-PackageArtifactContents -- this script already has one incident on record
+# (CLAUDE.md: "Re-deriving is the recurring defect in this codebase -- don't") of near-identical
+# logic drifting apart across two call sites.
+function Get-NupkgManifest {
     param([Parameter(Mandatory)] [string]$NupkgPath)
 
     $zip = [System.IO.Compression.ZipFile]::OpenRead($NupkgPath)
     try {
+        $entryNames = @($zip.Entries | ForEach-Object { $_.FullName })
+
         $nuspecEntry = $zip.Entries | Where-Object { $_.FullName -like '*.nuspec' } | Select-Object -First 1
         if (-not $nuspecEntry) {
             throw "No .nuspec entry found inside $NupkgPath"
@@ -117,7 +146,7 @@ function Get-NuspecVersion {
         try {
             $reader = New-Object System.IO.StreamReader($stream)
             try {
-                $content = $reader.ReadToEnd()
+                $nuspecContent = $reader.ReadToEnd()
             } finally {
                 $reader.Dispose()
             }
@@ -128,15 +157,70 @@ function Get-NuspecVersion {
         $zip.Dispose()
     }
 
-    # PowerShell's [xml] adapter resolves .package.metadata.version by local name regardless of
-    # the nuspec's default xmlns -- confirmed by direct use here, not assumed; a namespace-blind
-    # XPath would be the alternative if this ever stopped working.
-    [xml]$nuspecXml = $content
-    $version = $nuspecXml.package.metadata.version
+    # PowerShell's [xml] adapter resolves .package.metadata.version (and every other element used
+    # below) by local name regardless of the nuspec's default xmlns -- confirmed by direct use
+    # here, not assumed; a namespace-blind XPath would be the alternative if this ever stopped
+    # working.
+    [xml]$nuspecXml = $nuspecContent
+    return [pscustomobject]@{
+        EntryNames = $entryNames
+        NuspecXml  = $nuspecXml
+    }
+}
+
+function Get-NuspecVersion {
+    param([Parameter(Mandatory)] [string]$NupkgPath)
+
+    $manifest = Get-NupkgManifest -NupkgPath $NupkgPath
+    $version = $manifest.NuspecXml.package.metadata.version
     if ([string]::IsNullOrWhiteSpace($version)) {
         throw "Could not read <version> from the .nuspec inside $NupkgPath"
     }
     return $version
+}
+
+# The nuget-publish-readiness task's artifact-content check (see .DESCRIPTION point 4 above).
+# -RequireEntries are exact, case-sensitive root-level file names -- confirmed against a real pack
+# during this task that `dotnet pack` writes README.md, icon.png and THIRD-PARTY-NOTICES.md at the
+# package root with exactly that casing, not nested under any subfolder, so an exact string match
+# against the zip's own entry names is enough; no path normalization is needed. -ForbidEntries is
+# the same check inverted, for the one file that must NOT appear (THIRD-PARTY-NOTICES.md on
+# InTest.Runtime -- readiness spec §5: that package redistributes nothing third-party, so packing
+# the notices file there would be a copy-paste mistake, not a feature).
+function Assert-PackageArtifactContents {
+    param(
+        [Parameter(Mandatory)] [string]$NupkgPath,
+        [Parameter(Mandatory)] [string]$Label,
+        [string[]]$RequireEntries = @(),
+        [string[]]$ForbidEntries = @()
+    )
+
+    $manifest = Get-NupkgManifest -NupkgPath $NupkgPath
+
+    foreach ($required in $RequireEntries) {
+        if ($manifest.EntryNames -notcontains $required) {
+            throw "[$Label] artifact assertion failed: expected '$required' at the package root inside $NupkgPath, but it was not found. Entries present: $($manifest.EntryNames -join ', ')"
+        }
+    }
+
+    foreach ($forbidden in $ForbidEntries) {
+        if ($manifest.EntryNames -contains $forbidden) {
+            throw "[$Label] artifact assertion failed: '$forbidden' was found inside $NupkgPath, but this package must NOT bundle it -- see the readiness spec §5 for why."
+        }
+    }
+
+    $repositoryNode = $manifest.NuspecXml.package.metadata.repository
+    if (-not $repositoryNode) {
+        throw "[$Label] artifact assertion failed: the .nuspec inside $NupkgPath has no <repository> element at all -- Source Link should populate one automatically with no package reference needed (readiness spec §2)."
+    }
+    $commit = $repositoryNode.commit
+    if ([string]::IsNullOrWhiteSpace($commit)) {
+        throw "[$Label] artifact assertion failed: the .nuspec inside $NupkgPath has a <repository> element whose commit attribute is empty or missing -- Source Link should stamp the exact commit SHA this package was built from (readiness spec §2)."
+    }
+
+    $requireDesc = if ($RequireEntries) { $RequireEntries -join ', ' } else { '(none)' }
+    $forbidDesc = if ($ForbidEntries) { "; confirmed absent: $($ForbidEntries -join ', ')" } else { '' }
+    Write-Host "[$Label] artifact contents verified -- present: $requireDesc$forbidDesc; repository commit '$commit'." -ForegroundColor Green
 }
 
 function Get-ScaffoldedRuntimeVersion {
@@ -177,6 +261,16 @@ Write-Host "InTest.Runtime nuspec version: $runtimeVersion"
 if ($cliVersion -ne $runtimeVersion) {
     throw "InTest.Cli and InTest.Runtime packed at different versions ('$cliVersion' vs '$runtimeVersion') -- MinVer should derive an identical version for both from the same commit and the same Directory.Build.props configuration."
 }
+
+# ---- Step 3b (verify, do not assume -- the CONTRIBUTING.md "Publishing checklist" substitute described in
+# .DESCRIPTION point 4): unzip both .nupkg and confirm the packaged contents, not merely that
+# `dotnet pack` exited 0.
+Assert-PackageArtifactContents -NupkgPath $cliNupkg.FullName -Label 'InTest.Cli' `
+    -RequireEntries @('README.md', 'icon.png', 'THIRD-PARTY-NOTICES.md')
+
+Assert-PackageArtifactContents -NupkgPath $runtimeNupkg.FullName -Label 'InTest.Runtime' `
+    -RequireEntries @('README.md', 'icon.png') `
+    -ForbidEntries @('THIRD-PARTY-NOTICES.md')
 
 $cliDll = Join-Path $RepoRoot 'src' 'InTest.Cli' 'bin' 'Release' 'net10.0' 'InTest.Cli.dll'
 if (-not (Test-Path -LiteralPath $cliDll)) {

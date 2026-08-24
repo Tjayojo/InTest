@@ -1,6 +1,16 @@
 # Trunk-based versioning and prerelease
 
-**Status:** plan, rev 4. Nothing built yet.
+**Status:** plan, rev 5. Nothing built yet.
+
+**Revision note — rev 5.** `[publish-stays-manual]` is **superseded by NuGet Trusted Publishing
+(OIDC)**. Built separately, in the release-workflow task that made this plan's own deferral
+obsolete: `.github/workflows/release.yml`, tag-triggered, publishes both packages to nuget.org
+using `NuGet/login` to exchange a GitHub OIDC token for a short-lived API key — no
+`NUGET_API_KEY` secret exists anywhere in this repository. See `[publish-stays-manual]`'s own
+section below for the corrected record, in the style this document already uses for a superseded
+decision (`[versionprefix-not-version]`, rev 3): nothing in it is an instruction any more, and it
+is kept because the *reasoning that went wrong* is worth having on file, not because the
+conclusion still holds.
 
 **Revision note — rev 4.** Reviewed; four blocking findings, all corrected here. The review
 reproduced `[version-from-git]`'s table and the shallow-clone silence independently, so those stand.
@@ -327,18 +337,44 @@ rather than "corrupt a build".
 runtime's version — a change to `[exact-match]` in the spec, out of scope here, and the reason this
 decision is a report rather than a guarantee.
 
-### `[publish-stays-manual]` — this plan produces correct versions, it does not publish
+### `[publish-stays-manual]` — **superseded by NuGet Trusted Publishing (OIDC)**
 
-Consistent with the CI plan's `[publish-before-release-machinery]`, which deferred the release job
-because it would be forbidden from its own purpose: no NuGet IDs are reserved and the API key is the
-owner's.
-
-This plan makes CI produce **correctly versioned artifacts** and proves they are correct. Wiring
-`dotnet nuget push` remains deferred until there is something to publish to.
-
-Rev 3's refinement to `[tag-is-the-release]` makes this cheaper to keep, not harder: since a merge
-now produces an *artifact* rather than a *published prerelease*, deferring the push costs nothing a
-future release job will have to undo.
+> **Nothing in this section is an instruction any more.** Rev 5: a separate task built
+> `.github/workflows/release.yml`, which performs the actual `dotnet nuget push` this section
+> deferred, gated behind a GitHub Environment rather than a stored secret. Kept rather than
+> deleted, the same reason `[versionprefix-not-version]` was kept above: the reasoning that
+> produced this decision is worth having on file, because two of its three premises turned out to
+> be wrong in ways worth not re-arguing from scratch later.
+>
+> This section's original argument rested on three premises, each examined below on its own
+> terms:
+>
+> - **"No NuGet IDs are reserved."** This was **never actually a blocker**, and treating it as one
+>   was a reasoning error independent of trusted publishing — ID reservation is orthogonal to
+>   whether CI *can* push. Nothing about nuget.org requires a package ID to pre-exist before the
+>   first `dotnet nuget push` that names it; the first push simply claims the ID, whether that push
+>   comes from a human's laptop or from CI. This premise should not have stopped a release job even
+>   under the old API-key model.
+> - **"The API key is the owner's and cannot live in CI."** **Dissolved, not merely mitigated.**
+>   Trusted publishing does not solve the problem of getting the owner's key into CI safely — it
+>   removes the key from the equation entirely. nuget.org's trusted-publishing policy binds a
+>   *package owner* (a nuget.org account), matched against claims GitHub itself puts in a
+>   short-lived OIDC token — repository, workflow file name, and (the control this repository
+>   relies on) a GitHub Environment. `NuGet/login` exchanges that token for an API key that lives
+>   for about an hour and is never written to a secret store. There is no long-lived credential for
+>   "cannot live in CI" to be true or false about.
+> - **"Machinery with no consumer rots before first use."** **Still valid, and still the strongest
+>   argument in this section** — it just now argues for the opposite timing conclusion than rev 1–4
+>   drew from it. It was correct to *not* build a release job back when nothing was ready to
+>   publish; it is equally correct to build one *now*, at the point where `[scaffold-reads-itself]`,
+>   `[version-from-git]` and the readiness spec's metadata pass have all landed and a real tag push
+>   is imminent. Building it earlier would have risked exactly the rot this premise warns about;
+>   building it now, with a concrete first release as the consumer, is the same principle applied
+>   at the right moment rather than a reversal of it.
+>
+> Consistent with the CI plan's `[publish-before-release-machinery]`, which deferred the release
+> job for the identical reason this section gave — that document should be read alongside this one
+> as carrying the same superseded premise, not re-corrected separately.
 
 ---
 

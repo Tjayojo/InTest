@@ -416,26 +416,46 @@ first stable release), pushed with `git push origin <tag>`, makes the build at t
 no prerelease height, because MinVer only appends `.<height>` to a commit that is not itself an
 exact tag match. `pack.yml` also runs on any tag push, on any branch, and its tag-match check
 (`scripts/ci/pack-and-verify.ps1 -ExpectedTag`) fails the build if the packed version and the
-pushed tag ever disagree. The result is still only a workflow artifact, not a published package —
-pushing it to nuget.org is the manual step the readiness spec's §8 checklist walks through
-(`docs/superpowers/specs/2026-08-23-nuget-publish-readiness-design.md`), none of which has been
-performed yet.
+pushed tag ever disagree.
+
+**A tag matching a SemVer-ish shape also publishes**, automatically, via a second, narrower
+workflow: `.github/workflows/release.yml`. `[publish-stays-manual]`
+(`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`) recorded publishing as a deferred,
+manual step — that decision is **superseded**; see that section's own record for why two of its
+three premises turned out not to hold. What changed is NuGet Trusted Publishing (OIDC):
+`release.yml`'s `publish` job exchanges a GitHub-issued OIDC token for a short-lived (~1 hour)
+nuget.org API key via `NuGet/login`, scoped by a GitHub Environment (`nuget-release`) that only
+the repository owner can configure — no `NUGET_API_KEY` secret exists anywhere in this repository,
+and none needs to. See `release.yml`'s own header comment for the full security reasoning,
+including why this had to be a separate workflow file from `pack.yml` rather than a fourth job in
+it.
 
 **Cutting a release, end to end, as this repository defines it today:**
 
 1. Merge whatever should ship into `main`.
 2. Tag that commit and push the tag: `git tag 0.1.0-preview.1 && git push origin 0.1.0-preview.1`
-   (or `0.1.0` for a stable release).
+   (or `0.1.0` for a stable release). Use a plain SemVer shape — `release.yml`'s trigger only fires
+   on `X.Y.Z` or `X.Y.Z-<label>`; see its header comment for exactly what its tag-filter glob does
+   and does not accept.
 3. `pack.yml` packs and verifies both packages at exactly that tag's version and uploads them as
-   workflow artifacts on the resulting Actions run.
-4. Download the artifacts and follow the readiness spec's §8 checklist to verify and push them.
-   Nothing automated does this step — it is deliberately a human decision every time.
+   workflow artifacts on the resulting Actions run — unchanged from before, still never publishes.
+4. `release.yml` runs in parallel (same tag push triggers both workflows independently): its own
+   `pack` job re-packs and re-verifies the same commit — including the artifact-content assertions
+   below — then its `publish` job, gated on the `nuget-release` environment, pushes both the
+   `.nupkg` and `.snupkg` to nuget.org.
+5. The Publishing checklist below still names real one-time and per-release human steps that
+   automation does not perform — ID-prefix reservation, account hygiene, flipping the README
+   status callout, and (recommended, not yet configured) a required-reviewer gate on the
+   `nuget-release` environment so a human still looks before an irreversible push happens.
 
-**One honest gap in this path today:** `pack.yml` has never completed a real run on GitHub
-Actions. Its command sequences were exercised locally, on both platforms, by hand, and the
-workflow file passes `actionlint` — but the GitHub Actions runtime itself (trigger firing, matrix
-fan-out, artifact upload) is unexercised, and there is no green run or badge for it yet. Treat the
-first real tag push as the first genuine test of this path, not as something already proven.
+**One honest gap in this path today:** neither `pack.yml` nor `release.yml` has completed a real
+run on GitHub Actions. Every command sequence in both files was exercised locally, on both
+platforms where applicable, by hand, and both workflow files pass `actionlint` — but the GitHub
+Actions runtime itself (trigger firing, matrix fan-out, artifact upload/download between jobs, the
+OIDC token exchange, environment-gate enforcement) is unexercised, and there is no green run or
+badge for either. Treat the first real tag push as the first genuine test of this path, not as
+something already proven — that is true for `pack.yml` as it was before, and it is equally true,
+for the same reason, of the new `publish` job `release.yml` adds on top of it.
 
 **Patching an old major.** There are zero shipped releases today, so nothing needs this yet.
 Once one exists, cut `release/N.x` **on demand**, from the relevant tag, rather than maintaining a
@@ -487,41 +507,71 @@ for that harness specifically (see the script's own header comment for why).
 
 ## Publishing checklist
 
-None of this is performed automatically. It is the manual sequence for the *actual* first (and
-every subsequent) `dotnet nuget push` — see `docs/superpowers/specs/
-2026-08-23-nuget-publish-readiness-design.md` for the full reasoning behind each step.
+The actual `dotnet nuget push` step is now automated by `.github/workflows/release.yml` on a tag
+push (`[publish-stays-manual]` is superseded — see "Branching and how a release is cut" above and
+that section's own record in
+`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`). Everything below that isn't the
+push itself remains a real, one-time or per-release, human step — see `docs/superpowers/specs/
+2026-08-23-nuget-publish-readiness-design.md` for the full reasoning behind each.
 
-1. Confirm the branching/versioning model above is in effect and the release commit is tagged.
-   The scaffold defect that model exposed is already fixed — `InitCommand.cs` interpolates
-   `CliVersion.Current` rather than a literal, guarded by `PackageVersionCouplingTests` — so this
-   step is just "tests are green", not a manual check.
+**One-time setup, before the first tag push can succeed:**
+
+1. Confirm the branching/versioning model above is in effect. The scaffold defect that model
+   exposed is already fixed — `InitCommand.cs` interpolates `CliVersion.Current` rather than a
+   literal, guarded by `PackageVersionCouplingTests` — so this step is just "tests are green", not
+   a manual check.
 2. Reserve the `InTest.` NuGet ID prefix. The IDs are unclaimed today; the first push claims them.
+   Unrelated to trusted publishing — nuget.org's trusted-publishing policy binds a package *owner*,
+   not a reserved ID, so this step is only about the prefix-reservation benefit itself (protecting
+   `InTest.*` from being claimed by an unrelated package), not a publishing prerequisite.
 3. One-time nuget.org account hygiene: sign in with a Microsoft account, enable two-factor
    authentication, enable "email me when a package is published".
-4. **Clear the local NuGet cache** (`dotnet nuget locals global-packages --clear`, or delete
-   `~/.nuget/packages/intest.*`) before installing or testing the package you're about to push.
-   NuGet caches by exact version and never re-fetches, so a stale local-pack entry silently
-   shadows the real one.
-5. **Get the artifact.** Tag the release commit and let `.github/workflows/pack.yml` pack and
-   verify it (the ordinary path — see "Branching and how a release is cut" above), or run
-   `dotnet pack -c Release` by hand if you need the artifact before tagging. Either way, set
-   `-p:ContinuousIntegrationBuild=true` explicitly for a release pack if it wasn't produced by CI —
-   `ContinuousIntegrationBuild` is only auto-enabled under `GITHUB_ACTIONS`, so an ad hoc local
-   release pack is otherwise non-deterministic (embeds the packer's absolute paths in the Source
-   Link map).
-6. **Verify the artifact before pushing, regardless of where it came from.** Unzip both `.nupkg`
-   and confirm: `README.md` present, `icon.png` present, `THIRD-PARTY-NOTICES.md` present in
-   `InTest.Cli`, and a non-empty `<repository … commit="…">`. Then
+4. **Create the NuGet Trusted Publishing policy** on the nuget.org account that will own these
+   packages (Trusted Publishing is a gradual rollout — **not yet confirmed to be available on this
+   account**; if the menu item is missing, that gates everything below it). The policy needs:
+   Repository Owner and Repository set to this repo, **Workflow File set to the file name only**
+   (`release.yml` — not a path, not a job name), **Environment set to `nuget-release`**, and a
+   Package owner selected from the dropdown. Every field must match `release.yml` exactly — the
+   Environment field in particular is the control that makes an attacker unable to self-grant a
+   publish key by editing the workflow file; see that workflow's own header comment for why.
+5. **Create the `nuget-release` GitHub Environment** (repo Settings → Environments). At minimum
+   its name must match the policy's Environment field above exactly. Strongly recommended:
+   configure **required reviewers** on it — since the workflow itself performs no manual
+   verification step before pushing (see "Verify, then tag" below for where that check now lives
+   instead), a required-reviewer gate on this environment is the only remaining place a human
+   looks at a release before it becomes irreversible.
+6. **Add the `NUGET_TRUSTED_PUBLISHING_USER` repository or environment variable** (not a secret —
+   it is a nuget.org profile *name*, not a credential; `release.yml` reads it as
+   `vars.NUGET_TRUSTED_PUBLISHING_USER`). Scope it to the `nuget-release` environment created above
+   if you want it to only be readable by that job.
+
+**Per release:**
+
+7. **Clear the local NuGet cache** (`dotnet nuget locals global-packages --clear`, or delete
+   `~/.nuget/packages/intest.*`) before installing or testing any package built during this
+   release. NuGet caches by exact version and never re-fetches, so a stale local-pack entry
+   silently shadows the real one.
+8. **Verify, then tag.** Merge the release candidate to `main` and let `.github/workflows/pack.yml`
+   pack and verify it — this is the ordinary path (see "Branching and how a release is cut" above)
+   and it now runs the same artifact-content assertions release.yml's own pack job will run
+   (`README.md`, `icon.png`, `THIRD-PARTY-NOTICES.md` presence/absence, a non-empty `<repository …
+   commit="…">` — `scripts/ci/pack-and-verify.ps1`'s `Assert-PackageArtifactContents`). Download
+   that run's artifacts and do the one check nothing automated performs:
    `dotnet tool install --global --add-source <dir> InTest.Cli --version <v>` and run
-   `intest --help`. Neither `scripts/local-e2e-test.ps1` nor `scripts/ci/pack-and-verify.ps1`
-   substitutes for this — neither ever installs the tool, and neither pushes anything, so neither
-   can confirm what nuget.org itself will accept.
-7. `dotnet nuget push` both the `.nupkg` and the `.snupkg`. Whether nuget.org accepts a `.snupkg`
-   whose PDBs sit under `tools/` (a tool package) rather than `lib/` is unproven — confirm it here.
-8. Flip `README.md`'s "Status: v0 … nothing published yet" callout.
-9. Starting with the release *after* the first: add `<PackageValidationBaselineVersion>` to
-   `InTest.Runtime`'s project file, pointing at the version just published. (`InTest.Cli` never
-   participates in package validation — the SDK hard-disables it for tool packages.)
+   `intest --help`. Only once that looks right, tag the commit and push the tag — the trigger for
+   `release.yml`'s actual publish. This ordering matters: it is what puts a human verification step
+   *before* an irreversible push under an otherwise-automated flow, using an artifact `pack.yml`
+   already produced from the same commit, rather than trying to intercept `release.yml`'s own pack
+   job mid-run.
+9. `release.yml` packs and pushes both the `.nupkg` and the `.snupkg` automatically — no manual
+   `dotnet nuget push` needed or expected. Confirm the run went green and the version now appears
+   on nuget.org. Whether nuget.org accepts a `.snupkg` whose PDBs sit under `tools/` (a tool
+   package) rather than `lib/` was unproven before the first real push — this is where that gets
+   confirmed, for real, for the first time.
+10. Flip `README.md`'s "Status: v0 … nothing published yet" callout.
+11. Starting with the release *after* the first: add `<PackageValidationBaselineVersion>` to
+    `InTest.Runtime`'s project file, pointing at the version just published. (`InTest.Cli` never
+    participates in package validation — the SDK hard-disables it for tool packages.)
 
 ## Testing against a local build
 
