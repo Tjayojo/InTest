@@ -1,0 +1,7 @@
+# InTest writes these files with CRLF interior line endings (a template Normalize step for
+# generated .g.cs classes, JsonSerializerOptions.NewLine = "\r\n" for the JSON files). A
+# clone with core.autocrlf=input would rewrite them to LF on checkout, with nothing on disk
+# to show why.
+Generated/** text eol=crlf
+coverage-report.json text eol=crlf
+fixtures/**/*.json text eol=crlf
