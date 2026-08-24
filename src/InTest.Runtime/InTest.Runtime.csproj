@@ -22,6 +22,7 @@
     <InternalsVisibleTo Include="InTest.Runtime.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
     <PackageReference Include="NJsonSchema" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />

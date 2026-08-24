@@ -1,3 +1,4 @@
+using InTest.Cli;
 using InTest.Cli.Commands;
 using Shouldly;
 
@@ -52,8 +53,30 @@ public class ScaffoldCompileVerificationTests
         var runtimeProject = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime", "InTest.Runtime.csproj"));
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        File.WriteAllText(csprojPath, File.ReadAllText(csprojPath).Replace(
-        """<PackageReference Include="InTest.Runtime" Version="0.1.0" />""",
+        var csprojText = File.ReadAllText(csprojPath);
+
+        // The needle must track CliVersion.Current, not a hardcoded "0.1.0": before
+        // docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's Task 2, InitCommand's
+        // scaffold always wrote Version="0.1.0" for InTest.Runtime because Directory.Build.props
+        // pinned that literal (Task 1's [scaffold-reads-itself] switched the scaffold to
+        // interpolate CliVersion.Current, but Current itself still evaluated to "0.1.0" until
+        // Task 2's MinVer switch made it a moving, commit-derived value) — so a hardcoded needle
+        // happened to match by coincidence, not by design. Task 2 broke that coincidence: this
+        // was found failing with NU1101 (InTest.Runtime unresolvable) the moment CliVersion.Current
+        // stopped being "0.1.0", because String.Replace with no match found is a silent no-op —
+        // exactly the failure mode CLAUDE.md warns about — and the untouched PackageReference then
+        // tried to restore from nuget.org, where nothing is published. Asserted below (not just
+        // interpolated) so a future scaffold-format change fails loudly here rather than silently
+        // reintroducing the same NU1101 several steps downstream, pointing at the wrong cause.
+        var needle = $"""<PackageReference Include="InTest.Runtime" Version="{CliVersion.Current}" />""";
+        csprojText.ShouldContain(needle, Case.Sensitive,
+        "InitCommand's scaffold no longer writes InTest.Runtime's PackageReference in the " +
+        "expected shape (Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\") — update " +
+        "this test's needle alongside whatever changed, or the ProjectReference swap below " +
+        "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
+
+        File.WriteAllText(csprojPath, csprojText.Replace(
+        needle,
         $"""<ProjectReference Include="{runtimeProject}" />""",
         StringComparison.Ordinal));
 

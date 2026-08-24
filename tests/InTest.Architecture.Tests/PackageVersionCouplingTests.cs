@@ -68,10 +68,19 @@ namespace InTest.Architecture.Tests;
 /// comparing it against <see cref="CliVersion.Current"/> — the assertion Task 1 Step 2 asks for
 /// verbatim ("the scaffold emits the running version"), and the only one of the two that was
 /// measured to discriminate a hardcoded literal from the fix (see that method's own doc comment
-/// for the experiment). <c>ReadRuntimeSelfVersion</c> is still called by both test methods below,
-/// unchanged — Task 2 of the same plan removes Directory.Build.props' <c>&lt;Version&gt;</c>
-/// element entirely and expects that call, not this class's InTest.Runtime comparisons, to be
-/// what fails first; that is deliberate continuity across the two tasks, not an oversight here.
+/// for the experiment).
+/// <c>ReadRuntimeSelfVersion</c> is still called by both test methods below, unchanged in role —
+/// but Task 2 of the same plan (<c>[version-from-git]</c>) removed Directory.Build.props'
+/// <c>&lt;Version&gt;</c> element entirely, which is what that call used to read, and that removal
+/// was this class's own predicted acceptance signal: both test methods below failed at exactly
+/// that call, for exactly that reason, the moment the element was gone — confirmed, not assumed,
+/// by running this class before <see cref="ReadRuntimeSelfVersion"/> below was rewritten.
+/// <see cref="ReadRuntimeSelfVersion"/> now reads <see cref="CliVersion.Current"/> instead — the
+/// running assembly's own resolved version, populated at build time from the
+/// <c>AssemblyInformationalVersionAttribute</c> MinVer writes, rather than a static XML value that
+/// no longer exists. Its return value is still unused by <see cref="AssertScaffoldMatchesCentral"/>
+/// (see that method's own parameter doc comment) — that has not changed; what changed is only
+/// where the call gets its value from.
 /// </para>
 /// </para>
 /// </summary>
@@ -83,9 +92,6 @@ public class PackageVersionCouplingTests
 
     private static readonly Regex PackageVersionPattern =
         new(@"<PackageVersion\s+Include=""([^""]+)""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
-
-    private static readonly Regex VersionElementPattern =
-        new(@"<Version>([^<]+)</Version>", RegexOptions.Compiled);
 
     /// <summary>
     /// The one package InitCommand.cs's scaffold hardcodes a version for that is not a
@@ -146,26 +152,23 @@ public class PackageVersionCouplingTests
     }
 
     /// <summary>
-    /// Reads Directory.Build.props' own <c>&lt;Version&gt;</c> element. Kept, and still called by
-    /// both test methods below, even though neither's InTest.Runtime comparison consumes the
-    /// returned value any more after <c>[scaffold-reads-itself]</c> (see this class's own doc
-    /// comment) — docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's Task 2 removes
-    /// this element entirely and names this exact assertion, unchanged, as the acceptance signal
-    /// for that removal: both test methods are expected to fail here, for this one reason, the
-    /// moment <c>&lt;Version&gt;</c> is gone. Deleting this call now would silently move that
-    /// signal somewhere else.
+    /// Reads the running InTest.Cli assembly's own resolved version — <see cref="CliVersion.Current"/>,
+    /// populated at build time from the <c>AssemblyInformationalVersionAttribute</c> MinVer writes
+    /// (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's Task 2, <c>[version-from-git]</c>).
+    /// Before Task 2 this read Directory.Build.props' own <c>&lt;Version&gt;</c> element instead — a
+    /// static XML value that Task 2 removed entirely once MinVer took over deriving Version,
+    /// PackageVersion, AssemblyVersion and InformationalVersion from git tags and commit height (see
+    /// that file's own <c>[version-from-git]</c> comment). That removal was this class's own
+    /// predicted acceptance signal for Task 2: both test methods below called this method and both
+    /// failed here, for exactly this one reason, the moment the element was gone — confirmed by
+    /// running this class before this method was rewritten, not assumed. Still called by both test
+    /// methods below, unchanged in role: a live read of what the running build's version actually
+    /// resolved to, so this guard cannot go stale relative to whatever mechanism computes that
+    /// version, static XML or otherwise.
     /// </summary>
     private static string ReadRuntimeSelfVersion()
     {
-        var path = Path.Combine(RepoRoot(), "Directory.Build.props");
-        var text = File.ReadAllText(path);
-        var match = VersionElementPattern.Match(text);
-        match.Success.ShouldBeTrue(
-            "no <Version>...</Version> element was found in Directory.Build.props. Either its " +
-            "format changed and PackageVersionCouplingTests.VersionElementPattern no longer " +
-            "matches it, or the pin InitCommand.cs's scaffold relies on for InTest.Runtime has " +
-            "been removed.");
-        return match.Groups[1].Value;
+        return CliVersion.Current;
     }
 
     /// <summary>
