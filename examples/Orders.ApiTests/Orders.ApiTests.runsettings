@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <TestRunParameters>
+    <!-- Uncommenting this PINS the profile and makes INTEST_PROFILE unreachable.
+         Leave commented unless this file is environment-specific. -->
+    <!-- <Parameter name="profile" value="staging" /> -->
+  </TestRunParameters>
+  <MSTest>
+    <TestTimeout>60000</TestTimeout>
+  </MSTest>
+</RunSettings>

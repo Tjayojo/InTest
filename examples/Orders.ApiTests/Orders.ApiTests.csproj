@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RunSettingsFilePath>$(MSBuildProjectDirectory)/Orders.ApiTests.runsettings</RunSettingsFilePath>
+    <InTestSpecSource>../../samples/Orders.Api/Orders.Api.json</InTestSpecSource>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
+    <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+    <!-- InTest.Runtime's first NuGet publish went out as 0.1.0-preview.1, not the plain
+         0.1.0 intest init normally scaffolds (Directory.Build.props' Version) — pinned here
+         to the real published version so this committed example actually restores from
+         nuget.org. Bump back to 0.1.0 once a stable release replaces the preview. -->
+    <PackageReference Include="InTest.Runtime" Version="0.1.0-preview.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Generated/spec-schemas.json" Link="spec-schemas.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Generated/spec-paths.json" Link="spec-paths.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- TestHost resolves configuration from AppContext.BaseDirectory, so these must
+         travel to the output directory. Without them every generated project fails at
+         AssemblyInitialize with a FileNotFoundException for appsettings.json. -->
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- FixtureStore also loads from AppContext.BaseDirectory. Without this every
+         fixture is invisible at runtime — every operation that needs one 400s or sends
+         literal "TODO:..." sentinels, and nothing at compile time catches it. -->
+    <Content Include="fixtures/**/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!-- Parallelization intent lives in AssemblyInfo.cs. The MSBuild properties below
+       generate a second assembly attribute, which fails as CS0579 inside obj/. -->
+  <Target Name="InTestGuardParallelizeProperties" BeforeTargets="BeforeBuild"
+          Condition="'$(MSTestParallelizeScope)' != '' or '$(MSTestParallelizeWorkers)' != ''">
+    <Error Code="INTEST0001"
+           Text="Parallelization intent is declared in AssemblyInfo.cs. Remove MSTestParallelizeScope/MSTestParallelizeWorkers from the project file and edit [assembly: Parallelize] or [assembly: DoNotParallelize] instead." />
+  </Target>
+</Project>

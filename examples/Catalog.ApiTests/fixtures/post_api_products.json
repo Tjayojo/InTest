@@ -1,0 +1,26 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "post_api_products",
+    "generatedBy": "intest 0.1.0"
+  },
+  "body": {
+    "sku": "GDG-0003",
+    "name": "Gadget",
+    "description": "A standard gadget, created by the generated integration suite",
+    "price": 29.99,
+    "stockQuantity": 10,
+    "categoryId": "11111111-1111-1111-1111-111111111111",
+    "category": 1,
+    "availableFrom": "2026-01-01",
+    "supplierEmail": "supplier@example.invalid",
+    "dimensions": {
+      "lengthCentimetres": 8,
+      "widthCentimetres": 4,
+      "heightCentimetres": 2
+    },
+    "tags": [
+      "new"
+    ]
+  }
+}

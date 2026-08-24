@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "intestVersion": "0.1.0",
+  "spec": { "source": "../../samples/Catalog.Api/Catalog.Api.json", "producer": "auto" },
+  "project": {
+    "name": "Catalog.ApiTests",
+    "rootNamespace": "Catalog.ApiTests",
+    "framework": "mstest",
+    "assertions": ["shouldly"],
+    "testBaseClass": "Catalog.ApiTests.CatalogTestBase"
+  }
+}

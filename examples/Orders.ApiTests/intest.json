@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "intestVersion": "0.1.0",
+  "spec": { "source": "../../samples/Orders.Api/Orders.Api.json", "producer": "auto" },
+  "project": {
+    "name": "Orders.ApiTests",
+    "rootNamespace": "Orders.ApiTests",
+    "framework": "mstest",
+    "assertions": ["shouldly"],
+    "testBaseClass": "Orders.ApiTests.OrdersTestBase"
+  }
+}

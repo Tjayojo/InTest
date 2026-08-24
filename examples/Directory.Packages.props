@@ -1,0 +1,9 @@
+<Project>
+  <!-- Overrides ../Directory.Packages.props (MSBuild imports the nearest ancestor, not
+       both) so these scaffolded projects use the classic inline-Version PackageReference
+       shape intest init emits for an adopting team's own repo, rather than InTest's own
+       central package management. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

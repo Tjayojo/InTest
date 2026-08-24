@@ -1,0 +1,10 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "get_api_customers_id",
+    "generatedBy": "intest 0.1.0"
+  },
+  "$parameters": {
+    "id": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+  }
+}

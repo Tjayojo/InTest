@@ -1,0 +1,22 @@
+{
+  "title": "Orders API",
+  "generated": 24,
+  "operationsGenerated": 7,
+  "skipped": [],
+  "notes": {
+    "withheld": [],
+    "untaggedOperations": 0,
+    "synthesizedOperationIds": 7,
+    "statusOnlyContractTests": 1,
+    "inlineResponseSchemas": 2,
+    "declaredErrorTestsGenerated": 3,
+    "authTestsGenerated": 14,
+    "authTestsGatedOnSecondIdentity": 7,
+    "authTestsRequiringAnUnderScopedSecondIdentity": 7,
+    "notFoundWithoutPathParameter": 0,
+    "explanations": {
+      "authTestsGatedOnSecondIdentity": "How many generated *_Forbidden tests require a second identity to run at all. These skip rather than run when the suite has fewer than two identities; whether that happens is decided when the suite runs, by the ITestTokenProvider your project registers, which this generator does not execute.",
+      "authTestsRequiringAnUnderScopedSecondIdentity": "How many generated *_Forbidden tests belong to operations that declare required scopes. These skip rather than fail when the second identity holds those scopes; which ones skip is decided when the suite runs, by the ITestTokenProvider your project registers, which this generator does not execute."
+    }
+  }
+}

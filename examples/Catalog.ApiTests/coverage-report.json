@@ -1,0 +1,27 @@
+{
+  "title": "Catalog.Api | v1",
+  "generated": 13,
+  "operationsGenerated": 9,
+  "skipped": [],
+  "notes": {
+    "withheld": [
+      {
+        "operation": "put_api_products_id",
+        "reason": "declares 404 but has a required request body that an unmatchable-id-only, bodyless request would omit"
+      }
+    ],
+    "untaggedOperations": 0,
+    "synthesizedOperationIds": 9,
+    "statusOnlyContractTests": 2,
+    "inlineResponseSchemas": 2,
+    "declaredErrorTestsGenerated": 4,
+    "authTestsGenerated": 0,
+    "authTestsGatedOnSecondIdentity": 0,
+    "authTestsRequiringAnUnderScopedSecondIdentity": 0,
+    "notFoundWithoutPathParameter": 0,
+    "explanations": {
+      "authTestsGatedOnSecondIdentity": "How many generated *_Forbidden tests require a second identity to run at all. These skip rather than run when the suite has fewer than two identities; whether that happens is decided when the suite runs, by the ITestTokenProvider your project registers, which this generator does not execute.",
+      "authTestsRequiringAnUnderScopedSecondIdentity": "How many generated *_Forbidden tests belong to operations that declare required scopes. These skip rather than fail when the second identity holds those scopes; which ones skip is decided when the suite runs, by the ITestTokenProvider your project registers, which this generator does not execute."
+    }
+  }
+}
