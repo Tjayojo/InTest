@@ -47,45 +47,38 @@ without fixtures — which is what made a v0 acceptance run possible before fixt
 
 ## Running them
 
-None of the four sets a port in source, an `appsettings.json`, or a `launchSettings.json` (there
-is none). Run any one of them exactly as written below and it binds to the ASP.NET Core
-default, `http://localhost:5000` — confirmed by running each and reading its own "Now listening
-on" line, not assumed. Since all four share that same default, running more than one at a time
-needs an explicit, distinct `ASPNETCORE_URLS` per project — and more than one at a time is the
-ordinary case, since `Orders.Api` needs `Identity.Server` reachable to validate tokens:
+Each of the four projects ships a `Properties/launchSettings.json` pinning it to a fixed,
+non-colliding port, so `dotnet run --project samples/<Project>` just works — no environment
+variables to type by hand:
 
 ```bash
-ASPNETCORE_URLS="http://localhost:5081" dotnet run --project samples/Catalog.Api
-ASPNETCORE_URLS="http://localhost:5084" IdentityServer__IssuerUri="http://localhost:5084" \
-  dotnet run --project samples/Identity.Server    # required only by Orders.Api
-ASPNETCORE_URLS="http://localhost:5082" ASPNETCORE_ENVIRONMENT="Development" \
-  Identity__Authority="http://localhost:5084" dotnet run --project samples/Orders.Api
-ASPNETCORE_URLS="http://localhost:5083" dotnet run --project samples/Inventory.Api
+dotnet run --project samples/Catalog.Api      # http://localhost:5081
+dotnet run --project samples/Identity.Server  # http://localhost:5084 — required only by Orders.Api
+dotnet run --project samples/Orders.Api       # http://localhost:5082
+dotnet run --project samples/Inventory.Api    # http://localhost:5083
 ```
 
-`Identity.Server` and `Orders.Api` need two more variables between them, not just a port, because
-both default to `https://localhost:5443` in source (`Identity.Server/Program.cs:9`,
-`Orders.Api/Program.cs:11`) — a bare `ASPNETCORE_URLS` override moves where `Identity.Server`
-listens without moving where `Orders.Api` looks for it, so token validation targets an address
-nothing answers on. `IdentityServer__IssuerUri` repoints the issuer `Identity.Server` stamps into
-every token to match where it actually listens; `Identity__Authority` repoints where `Orders.Api`
-goes looking for that issuer's metadata to the same address. They must name the same host and
-port, or the pairing fails the same way. `ASPNETCORE_ENVIRONMENT="Development"` is required too,
-separately: none of the four projects ships a `launchSettings.json` (by design, above), so without
-it every project defaults to the `Production` hosting environment, and `Orders.Api` refuses a
-plain-HTTP authority outright in Production (`RequireHttpsMetadata = builder.Environment.
-IsProduction()`, `Orders.Api/Program.cs:18`) — every request 500s with "The MetadataAddress or
-Authority must use HTTPS", not the 401 an unauthenticated request should get.
+`Orders.Api` needs `Identity.Server` reachable to validate tokens — start both when working with
+Orders.Api. Their launch profiles already carry the pairing that makes this work:
+`Identity.Server`'s profile sets `IdentityServer__IssuerUri=http://localhost:5084` (the address it
+actually listens on, overriding the `https://localhost:5443` default in
+`Identity.Server/Program.cs:9`), `Orders.Api`'s profile sets
+`Identity__Authority=http://localhost:5084` to match, and both set
+`ASPNETCORE_ENVIRONMENT=Development` — required because `Orders.Api/Program.cs:18` sets
+`RequireHttpsMetadata = builder.Environment.IsProduction()`, so a plain-HTTP authority is only
+accepted outside Production.
 
 Confirmed by measurement, not merely by `/health/ready`, which is anonymous and would pass even
 if the pairing above were wrong: with all four running as shown, `GET /api/orders` on `Orders.Api`
 with no `Authorization` header returns `401`; requesting a token from `Identity.Server`
 (`POST /connect/token`, `client_id=orders-client`) and retrying the same request with
-`Authorization: Bearer <token>` returns `200` with the seeded order list. Pick different ports
-freely — nothing below depends on these specific numbers — but each project's `Api:BaseUrl` (or
+`Authorization: Bearer <token>` returns `200` with the seeded order list.
+
+To run on different ports, edit the relevant `Properties/launchSettings.json` (or pass
+`ASPNETCORE_URLS`, which overrides `applicationUrl` for a single invocation) — nothing below
+depends on these specific numbers, but each project's `Api:BaseUrl` (or
 `Identity:Authority`/`IdentityServer:IssuerUri` for the identity pair, kept equal to each other)
-must then point at whatever you actually chose, and `Orders.Api` still needs
-`ASPNETCORE_ENVIRONMENT=Development` for as long as its authority is plain HTTP.
+must then point at whatever you actually chose.
 
 Each exposes `GET /health/ready`. Each writes its OpenAPI document beside its project file at
 build time, so `intest` can read an artifact rather than needing a running instance.
