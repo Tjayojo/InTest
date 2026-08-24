@@ -9,8 +9,13 @@ HTTP, from its OpenAPI document. Two shipped packages (`InTest.Cli`, `InTest.Run
 sample APIs used as fixtures, four test suites. Nothing is published to NuGet; build from source.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
+A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
+snapshot (§9), which `generate --check` and `fixtures repair` then read instead of the network.
 `survey`, `fixtures promote`, `assertions add`, `generate --emit-plan`, variation tests and YAML
-input do **not** exist yet — do not assume they do.
+input do **not** exist yet — do not assume they do. YAML is unbuilt from a file *and* from a URL;
+so is §9's build-time copy of the spec to the output directory (`init` scaffolds the
+`<InTestSpecSource>` property, but nothing consumes it and the runtime reads
+`Generated/spec-schemas.json`).
 
 ## Commands
 
@@ -106,6 +111,13 @@ SHA — see CONTRIBUTING.md's dependency policy.
 
 `SpecLoader` -> `TestPlanBuilder` -> `TemplateRenderer` -> files under `Generated/`.
 
+`Spec/` splits three ways, and the split is deliberate: `SpecLoader` turns *text* into an
+`OpenApiDocument` and knows nothing about where the text came from; `SpecFetcher` owns HTTP policy
+(timeout, size cap, status and content-type handling) for a URL source; `SpecSnapshot` owns the
+committed `spec.json` — its name, its bytes, and the reprint that makes `--check` stable. Do not
+fold fetching back into the loader: parsing and transport are different concerns with different
+failure vocabularies.
+
 - **`Planning/`** is the single source of truth. `TestPlanBuilder.Build` decides which operations
   produce cases, which are skipped (with a reason), and which get a non-removing coverage *note*.
   `TestCasePlan` deliberately **carries** verdicts computed elsewhere (`NeedsFixture`,
@@ -122,12 +134,19 @@ SHA — see CONTRIBUTING.md's dependency policy.
 | Directory | Written by | Never touched by |
 |---|---|---|
 | `Generated/` | `generate` (deleted and rewritten wholesale) | humans |
+| `spec.json` | `generate`, when `spec.source` is a URL — the committed snapshot (§9) | humans; `fixtures repair` and `--check` only *read* it |
 | `fixtures/` | `fixtures repair` only | `generate` — it only *reports* drift |
 | everything else | the adopting team | InTest, with one narrow exception: `upgrade` writes `.gitattributes` if the project does not already have one, never overwriting an existing one |
 
-`generate` detects fixture drift **before** writing anything and exits `1`. Exit codes are public
-API: `0` ok, `1` work outstanding, `2` tool error, `3` already initialised (`init` only),
-`4` tool/config version mismatch (`generate --check` only).
+`generate` detects fixture drift **before** writing any generated *output* and exits `1`. The one
+deliberate exception is `spec.json`, written as soon as a fetched document parses and therefore
+before the drift gate — it is the materialized *input*, not output, and writing it later
+deadlocks the drift/repair cycle. `[snapshot-is-input]` in
+`docs/superpowers/plans/2026-08-24-intest-url-spec-source.md` is the canonical explanation, with
+the worked loop; `GenerateCommand.ResolveSpecAsync` points at it.
+
+Exit codes are public API: `0` ok, `1` work outstanding, `2` tool error, `3` already initialised
+(`init` only), `4` tool/config version mismatch (`generate --check` only).
 
 ### Three separate text-safety rules — keep them separate
 

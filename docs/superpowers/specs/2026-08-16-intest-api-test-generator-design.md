@@ -482,7 +482,7 @@ files over this column.
 | Command | Writes | Never writes | Exit | Ships today |
 |---|---|---|---|---|
 | `intest init` | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs`, `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings`, `.config/dotnet-tools.json`, `.gitattributes` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused, or the scaffold failed · 3 already initialised | Yes |
-| `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, or spec unparseable | Yes |
+| `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a URL `spec.source` that could not be fetched (never a fall back to the committed snapshot — §9) | Yes |
 | `intest generate --check` | Nothing | Everything | 0 identical · 1 `Generated/` or `coverage-report.json` differs, or a fixture has drifted (same code as plain `generate`'s exit 1, §5's exit-1 row already lists both as one code) · 2 tool error · 4 tool-version mismatch, checked before any output comparison and only when `intestVersion` is declared (absent means no claim made, not a mismatch) | Yes |
 | `intest generate --emit-plan` | `TestPlan` JSON to stdout | Everything | 0 ok | Not yet |
 | `intest fixtures repair` | `fixtures/` — **creates missing fixtures** by tier precedence, adds `TODO:` sentinels for newly-required properties, flags removed ones. Never overwrites an existing value | `Generated/`, team-owned files | 0 ok, including nothing to repair · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a committed fixture that cannot be read | Yes |
@@ -950,6 +950,12 @@ artifact** — the property that makes a separate gate stage work — and a miss
 build error (`MSB3030`), not a silent skip. InTest wraps that with a clearer message via a guard
 target, but the fail-loud behaviour is already correct.
 
+> **Not built.** `init` scaffolds the `<InTestSpecSource>` property, but no `Content` item
+> consumes it and no guard target wraps `MSB3030` — the runtime reads `Generated/spec-schemas.json`
+> from `AppContext.BaseDirectory` and never `spec.json`. The property is nonetheless kept correct
+> for both source kinds (a URL project points it at the snapshot), so this needs no second fix
+> when it lands. `[url-spec-source]` depends on that distinction and is the first thing to.
+
 The spec is neither committed nor embedded. Diffs stay small and there is no second copy to
 drift.
 
@@ -961,9 +967,10 @@ endpoint on a running service, with no build artifact anywhere. MSBuild cannot c
 undefined.
 
 **A URL source is snapshotted at generation time.** `intest generate` fetches it and writes
-`spec.json` into the project as a generator-owned, committed file; the `.csproj` copies that
-local file to the output directory exactly as above. Everything downstream — bundling,
-publishing into a gate stage, the `MSB3030` guard — is then identical for both source kinds.
+`spec.json` into the project as a generator-owned, committed file; the `.csproj` points
+`InTestSpecSource` at that local file rather than at the URL, so whenever the build-time copy
+above lands it is identical for both source kinds. Everything downstream — bundling, publishing
+into a gate stage, the `MSB3030` guard — is then identical too.
 
 Two consequences, both wanted:
 
@@ -976,6 +983,41 @@ Two consequences, both wanted:
 
 This keeps the ownership invariant intact: `spec.json` is generator-owned like `Generated/` and
 `coverage-report.json`, and `generate` still never writes `fixtures/` or a team-owned file (§5).
+
+##### Built, with four decisions the design did not settle
+
+Shipped in `[url-spec-source]`
+(`docs/superpowers/plans/2026-08-24-intest-url-spec-source.md`). Four things this section left
+open, and what each was settled as:
+
+- **The snapshot is re-emitted, not copied byte-for-byte** — indented, CRLF, with the relaxed
+  JSON encoder. Real Swagger endpoints overwhelmingly serve *minified* JSON, and a 200 KB
+  single-line `spec.json` has a diff of no review value, which would leave the "reviewable diff"
+  justification above technically satisfied and practically void. Number fidelity, idempotence,
+  string round-tripping and readability were each confirmed by direct experiment before this was
+  chosen, and each is pinned by a test.
+- **`generate` writes the snapshot as soon as the fetched document parses — before the
+  fixture-drift gate.** This is a deliberate, documented exception to "detects fixture drift
+  before writing anything", and the invariant narrows rather than breaks: what it protects is
+  generated *output*, and `spec.json` is the materialized *input*. Writing it later deadlocks
+  the tool — drift exits 1 without a fresh snapshot, `fixtures repair` then repairs against the
+  old spec, and the drift never clears however many times either command runs.
+- **A failed fetch is exit 2, never a fall back to the committed snapshot**, even when one is
+  sitting there. Falling back would make "regenerated against the current spec" and "regenerated
+  against whatever was lying around" produce identical output and identical exit codes.
+- **The fetch is anonymous.** No headers, no token. A `401`/`403` gets its own message pointing
+  at the fetch-it-yourself-and-commit-the-file route. Authentication is a credential path through
+  the CLI and deserves its own change.
+
+**JSON only.** YAML is unbuilt from a file and from a URL alike — the parse format is hard-coded
+— and a URL serving YAML is refused by name (from the `Content-Type`, or from a leading
+`openapi:` line) rather than surfacing as a generic parse error. The "Input" row of §2's in-scope
+table still describes the v1 target, not what is built today.
+
+**`fixtures repair` reads the snapshot and never fetches**, for the same reason `--check` does
+not: deciding what the spec now says is `generate`'s job. Running it before the first `generate`
+on a URL project is refused with a message naming `intest generate`, rather than reporting
+`spec.json` as a missing file the adopter never named.
 
 #### Bundling
 

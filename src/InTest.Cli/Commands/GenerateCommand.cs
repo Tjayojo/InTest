@@ -133,8 +133,16 @@ public static class GenerateCommand
     private static string ToFullPath(string projectRoot, string relativePath)
         => Path.Combine(projectRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
+    /// <param name="specTransport">
+    /// Test seam, <c>null</c> in production, matching <paramref name="report"/>'s shape and
+    /// purpose. Passed through to <see cref="SpecFetcher.FetchAsync"/> so a test can drive the
+    /// URL path without a socket — including the tests that prove a socket is <i>never</i> opened
+    /// (a transport that throws when invoked is how <c>[no-refetch]</c> is pinned mechanically
+    /// rather than by reading the code).
+    /// </param>
     public static async Task<int> RunAsync(
-        string projectRoot, CancellationToken cancellationToken, TextWriter? report = null, bool check = false)
+        string projectRoot, CancellationToken cancellationToken, TextWriter? report = null,
+        bool check = false, HttpMessageHandler? specTransport = null)
     {
         report ??= Console.Out;
 
@@ -173,9 +181,18 @@ public static class GenerateCommand
                 return ExitCode.VersionMismatch;
             }
 
-            var spec = await SpecLoader.LoadFromFileAsync(Path.Combine(projectRoot, config.SpecSource), cancellationToken)
-                                       .ConfigureAwait(false);
+            // What "the spec" means depends on the kind of source, and the answer is carried on
+            // the config rather than re-derived here (see LoadedConfig.SpecSourceIsUrl).
+            // ResolveSpecAsync returns null only when it has already reported a §5 exit code of
+            // its own — today the one case is --check with no snapshot yet.
+            var resolved = await ResolveSpecAsync(
+                projectRoot, config, check, specTransport, report, cancellationToken).ConfigureAwait(false);
+            if (resolved.Spec is null)
+            {
+                return resolved.ExitCode;
+            }
 
+            var spec = resolved.Spec;
             var plan = TestPlanBuilder.Build(spec.Document);
 
             // Fixture drift is checked — and reported — before anything is written, in both
@@ -248,6 +265,210 @@ public static class GenerateCommand
         {
             Console.Error.WriteLine(ex.Message);
             return ExitCode.ToolError;
+        }
+    }
+
+    /// <summary>
+    /// Either the loaded spec, or the exit code a caller should return because this step already
+    /// reported why it could not produce one. Only <see cref="ResolveSpecAsync"/> constructs it;
+    /// a null <see cref="Spec"/> always comes with a message already written to the report.
+    /// </summary>
+    private readonly record struct ResolvedSpec(LoadedSpec? Spec, int ExitCode);
+
+    /// <summary>
+    /// Answers "what is the spec, right now" for both kinds of <c>spec.source</c>, and — for a
+    /// URL in write mode — takes the §9 snapshot that makes every later read of it local.
+    ///
+    /// <para><b>Three paths, and only one of them opens a socket:</b></para>
+    /// <list type="bullet">
+    /// <item><b>A path source</b> reads the file, exactly as `generate` always has.</item>
+    /// <item><b>A URL under <c>--check</c></b> reads the committed snapshot and <i>never</i>
+    /// fetches (<c>[no-refetch]</c>). §9 requires this: "`--check` does not re-fetch. It compares
+    /// against the committed snapshot, so CI stays hermetic and does not depend on the service
+    /// being reachable." A missing snapshot is reported as <see cref="ExitCode.WorkOutstanding"/>
+    /// rather than a tool error, because that is what it is — a human has to run `generate` —
+    /// and it is the same voice every other `--check` difference is reported in.</item>
+    /// <item><b>A URL in write mode</b> fetches, reprints, parses, then writes.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// <b>That write-mode order is load-bearing in both directions, and neither half is
+    /// incidental.</b> Parsing the <i>reprinted</i> text rather than the raw response is what
+    /// guarantees the document this run plans from is byte-identical to what lands on disk, so a
+    /// subsequent <c>--check</c> reading the snapshot reaches the identical plan. Parsing
+    /// <i>before</i> writing is what guarantees an unparseable response never overwrites a good
+    /// snapshot — the fetch succeeded, the document is still garbage, and the last known-good
+    /// snapshot is worth more than a fresh copy of nonsense.
+    /// </para>
+    ///
+    /// <para>
+    /// <b><c>[snapshot-is-input]</c> — why the write is here, above the fixture-drift gate.</b>
+    /// CLAUDE.md says `generate` "detects fixture drift before writing anything and exits 1", and
+    /// this is the deliberate, documented exception to that sentence rather than a violation of
+    /// it: what the invariant protects is <i>generated output</i> — nothing under Generated/, no
+    /// coverage-report.json — and <c>spec.json</c> is not output. It is the materialized
+    /// <i>input</i>: the bytes the rest of the run reasons from, which for a path source already
+    /// exist on disk before `generate` is invoked at all. Writing it here puts a URL source in
+    /// exactly the state a path source is permanently in.
+    /// </para>
+    /// <para>
+    /// Moving it down beside the other writes — which looks tidier, and is the shape a future
+    /// reader will reach for — deadlocks the tool. Worked through, because the loop is not
+    /// obvious from the call site: the spec changes upstream and adds a required property;
+    /// `generate` fetches, sees fixture drift, exits 1 <i>without</i> writing the snapshot;
+    /// `fixtures repair` reads the old snapshot and repairs against the old spec; `generate`
+    /// fetches, sees the same drift, exits 1. Forever, with every command behaving exactly as
+    /// documented. <c>GenerateCommandTests.WritesTheSnapshotEvenWhenFixtureDriftEndsTheRun</c>
+    /// is the regression test; deleting this ordering fails it.
+    /// </para>
+    /// </summary>
+    private static async Task<ResolvedSpec> ResolveSpecAsync(
+        string projectRoot, LoadedConfig config, bool check, HttpMessageHandler? specTransport,
+        TextWriter report, CancellationToken cancellationToken)
+    {
+        if (!config.SpecSourceIsUrl)
+        {
+            return new ResolvedSpec(
+                await SpecLoader.LoadFromFileAsync(
+                    Path.Combine(projectRoot, config.SpecSource), cancellationToken).ConfigureAwait(false),
+                ExitCode.Ok);
+        }
+
+        var snapshotPath = Path.Combine(projectRoot, SpecSnapshot.FileName);
+
+        if (check)
+        {
+            if (!File.Exists(snapshotPath))
+            {
+                // Phrased like the other --check differences ("<file> is missing.") rather than
+                // like a spec-load failure, because that is the category it belongs to: the
+                // committed state does not yet contain something `generate` is supposed to have
+                // put there. Routing it through SpecLoadException instead would report exit 2
+                // and tell CI the tool broke, when what actually happened is that a human has
+                // not run `generate` yet.
+                report.WriteLine($"{SpecSnapshot.FileName} is missing.");
+                report.WriteLine(
+                    $"spec.source is a URL, so {SpecSnapshot.FileName} is the committed snapshot " +
+                    "--check compares against. Run 'intest generate' to fetch it, and commit the result.");
+                return new ResolvedSpec(null, ExitCode.WorkOutstanding);
+            }
+
+            return new ResolvedSpec(
+                await SpecLoader.LoadFromFileAsync(snapshotPath, cancellationToken).ConfigureAwait(false),
+                ExitCode.Ok);
+        }
+
+        // [fail-closed]: every failure below throws SpecLoadException and is caught by RunAsync as
+        // §5's exit 2, with nothing written — including when a perfectly good spec.json is sitting
+        // right there. Falling back to it would make "I regenerated against the current spec" and
+        // "I regenerated against whatever I had lying around" produce identical output and an
+        // identical exit code, which is the quiet-green failure README.md's "Fail loudly"
+        // principle exists to reject.
+        var fetched = await SpecFetcher
+            .FetchAsync(config.SpecSource, specTransport, cancellationToken).ConfigureAwait(false);
+
+        var snapshot = SpecSnapshot.Reprint(fetched);
+        var spec = await SpecLoader.LoadFromTextAsync(snapshot, cancellationToken).ConfigureAwait(false);
+
+        await WriteSnapshotAsync(snapshotPath, snapshot, cancellationToken).ConfigureAwait(false);
+
+        return new ResolvedSpec(spec, ExitCode.Ok);
+    }
+
+    /// <summary>
+    /// Writes the snapshot atomically — to a sibling temp file, then <see cref="File.Move(string,
+    /// string, bool)"/> over the target — and translates a write failure into a sentence rather
+    /// than a stack trace.
+    ///
+    /// <para>
+    /// <b>Why this one write is atomic when the <c>Generated/</c> writes are not.</b> Not
+    /// inconsistency: <c>spec.json</c> is the only artefact written <i>before</i> the drift gate,
+    /// on the routine path, and it is an <i>input</i> to every command that follows. A Ctrl+C or
+    /// a full disk part-way through a plain write leaves a truncated snapshot sitting in the
+    /// project, and from that point `--check` and `fixtures repair` both fail on a corrupt file —
+    /// reporting a spec problem the adopter did not cause and cannot diagnose from the message.
+    /// A half-written file under <c>Generated/</c> is recoverable by re-running `generate`; a
+    /// half-written <c>spec.json</c> is what `generate` reads.
+    /// </para>
+    /// <para>
+    /// <see cref="File.Move(string, string, bool)"/> rather than <c>File.Replace</c>: replace
+    /// requires the destination to exist, which it does not on the first run.
+    /// </para>
+    /// <para>
+    /// <b>A read-only <c>spec.json</c> is refused on every platform</b>, by an explicit check
+    /// rather than by whatever the move happens to do — see the comment on that check for why
+    /// leaving it to the platform produced two different answers to the same command. The catch
+    /// below covers what remains: an unwritable <i>directory</i> — a full disk, a read-only
+    /// checkout, a permissions problem.
+    /// </para>
+    /// </summary>
+    private static async Task WriteSnapshotAsync(
+        string snapshotPath, string content, CancellationToken cancellationToken)
+    {
+        // Beside the target, not in the system temp directory: File.Move is only atomic within a
+        // single volume, and a project on a different drive from %TEMP% would silently degrade to
+        // a copy — which is exactly the non-atomic write this method exists to avoid.
+        var temporaryPath = snapshotPath + ".tmp";
+
+        // Uniformity, chosen rather than inherited. The atomic write makes this behaviour
+        // platform-divergent if left alone: on POSIX the move is rename(2), which checks write
+        // permission on the *directory* and ignores the target file's own mode, so a read-only
+        // spec.json is replaced; on Windows MoveFileEx honours the read-only attribute and fails.
+        // The same command, two answers, decided by whichever OS is running it — caught by CI's
+        // windows-latest leg after the ubuntu leg had gone green.
+        //
+        // This repository already rejected that shape once, for line endings, and the reasoning
+        // transfers verbatim (CommittedJsonOptions: "one fixed convention, chosen deliberately,
+        // beats one that tracks whatever the writing platform's default happens to be").
+        //
+        // Refusal is the convention chosen, for two reasons. It is what a plain
+        // File.WriteAllText did on both platforms before this write became atomic, so it is not a
+        // behaviour change smuggled in alongside an unrelated fix. And a read-only bit is a
+        // deliberate signal from whoever set it: generator-owned (§5) means `generate` is the
+        // only thing that *writes* spec.json, not that it should overrule a filesystem that has
+        // been told to protect it.
+        if (File.Exists(snapshotPath) && new FileInfo(snapshotPath).IsReadOnly)
+        {
+            throw new SpecLoadException(
+                $"The spec snapshot at '{snapshotPath}' is read-only, so `generate` cannot refresh " +
+                "it. spec.json is generator-owned and must stay writable — clear the read-only " +
+                "flag, or point spec.source at a path source if this project is not meant to " +
+                "snapshot from a URL.");
+        }
+
+        try
+        {
+            await File.WriteAllTextAsync(temporaryPath, content, cancellationToken).ConfigureAwait(false);
+            File.Move(temporaryPath, snapshotPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Otherwise this escapes both of RunAsync's catches and lands on Program's crash
+            // floor: `chmod 444 spec.json` reported "intest: unexpected failure:
+            // UnauthorizedAccessException", which names neither the file nor anything the adopter
+            // can act on. A read-only or full checkout is an ordinary condition, not a defect in
+            // the tool.
+            throw new SpecLoadException(
+                $"The spec snapshot could not be written to '{snapshotPath}': {ex.Message} " +
+                "spec.json is generator-owned and must be writable — check the file is not " +
+                "read-only and that there is space on the volume.", ex);
+        }
+        finally
+        {
+            // A failed Move leaves the temp file behind, and a stray spec.json.tmp in a committed
+            // project is its own small confusion. Best-effort: a cleanup failure must not replace
+            // the real error above with a less useful one.
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                // Deliberately swallowed — see above.
+            }
         }
     }
 
