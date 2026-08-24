@@ -1,8 +1,55 @@
 # NuGet publish readiness
 
-**Status:** Design · Revision 6
-**Date:** 2026-08-23
-**Supersedes:** Revision 5 — §8's publishing checklist still assumed a manual local `dotnet
+**Status:** Implemented · Revision 7
+**Date:** 2026-08-24
+**Supersedes:** Revision 6 — §2–§6 and §10 are now implemented and verified, not just designed.
+See "Implemented — revision 7" below for what landed and how it was checked. Nothing in revision
+6's reasoning was found wrong in the process; this is a status change, not a correction.
+
+## Implemented — revision 7
+
+Landed in one change: `Directory.Build.props` (§2 symbol/SourceLink properties, §6
+`EnablePackageValidation`), `src/InTest.Cli/InTest.Cli.csproj` and
+`src/InTest.Runtime/InTest.Runtime.csproj` (§3 `Description`/`PackageTags`, §4
+`PackageReadmeFile` + `None` item, §5 the `THIRD-PARTY-NOTICES.md` `None` item on `InTest.Cli`
+only), `src/InTest.Cli/README.md` and `src/InTest.Runtime/README.md` (new, §4),
+`THIRD-PARTY-NOTICES.md` (§5, `Microsoft.OpenApi` corrected to `3.10.2`), `.gitattributes` (§10,
+`*.png binary` / `*.svg text eol=crlf` — `eol=crlf` because the repo's convention flipped after
+this spec's earlier revisions, per §10's own note), and the new "Publishing checklist" subsection
+in `CONTRIBUTING.md` (§8), placed after "Branching and how a release is cut" rather than
+immediately after "Releases" since it assumes a release has already been cut.
+
+`scripts/local-e2e-test.ps1` needed **two** further fixes beyond the one §1 already records, both
+the identical failure mode: the scratch copy mirrors `src/InTest.Cli`, `src/InTest.Runtime` and a
+short list of repo-root files each project reaches by a `../../`-relative path, and every file
+newly referenced that way has to be added to that list or `dotnet pack` fails outright.
+`THIRD-PARTY-NOTICES.md` was the second one, failing `NU5019: File not found` until added
+alongside `assets/`. Reproduced, fixed, reproduced clean — same pattern as §1's `assets/` fix.
+
+**Verified, not assumed:**
+- `dotnet build InTest.sln -c Release` and `dotnet test InTest.sln -c Release`: all four suites
+  green (732 passing — up from the 658 §11 cites, from unrelated work landed on `main` since).
+- `pwsh scripts/local-e2e-test.ps1`: full adoption path green, including the pack step that
+  exercises every property/item added here.
+- **§11's "unzip both `.nupkg` and assert contents" was performed for real**, not deferred to
+  first publish: a throwaway `dotnet pack` of both projects (own `NUGET_PACKAGES` redirect, never
+  restored, never touches the real global cache) followed by `unzip` on both `.nupkg`, confirming
+  by direct inspection: `InTest.Cli`'s package root contains `icon.png`, `README.md`, and
+  `THIRD-PARTY-NOTICES.md` alongside `tools/`; `InTest.Runtime`'s contains `icon.png` and
+  `README.md` alongside `lib/`; both nuspecs carry a populated
+  `<repository type="git" url="https://github.com/Tjayojo/intest.git" commit="…">` — confirming §2's
+  "Source Link already works with no reference" claim at the packaged-artifact level, not just in
+  principle. The "package is missing a readme" `dotnet pack` warning that appeared before
+  `PackageReadmeFile` was wired is gone.
+- §7's scaffold defect and §9's deterministic-build question were **not** touched by this change —
+  both were already resolved separately (the trunk-based-versioning plan, and this change's own
+  `CONTRIBUTING.md` checklist step 5 documenting the `-p:ContinuousIntegrationBuild=true` fallback
+  for an ad hoc local release pack).
+
+**Not done, and out of scope for this change specifically:** the checklist items that require an
+actual publish (ID reservation, nuget.org account hygiene, the real `dotnet nuget push`, flipping
+`README.md`'s "Status: v0" callout, and the baseline-version step for the release after the
+first) — all still exactly where §8 leaves them, waiting on a human to run them. — §8's publishing checklist still assumed a manual local `dotnet
 pack` as the only way to get an artifact. By the time this revision was written, the versioning
 plan's Task 3 (`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`) had shipped
 `.github/workflows/pack.yml`, which already packs and verifies both projects in CI on every merge

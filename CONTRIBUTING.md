@@ -485,6 +485,44 @@ fire outside a git repository at all — `scripts/local-e2e-test.ps1` packs from
 `src/` by design, so it hits a plain `MINVER1001` warning instead, and that fallback is accepted
 for that harness specifically (see the script's own header comment for why).
 
+## Publishing checklist
+
+None of this is performed automatically. It is the manual sequence for the *actual* first (and
+every subsequent) `dotnet nuget push` — see `docs/superpowers/specs/
+2026-08-23-nuget-publish-readiness-design.md` for the full reasoning behind each step.
+
+1. Confirm the branching/versioning model above is in effect and the release commit is tagged.
+   The scaffold defect that model exposed is already fixed — `InitCommand.cs` interpolates
+   `CliVersion.Current` rather than a literal, guarded by `PackageVersionCouplingTests` — so this
+   step is just "tests are green", not a manual check.
+2. Reserve the `InTest.` NuGet ID prefix. The IDs are unclaimed today; the first push claims them.
+3. One-time nuget.org account hygiene: sign in with a Microsoft account, enable two-factor
+   authentication, enable "email me when a package is published".
+4. **Clear the local NuGet cache** (`dotnet nuget locals global-packages --clear`, or delete
+   `~/.nuget/packages/intest.*`) before installing or testing the package you're about to push.
+   NuGet caches by exact version and never re-fetches, so a stale local-pack entry silently
+   shadows the real one.
+5. **Get the artifact.** Tag the release commit and let `.github/workflows/pack.yml` pack and
+   verify it (the ordinary path — see "Branching and how a release is cut" above), or run
+   `dotnet pack -c Release` by hand if you need the artifact before tagging. Either way, set
+   `-p:ContinuousIntegrationBuild=true` explicitly for a release pack if it wasn't produced by CI —
+   `ContinuousIntegrationBuild` is only auto-enabled under `GITHUB_ACTIONS`, so an ad hoc local
+   release pack is otherwise non-deterministic (embeds the packer's absolute paths in the Source
+   Link map).
+6. **Verify the artifact before pushing, regardless of where it came from.** Unzip both `.nupkg`
+   and confirm: `README.md` present, `icon.png` present, `THIRD-PARTY-NOTICES.md` present in
+   `InTest.Cli`, and a non-empty `<repository … commit="…">`. Then
+   `dotnet tool install --global --add-source <dir> InTest.Cli --version <v>` and run
+   `intest --help`. Neither `scripts/local-e2e-test.ps1` nor `scripts/ci/pack-and-verify.ps1`
+   substitutes for this — neither ever installs the tool, and neither pushes anything, so neither
+   can confirm what nuget.org itself will accept.
+7. `dotnet nuget push` both the `.nupkg` and the `.snupkg`. Whether nuget.org accepts a `.snupkg`
+   whose PDBs sit under `tools/` (a tool package) rather than `lib/` is unproven — confirm it here.
+8. Flip `README.md`'s "Status: v0 … nothing published yet" callout.
+9. Starting with the release *after* the first: add `<PackageValidationBaselineVersion>` to
+   `InTest.Runtime`'s project file, pointing at the version just published. (`InTest.Cli` never
+   participates in package validation — the SDK hard-disables it for tool packages.)
+
 ## Testing against a local build
 
 Nothing is published to NuGet yet, so trying the documented adoption path

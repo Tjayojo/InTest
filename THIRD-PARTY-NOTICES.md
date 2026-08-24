@@ -31,7 +31,7 @@ and are not listed below because they never ship in either published package.
 These assemblies are copied into `InTest.Cli`'s `.nupkg` and redistributed in binary form with
 every install of the tool.
 
-### Microsoft.OpenApi 3.10.0 (MIT)
+### Microsoft.OpenApi 3.10.2 (MIT)
 
 > © Microsoft Corporation. All rights reserved.
 
