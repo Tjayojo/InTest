@@ -274,14 +274,27 @@ public class GenerateUrlSpecTests
 
     /// <summary>
     /// A snapshot that cannot be written is refused with a sentence, not a stack trace. Without
-    /// the translation this escapes both of <c>RunAsync</c>'s catches and lands on
-    /// <c>Program</c>'s crash floor as "intest: unexpected failure:
-    /// UnauthorizedAccessException", naming neither the file nor anything the adopter can act on.
-    /// A read-only checkout is an ordinary condition, not a defect in the tool.
+    /// the translation in <c>GenerateCommand.WriteSnapshotAsync</c> this escapes both of
+    /// <c>RunAsync</c>'s catches and lands on <c>Program</c>'s crash floor as "intest: unexpected
+    /// failure: UnauthorizedAccessException", naming neither the file nor anything the adopter
+    /// can act on. A full or read-only checkout is an ordinary condition, not a defect in the
+    /// tool.
     /// <para>
-    /// Skipped where the process can write regardless of the read-only bit — root on Linux, which
-    /// is how CI containers usually run. Asserting the guard from a context that cannot provoke it
-    /// would make this test pass for the wrong reason.
+    /// <b>Provoked by putting a directory where the temp file goes</b>, rather than by marking
+    /// <c>spec.json</c> read-only. The obvious approach does not work, and finding out why was
+    /// worth the trip: the write is atomic (temp file, then <see cref="File.Move(string, string,
+    /// bool)"/>), and on POSIX that move is <c>rename(2)</c>, which checks write permission on
+    /// the <i>directory</i> and ignores the target file's own mode. A read-only
+    /// <c>spec.json</c> is therefore replaced quite happily — see
+    /// <see cref="ReplacesAReadOnlySnapshot"/>, which pins that as the deliberate behaviour it is
+    /// rather than leaving it as a surprise.
+    /// </para>
+    /// <para>
+    /// A directory at the temp path fails the write on Windows and POSIX alike, so this runs
+    /// everywhere and needs no privilege to set up. An earlier version of this test used the
+    /// read-only bit and an <c>Assert.Inconclusive</c> escape hatch for root; it silently skipped
+    /// on every local run and failed the moment CI executed it for real. A test that skips where
+    /// it is developed is not a test.
     /// </para>
     /// </summary>
     [TestMethod]
@@ -290,30 +303,47 @@ public class GenerateUrlSpecTests
         using var transport = new StubTransport(Spec);
         await RunAsync(transport);
 
-        var snapshot = new FileInfo(SnapshotPath);
-        snapshot.IsReadOnly = true;
+        Directory.CreateDirectory(SnapshotPath + ".tmp");
+
+        var (exitCode, error) = await RunCapturingErrorAsync(transport);
+
+        exitCode.ShouldBe(ExitCode.ToolError);
+        error.ShouldNotContain("unexpected failure",
+            customMessage: "an unwritable checkout is an adopter's condition, not a crash");
+        error.ShouldContain(SpecSnapshot.FileName,
+            customMessage: "a refusal names the file it could not write");
+    }
+
+    /// <summary>
+    /// The other side of the <c>rename(2)</c> behaviour described on
+    /// <see cref="ExplainsASnapshotThatCannotBeWritten"/>: a read-only <c>spec.json</c> is
+    /// replaced rather than refused.
+    /// <para>
+    /// Pinned deliberately rather than left as an accident of the atomic write. It is the right
+    /// outcome — <c>spec.json</c> is generator-owned (§5), so `generate` overwriting it is the
+    /// whole contract, and a read-only bit on a file the tool owns should not stop the tool
+    /// owning it. But it <i>is</i> a behaviour change from a plain <c>File.WriteAllText</c>,
+    /// which would have failed here, and an undocumented behaviour change is how the next reader
+    /// concludes the guard above is broken.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ReplacesAReadOnlySnapshot()
+    {
+        using var transport = new StubTransport(Spec);
+        await RunAsync(transport);
+
+        var snapshot = new FileInfo(SnapshotPath) { IsReadOnly = true };
         try
         {
-            using var probe = File.OpenWrite(SnapshotPath);
-            Assert.Inconclusive(
-                "this process can write a read-only file (running as root?), so the guard " +
-                "cannot be provoked here");
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // The read-only bit is enforced for this process — the precondition holds.
-        }
+            var (exitCode, report) = await RunAsync(transport);
 
-        try
-        {
-            var (exitCode, error) = await RunCapturingErrorAsync(transport);
-
-            exitCode.ShouldBe(ExitCode.ToolError);
-            error.ShouldNotContain("unexpected failure");
-            error.ShouldContain(SpecSnapshot.FileName);
+            exitCode.ShouldBe(ExitCode.Ok, report);
+            File.ReadAllText(SnapshotPath).ShouldBe(SpecSnapshot.Reprint(Spec));
         }
         finally
         {
+            snapshot.Refresh();
             snapshot.IsReadOnly = false;
         }
     }

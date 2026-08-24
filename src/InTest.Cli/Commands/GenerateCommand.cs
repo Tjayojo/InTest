@@ -394,6 +394,17 @@ public static class GenerateCommand
     /// <see cref="File.Move(string, string, bool)"/> rather than <c>File.Replace</c>: replace
     /// requires the destination to exist, which it does not on the first run.
     /// </para>
+    /// <para>
+    /// <b>One behaviour this changes, deliberately.</b> On POSIX the move is <c>rename(2)</c>,
+    /// which checks write permission on the <i>directory</i> and ignores the target file's own
+    /// mode — so a read-only <c>spec.json</c> is replaced rather than refused, where a plain
+    /// <c>File.WriteAllText</c> would have failed. That is the right outcome (<c>spec.json</c> is
+    /// generator-owned per §5, and `generate` overwriting it is the entire contract) but it is a
+    /// change, so it is stated here and pinned by
+    /// <c>GenerateUrlSpecTests.ReplacesAReadOnlySnapshot</c> rather than left for someone to
+    /// rediscover as a bug report. What still fails, and is what the catch below is for, is an
+    /// unwritable <i>directory</i>: a full disk, a read-only checkout, a permissions problem.
+    /// </para>
     /// </summary>
     private static async Task WriteSnapshotAsync(
         string snapshotPath, string content, CancellationToken cancellationToken)
