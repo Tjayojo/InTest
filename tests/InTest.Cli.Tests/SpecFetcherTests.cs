@@ -219,6 +219,81 @@ public class SpecFetcherTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
+    /// <summary>
+    /// A failure that happens while the <i>body</i> is being read, not while the headers are.
+    /// This is a real gap that reaching for <see cref="HttpCompletionOption.ResponseHeadersRead"/>
+    /// opens up and that a naive implementation misses: with that option the <c>GetAsync</c> call
+    /// returns as soon as the headers arrive, so a server that hangs, or drops the connection,
+    /// part-way through a large document fails <i>after</i> the code that translates transport
+    /// exceptions into adopter-facing sentences has already run.
+    /// <para>
+    /// Left unhandled it escapes as a raw <c>TaskCanceledException</c> and reaches
+    /// <c>Program</c>'s crash floor, so a slow API — an entirely ordinary thing for a spec
+    /// endpoint to be — is reported to the adopter as "intest: unexpected failure". Same exit
+    /// code, and a sentence that blames the tool for the network.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ReportsATimeoutThatHappensWhileReadingTheBody()
+    {
+        var reason = await ReasonForAsync(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ThrowingStream(() => new TaskCanceledException("timed out"))),
+        });
+
+        reason.ShouldContain("30 seconds");
+        reason.ShouldContain(Url, Case.Sensitive);
+    }
+
+    /// <summary>The same gap, reached by a connection dropped mid-body rather than a stall.</summary>
+    [TestMethod]
+    public async Task ReportsAConnectionLostWhileReadingTheBody()
+    {
+        var reason = await ReasonForAsync(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ThrowingStream(
+                () => new HttpRequestException("The response ended prematurely."))),
+        });
+
+        reason.ShouldContain(Url, Case.Sensitive);
+        reason.ShouldContain("ended prematurely");
+    }
+
+    /// <summary>Cancellation stays cancellation even when it happens mid-body.</summary>
+    [TestMethod]
+    public async Task PropagatesCancellationThatHappensWhileReadingTheBody()
+    {
+        using var cancelled = new CancellationTokenSource();
+        using var transport = new StubTransport(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ThrowingStream(() =>
+            {
+                cancelled.Cancel();
+                return new TaskCanceledException("cancelled");
+            })),
+        });
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => SpecFetcher.FetchAsync(Url, transport, cancelled.Token));
+    }
+
+    /// <summary>A stream that fails on the first read, with whatever the test asks for.</summary>
+    private sealed class ThrowingStream(Func<Exception> failure) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw failure();
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default) => throw failure();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     [TestMethod]
     public async Task NamesTheUnderlyingReasonForATransportFailure()
     {

@@ -142,19 +142,33 @@ public static class SpecFetcher
         }
     }
 
+    /// <summary>
+    /// The whole exchange — headers <i>and</i> body — inside one translation of transport
+    /// exceptions into adopter-facing sentences.
+    /// <para>
+    /// <b>Both halves, deliberately.</b> An earlier version wrapped only the <c>GetAsync</c> call,
+    /// which is the obvious shape and is wrong here for a reason
+    /// <see cref="HttpCompletionOption.ResponseHeadersRead"/> introduces: that option makes
+    /// <c>GetAsync</c> return the moment the headers arrive, so a server that stalls or drops the
+    /// connection part-way through a large document fails <i>after</i> the translation has already
+    /// run. The raw <c>TaskCanceledException</c> then escaped to <c>Program</c>'s crash floor and
+    /// an entirely ordinary slow API was reported as "intest: unexpected failure". Pinned by
+    /// <c>SpecFetcherTests.ReportsATimeoutThatHappensWhileReadingTheBody</c> and its
+    /// connection-lost twin.
+    /// </para>
+    /// <para>
+    /// The <see cref="SpecLoadException"/>s thrown inside the <c>try</c> — a failed status, an
+    /// oversized or empty or YAML body — pass through untouched, because only the two transport
+    /// exception types are caught. A catch-all here would re-wrap this type's own curated
+    /// messages as though the network had failed.
+    /// </para>
+    /// </summary>
     private static async Task<string> ReadAsync(
         HttpClient client, string url, CancellationToken cancellationToken)
     {
-        HttpResponseMessage response;
         try
         {
-            // ResponseHeadersRead, not the default ResponseContentRead: the Content-Length check
-            // below is only worth anything if it runs *before* the body has already been buffered
-            // into memory. With the default, an oversized response is fully downloaded and then
-            // reported as too large, which is the wrong order to do those two things in.
-            response = await client
-                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
+            return await ExchangeAsync(client, url, cancellationToken).ConfigureAwait(false);
         }
         catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -173,15 +187,26 @@ public static class SpecFetcher
         }
         catch (HttpRequestException ex)
         {
-            // Covers DNS failure, connection refused and TLS validation failure alike. The inner
-            // message is included rather than flattened to "could not be reached": those three
-            // have entirely different remedies, and the adopter cannot tell which one happened
-            // from a sentence that describes all of them equally well.
+            // Covers DNS failure, connection refused, TLS validation failure and a connection
+            // lost mid-body alike. The inner message is included rather than flattened to "could
+            // not be reached": those have entirely different remedies, and the adopter cannot
+            // tell which one happened from a sentence that describes all of them equally well.
             throw new SpecLoadException(
                 $"spec.source '{url}' could not be fetched: {ex.Message}", ex);
         }
+    }
 
-        using (response)
+    private static async Task<string> ExchangeAsync(
+        HttpClient client, string url, CancellationToken cancellationToken)
+    {
+        // ResponseHeadersRead, not the default ResponseContentRead: the Content-Length check
+        // below is only worth anything if it runs *before* the body has already been buffered
+        // into memory. With the default, an oversized response is fully downloaded and then
+        // reported as too large, which is the wrong order to do those two things in. See
+        // ReadAsync's doc comment for what this option costs and how that is paid for.
+        using (var response = await client
+            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .ConfigureAwait(false))
         {
             if (!response.IsSuccessStatusCode)
             {
