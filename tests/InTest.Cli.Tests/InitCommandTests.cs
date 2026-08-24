@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using InTest.Cli;
 using InTest.Cli.Commands;
 using InTest.Cli.Configuration;
+using InTest.Cli.Spec;
 using Shouldly;
 
 namespace InTest.Cli.Tests;
@@ -687,24 +688,68 @@ public class InitCommandTests
     }
 
     /// <summary>
-    /// The same reason the blank <c>--spec</c> guard gives: `init` must never write a config it
-    /// knows `generate` will reject. Measured before this guard existed —
-    /// <c>init --spec https://example.com/openapi.json</c> printed
-    /// "Initialised Orders.ApiTests. Next: `intest generate`." and exited <b>0</b>, writing the
-    /// whole scaffold, and only then did `generate` fail with
-    /// <c>Spec file not found: &lt;projectRoot&gt;\https://example.com/openapi.json</c> at exit 2.
+    /// A URL <c>--spec</c> scaffolds a project, and scaffolds it correctly: the URL is what
+    /// <c>intest.json</c> records as the source, while <c>&lt;InTestSpecSource&gt;</c> — which
+    /// names a local file the build can copy — points at the snapshot <c>generate</c> will write.
+    /// MSBuild cannot copy from <c>https://</c>, so those two must differ for a URL project, and
+    /// that difference is the whole shape of §9 expressed in a scaffold.
     /// <para>
-    /// So `init` did not merely fail to help: it actively confirmed the belief the help text had
-    /// created ("Path or URL"), and displaced the contradiction onto a different command, one
-    /// step later, phrased as a missing file. Refusing here is what makes the tool's own voice
-    /// agree with itself.
+    /// This replaces a refusal test. The defect that refusal was written for is still worth
+    /// recording, because it is why <c>--spec</c> is judged before the first write at all:
+    /// measured before any guard existed, <c>init --spec https://example.com/openapi.json</c>
+    /// printed "Initialised Orders.ApiTests. Next: `intest generate`." and exited <b>0</b>,
+    /// writing the whole scaffold, and only then did `generate` fail with
+    /// <c>Spec file not found: &lt;projectRoot&gt;\https://example.com/openapi.json</c> at exit 2 —
+    /// the contradiction displaced onto a different command, one step later, phrased as a missing
+    /// file. A malformed URL still reaches that outcome if it gets past the guard, which is what
+    /// <see cref="RefusesAMalformedUrlSpec"/> covers.
     /// </para>
     /// </summary>
     [TestMethod]
     [DataRow("https://example.com/openapi.json", DisplayName = "https")]
     [DataRow("http://example.com/openapi.json", DisplayName = "http")]
     [DataRow("HTTPS://EXAMPLE.COM/openapi.json", DisplayName = "uppercase scheme")]
-    public void RefusesAUrlSpecRatherThanScaffoldingAProjectGenerateWillReject(string spec)
+    public void ScaffoldsAUrlSpecSourcePointingTheBuildAtTheSnapshot(string spec)
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", spec).ShouldBe(ExitCode.Ok);
+
+        var config = ConfigLoader.Load(_root);
+        config.SpecSource.ShouldBe(spec,
+            "the URL is the source, and reaches intest.json exactly as it was typed");
+        config.SpecSourceIsUrl.ShouldBeTrue();
+
+        var doc = XDocument.Load(Path.Combine(_root, "Orders.ApiTests.csproj"));
+        doc.Descendants("InTestSpecSource").Single().Value.ShouldBe("spec.json",
+            "MSBuild cannot copy from https:// — the build points at the snapshot, not the source");
+    }
+
+    /// <summary>
+    /// The <c>.gitattributes</c> pin for the snapshot. It is scaffolded unconditionally — for a
+    /// path source too — because `init` cannot know a project will never switch to a URL, and a
+    /// pin matching no file costs nothing.
+    /// </summary>
+    [TestMethod]
+    public void PinsTheSpecSnapshotToCrlfInGitattributes()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
+
+        File.ReadAllText(Path.Combine(_root, ".gitattributes"))
+            .ShouldContain("spec.json text eol=crlf",
+                customMessage: "spec.json is committed, InTest-written and pure CRLF, like the " +
+                               "three paths already pinned beside it");
+    }
+
+    /// <summary>
+    /// The one value that clears <see cref="SpecLoader.IsUrl"/>'s prefix test and is still not a
+    /// URL anything can fetch. What survives of the deleted blanket URL refusal, and for the same
+    /// reason it existed: without it this reaches <c>Path.Combine</c> and resurfaces as the
+    /// mangled-path defect described on
+    /// <see cref="ScaffoldsAUrlSpecSourcePointingTheBuildAtTheSnapshot"/>.
+    /// </summary>
+    [TestMethod]
+    [DataRow("https://", DisplayName = "scheme only")]
+    [DataRow("http://", DisplayName = "scheme only, http")]
+    public void RefusesAMalformedUrlSpec(string spec)
     {
         var (exitCode, error) = RunCapturingError(_root, "Orders.ApiTests", spec);
 

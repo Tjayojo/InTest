@@ -29,13 +29,20 @@
          untouched, even though `dotnet pack` alone does not populate the cache at all -- it is
          specifically *restore* that is dangerous, and every path that restores is covered here.
       2. Every package this script packs is stamped with a version that can never collide with a
-         real release: 0.1.0-local.<UTC timestamp>.pid<process id>. Directory.Build.props pins
-         <Version>0.1.0</Version> for the whole repo (deliberately, per CLAUDE.md -- not to be
-         edited by this script), so the override goes in as an MSBuild global property via
-         `-p:Version=`, which wins over a plain, unconditional property assignment in an
-         imported props file. This is defence in depth: even if defence 1 somehow failed, or a
-         human ran a manual `dotnet pack`/`dotnet restore` afterwards against a leftover local
-         feed, a `0.1.0-local.*` package can never shadow a published `0.1.0`.
+         real release: 0.1.0-local.<UTC timestamp>.pid<process id>. Version is no longer a static
+         pin in Directory.Build.props to override -- docs/superpowers/plans/
+         2026-08-23-trunk-based-versioning.md's [version-from-git] (Task 2) replaced that with
+         MinVer, which derives Version/PackageVersion/InformationalVersion from git tags and
+         commit height at build time and overwrites a plain `-p:Version=` global property with its
+         own computed value regardless (measured directly: `-p:Version=` alone silently stopped
+         taking effect the moment MinVer was added, which is exactly the kind of "green build,
+         wrong artifact" failure this repository's own CLAUDE.md warns about). MinVer's own
+         supported override hook is `MinVerVersionOverride` -- an MSBuild property MinVer itself
+         reads and treats as authoritative, skipping its git-based computation entirely -- so this
+         script passes the local-only version as `-p:MinVerVersionOverride=` instead. This is
+         defence in depth: even if defence 1 somehow failed, or a human ran a manual `dotnet
+         pack`/`dotnet restore` afterwards against a leftover local feed, a `0.1.0-local.*` package
+         can never shadow a published `0.1.0`.
 
     Measured experiment this script's design rests on (see the task's own notes, reproduced
     here so the reasoning travels with the code rather than living only in a chat transcript):
@@ -100,7 +107,7 @@
 # the same reasoning has to appear twice, one copy is authoritative and the other points at it --
 # never two copies that must agree by discipline. A bash port of this script would be exactly
 # that: every step above (the version stamp format, the NUGET_PACKAGES redirection, the exact
-# sequence of expected exit codes, the csproj patch, the contrived version-mismatch test) would
+# sequence of expected exit codes, the csproj-reference verification, the contrived version-mismatch test) would
 # exist twice, and the two would drift the first time either one changed without the other.
 #
 # PowerShell 7 (`pwsh`) is itself cross-platform -- it ships and runs natively on Linux and macOS,
@@ -174,11 +181,13 @@ New-Item -ItemType Directory -Force -Path $LocalFeed, $NuGetPackagesScratch, $Sc
 # search, so preserving the relative layout (scratch-root/Directory.Build.props two levels above
 # scratch-root/src/InTest.Cli/InTest.Cli.csproj, matching the real repo) is what makes that search
 # land on these copies rather than either finding nothing or, worse, finding the real repo's if
-# the scratch root ever happened to sit under it. `assets/` is copied for the same reason, one
-# level shallower: both csproj files pack `../../assets/icon.png` by a relative path, so the
-# scratch copy needs `assets/` sitting at the same two-levels-above-the-project spot the real repo
-# has it, or `dotnet pack` fails with "Could not find a part of the path" -- confirmed by direct
-# experiment, this script failed exactly that way before `assets/` was added here.
+# the scratch root ever happened to sit under it. `assets/` and `THIRD-PARTY-NOTICES.md` are copied
+# for the same reason, one level shallower: InTest.Cli.csproj packs `../../assets/icon.png` and
+# `../../THIRD-PARTY-NOTICES.md` by relative path, InTest.Runtime.csproj packs
+# `../../assets/icon.png`, so the scratch copy needs both sitting at the same
+# two-levels-above-the-project spot the real repo has them, or `dotnet pack` fails ("Could not
+# find a part of the path" / NU5019 "File not found") -- confirmed by direct experiment for both,
+# this script failed exactly those ways before they were added here.
 #
 # This used to shell out to robocopy, which does not exist outside Windows -- a Linux contributor
 # following CONTRIBUTING.md's "use this script" rule could not, since the very first thing the
@@ -221,6 +230,11 @@ function Copy-SourceTree {
 
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'Directory.Build.props') -Destination $SrcCopyRoot
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'Directory.Packages.props') -Destination $SrcCopyRoot
+# InTest.Cli.csproj packs ../../THIRD-PARTY-NOTICES.md by the same relative path as assets/
+# above, for the same reason: the scratch copy needs it at the matching two-levels-above-the-
+# project spot or dotnet pack fails NU5019 "File not found" -- confirmed by direct experiment,
+# the same way the assets/ gap was.
+Copy-Item -LiteralPath (Join-Path $RepoRoot 'THIRD-PARTY-NOTICES.md') -Destination $SrcCopyRoot
 Copy-SourceTree -From (Join-Path $RepoRoot 'assets') -To (Join-Path $SrcCopyRoot 'assets')
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Cli') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Cli')
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime')
@@ -279,19 +293,20 @@ try {
     Write-Host "Spec:           $Spec"
 
     # ---- Pack InTest.Cli and InTest.Runtime at the local-only version into the scratch feed.
-    # -p:Version overrides Directory.Build.props's <Version>0.1.0</Version>: a `-p:` value is a
-    # global MSBuild property, and a plain (un-Condition-guarded) <Version>0.1.0</Version> in an
-    # imported props file cannot overwrite a global property -- the global value wins for the
-    # whole build. Confirmed below by asserting the packed .nupkg is actually named with
-    # $LocalVersion, not silently packed at 0.1.0 anyway.
+    # -p:MinVerVersionOverride tells MinVer to skip its own git-based computation and use this
+    # value verbatim -- a plain `-p:Version=` no longer works for this (see the header comment's
+    # defence 2 for the measured reason: MinVer overwrites it unconditionally). Confirmed below by
+    # asserting the packed .nupkg is actually named with $LocalVersion, not silently packed at
+    # whatever MinVer would otherwise have computed for this non-git source copy (MINVER1001,
+    # "0.1.0-preview.0" -- see Copy-SourceTree's own header for why this copy has no .git at all).
     Invoke-Dotnet -StepName 'pack InTest.Cli' -Arguments @(
         'pack', $CliProject, '-c', 'Release',
-        "-p:Version=$LocalVersion",
+        "-p:MinVerVersionOverride=$LocalVersion",
         '-o', $LocalFeed
     )
     Invoke-Dotnet -StepName 'pack InTest.Runtime' -Arguments @(
         'pack', $RuntimeProject, '-c', 'Release',
-        "-p:Version=$LocalVersion",
+        "-p:MinVerVersionOverride=$LocalVersion",
         '-o', $LocalFeed
     )
 
@@ -306,41 +321,41 @@ try {
     $cliPackage = Join-Path $LocalFeed "InTest.Cli.$LocalVersion.nupkg"
     $runtimePackage = Join-Path $LocalFeed "InTest.Runtime.$LocalVersion.nupkg"
     if (-not (Test-Path $cliPackage)) {
-        throw "Expected package not found: $cliPackage -- the -p:Version override did not take effect as expected."
+        throw "Expected package not found: $cliPackage -- the -p:MinVerVersionOverride override did not take effect as expected."
     }
     if (-not (Test-Path $runtimePackage)) {
-        throw "Expected package not found: $runtimePackage -- the -p:Version override did not take effect as expected."
+        throw "Expected package not found: $runtimePackage -- the -p:MinVerVersionOverride override did not take effect as expected."
     }
     Write-Host "Confirmed both packages carry the local-only version: $LocalVersion" -ForegroundColor Green
 
     # ---- Bootstrap: `intest init` via `dotnet run`, the same way a project has no `intest` on
     # PATH to run it with yet (docs/getting-started.md Phase 2's note; F13 in v0-acceptance.md).
-    # Stamped with the same -p:Version, so intest.json's intestVersion and
+    # Stamped with the same -p:MinVerVersionOverride, so intest.json's intestVersion and
     # .config/dotnet-tools.json's tool pin both come out as $LocalVersion, matching what was just
     # packed above -- no separate patch step needed for either of those two files.
     New-Item -ItemType Directory -Force -Path $ScaffoldDir | Out-Null
     Invoke-Dotnet -StepName 'intest init (bootstrapped via dotnet run)' -WorkingDirectory $ScaffoldDir -Arguments @(
         'run', '--project', $CliProject, '-c', 'Release',
-        "-p:Version=$LocalVersion",
+        "-p:MinVerVersionOverride=$LocalVersion",
         '--', 'init', '--name', $ProjectName, '--spec', $Spec
     )
 
-    # ---- Patch the one place `init` hardcodes "InTest.Runtime" ... Version="0.1.0" (verified at
-    # src/InTest.Cli/Commands/InitCommand.cs -- the scaffolded .csproj's PackageReference version
-    # is a literal, not derived from CliVersion.Current the way intestVersion and the tool pin
-    # are). Without this, the scaffold would ask for InTest.Runtime 0.1.0, which was never packed
-    # under that number here -- restore would correctly fail rather than silently resolving the
-    # wrong thing, but the point of this script is to prove the *real* local build compiles, so
-    # point it at what was actually packed.
+    # ---- Verify, do not patch: docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's
+    # [scaffold-reads-itself] (Task 1) replaced InitCommand.cs's hardcoded
+    # Include="InTest.Runtime" Version="0.1.0" with an interpolation of CliVersion.Current, so
+    # `intest init` -- run above via `dotnet run ... -p:MinVerVersionOverride=$LocalVersion -- init ...` --
+    # already scaffolds InTest.Runtime at $LocalVersion on its own; this script no longer has
+    # anything to patch. What used to be a patch step is now a verification of that fact: this is
+    # the "confirm the generated .csproj references that same version" proof this script exists
+    # to run end to end, and its absence would otherwise surface only indirectly, as a NU1102
+    # restore failure several steps later at `dotnet build`, pointing at the wrong cause.
     $csprojPath = Join-Path $ScaffoldDir "$ProjectName.csproj"
     $csprojText = Get-Content -Raw -LiteralPath $csprojPath
-    $needle = 'Include="InTest.Runtime" Version="0.1.0"'
+    $needle = "Include=`"InTest.Runtime`" Version=`"$LocalVersion`""
     $matchCount = ([regex]::Matches($csprojText, [regex]::Escape($needle))).Count
     if ($matchCount -ne 1) {
-        throw "Expected exactly one '$needle' in $csprojPath, found $matchCount -- InitCommand's scaffolded csproj shape has changed; update this script's patch logic."
+        throw "Expected exactly one '$needle' in $csprojPath, found $matchCount -- either InitCommand's scaffolded csproj shape changed, or [scaffold-reads-itself] regressed and the scaffold is no longer following CliVersion.Current."
     }
-    $csprojText = $csprojText.Replace($needle, "Include=`"InTest.Runtime`" Version=`"$LocalVersion`"")
-    Set-Content -LiteralPath $csprojPath -Value $csprojText -NoNewline
 
     # ---- nuget.config for the scaffold only: <clear/> so nothing ambient (a stray user-level
     # feed, credentials, anything else configured on this machine) can leak in and make this run

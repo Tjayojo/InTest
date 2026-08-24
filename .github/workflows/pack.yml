@@ -1,0 +1,145 @@
+name: Pack
+
+# Task 3 of docs/superpowers/plans/2026-08-23-trunk-based-versioning.md ("CI produces the
+# versions"). [tag-is-the-release]: every merge to main produces a versioned artifact; every tag
+# produces a publishable one. Neither is published anywhere -- see "What this workflow
+# deliberately does not do" at the bottom of this file for [publish-stays-manual]'s scope.
+#
+# A separate workflow file, not a fourth job in build-and-test.yml -- decided deliberately, not
+# defaulted to. GitHub Actions has no per-job trigger; every job in one workflow file shares that
+# file's `on:` block. build-and-test.yml's `on.pull_request` is exactly what this workflow must
+# NOT run under: [tag-is-the-release] promises an artifact for every *merge*, not every PR, and
+# packing (which has never run in CI before this task -- see the job below) on every PR push would
+# both slow down the fast PR feedback loop [fast-first] exists to protect and produce
+# preview.0.N-labelled artifacts for branches that may never merge. Folding this into
+# build-and-test.yml would need an `if:` guard on every step to reproduce exactly what a second,
+# narrower `on:` block already expresses natively. `on.push.tags` here fires for a tag on *any*
+# branch, not only main -- also correct: nothing in [tag-is-the-release] requires a release tag to
+# sit on main's current tip at the moment it is cut.
+#
+# Action pins, matrix shape and cache-key convention are copied from build-and-test.yml
+# deliberately, not reinvented -- see that file's own comments for the fuller reasoning behind
+# each; only the actions/upload-artifact pin below is new to this file.
+on:
+  push:
+    branches: [main]
+    tags:
+      - '*'
+
+# Same reasoning as build-and-test.yml: this workflow writes nothing to the repository, opens no
+# issues, and needs no token scope beyond reading the checkout. It also never publishes a package
+# -- see the closing comment block.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  pack:
+    name: Pack (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        # Identical pin and identical [shallow-clone-is-a-defect] reasoning to build-and-test.yml's
+        # three checkout steps -- MinVer needs full tag history to compute a correct version at
+        # all here, not merely to avoid a warning. See that file's own comment for how this SHA
+        # was resolved and verified.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        # Same key shape as build-and-test.yml's three jobs, and deliberately identical rather
+        # than workflow-scoped: a runner that already populated this cache key for
+        # fast/golden/dogfood on the same push should not have to restore the same packages from
+        # nuget.org a second time just because this job lives in a different workflow file.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # Packing has only ever been exercised on Windows before this task (the plan's own words) --
+      # this step is the first time either platform's packing is proven inside CI, and the matrix
+      # above runs it on both rather than trusting Windows to stand in for Linux, the same
+      # [both-platforms] reasoning (docs/superpowers/plans/2026-08-22-intest-ci.md) already applied
+      # to the three test jobs.
+      #
+      # scripts/ci/pack-and-verify.ps1 does the real work: packs both projects at whatever version
+      # this checkout's git history resolves (Task 3 Step 1/2), unzips both .nuspec files rather
+      # than trusting `dotnet pack`'s exit code, and confirms a scaffold built from the just-packed
+      # InTest.Cli.dll references the exact InTest.Runtime version that was actually packed (Task 3
+      # Step 3 -- [scaffold-reads-itself] end to end against a packed build). See that script's own
+      # header for the full design.
+      #
+      # -ExpectedTag is populated only when this run was triggered by a tag push (Task 3 Step 4);
+      # left empty for an ordinary push to main, where [tag-is-the-release] makes no exact-version
+      # promise to check. github.ref_type is 'tag' for a tag push and 'branch' for a branch push.
+      - name: Pack and verify InTest.Cli / InTest.Runtime
+        run: >-
+          ./scripts/ci/pack-and-verify.ps1
+          -RepoRoot ${{ github.workspace }}
+          -OutputDir ${{ runner.temp }}/intest-pack
+          -ScaffoldRoot ${{ runner.temp }}/intest-pack-scaffold
+          -ExpectedTag '${{ github.ref_type == 'tag' && github.ref_name || '' }}'
+
+      - name: Upload packed artifacts
+        # actions/upload-artifact, pinned the same way as every other action in this repository
+        # ([pin-actions-by-sha], CONTRIBUTING.md) -- resolved 2026-08-23 via
+        #   gh api repos/actions/upload-artifact/releases/latest --jq '.tag_name'    # -> v7.0.1
+        #   gh api repos/actions/upload-artifact/git/refs/tags/v7.0.1 --jq '.object.sha'
+        # and the resulting commit's date/message checked against the release before use, not
+        # trusted on the ref name alone -- same discipline as every other pin in this repository.
+        #
+        # This is the artifact [tag-is-the-release] asks for: downloadable from the Actions run
+        # itself, not published anywhere -- see the closing comment block. Named per matrix leg so
+        # the two OS uploads in one run don't collide: actions/upload-artifact v4+ refuses to
+        # append to an artifact name that already exists in the same run, by design (unlike v3,
+        # which merged same-named uploads silently).
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: intest-packages-${{ matrix.os }}
+          path: ${{ runner.temp }}/intest-pack/*.nupkg
+          if-no-files-found: error
+
+      - name: Confirm the working tree is still clean
+        # Same belt-and-suspenders as build-and-test.yml's `dogfood` job: packing and the
+        # scaffold-verification step both write outside github.workspace by construction
+        # (runner.temp on both sides), so this confirms that isolation rather than trusting it
+        # silently.
+        run: |
+          $status = git status --porcelain
+          if ($status) {
+            Write-Host "::error::Working tree is not clean after packing:"
+            Write-Host $status
+            exit 1
+          }
+          Write-Host "Working tree clean."
+
+# ---- What this workflow deliberately does not do ------------------------------------------------
+# No step here runs `dotnet nuget push`, and none will be added to this file -- publishing is
+# handled by a wholly separate workflow, .github/workflows/release.yml, and deliberately kept out
+# of this one. [publish-stays-manual], which used to record this file as the reason nothing
+# published, is itself superseded now -- see that section's own record in
+# docs/superpowers/plans/2026-08-23-trunk-based-versioning.md for why its premises (no ID
+# reserved, the API key being the owner's alone) turned out not to be the blocker they looked like.
+# What replaced it is NuGet Trusted Publishing (OIDC): no API key is stored anywhere in this
+# repository, in this file or release.yml, and this file still cannot push -- not because a key is
+# missing, but because it was never granted the `id-token: write` permission release.yml's publish
+# job carries, and it triggers on every push to main (see the header comment above), which
+# release.yml's narrower tag-pattern trigger and its `environment: nuget-release` gate are both
+# built to keep off the merge-to-main path -- see release.yml's own header for the full reasoning.
+# This workflow's job remains only to prove an artifact packs and matches its scaffold; whether
+# nuget.org actually accepts what gets pushed (including the .snupkg-under-tools/ question the
+# readiness spec flags as open) is exercised by release.yml's real push, not by this file, and
+# release.yml's own header records exactly how much of that is still unexercised as of this task.

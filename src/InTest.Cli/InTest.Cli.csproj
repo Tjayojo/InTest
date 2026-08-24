@@ -4,10 +4,14 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>intest</ToolCommandName>
     <PackageId>InTest.Cli</PackageId>
+    <Description>Generates a committed, owned MSTest project that exercises a deployed API over real HTTP, from its OpenAPI document.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>testing;mstest;openapi;api-testing;dotnet-tool;test-generation</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RootNamespace>InTest.Cli</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
     <PackageReference Include="Microsoft.OpenApi" />
     <PackageReference Include="NJsonSchema" />
     <PackageReference Include="Scriban" />
@@ -21,6 +25,12 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <!-- Only InTest.Cli bundles third-party binaries (PackAsTool packs dotnet publish output,
+         including every dependency DLL); InTest.Runtime's package is just its own DLL with
+         declared PackageReference dependencies, so nothing third-party is redistributed there —
+         see the readiness spec §5. -->
+    <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

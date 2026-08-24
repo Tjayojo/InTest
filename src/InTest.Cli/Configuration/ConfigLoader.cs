@@ -43,12 +43,14 @@ public static class ConfigLoader
     public const int SupportedSchemaVersion = 1;
 
     private const string SpecSourceRule =
-        "It must be the path to the OpenAPI document, relative to the project directory — " +
-        "for example \"../Orders/bin/Debug/net10.0/orders.json\".";
+        "It must be the path to the OpenAPI document, relative to the project directory — for " +
+        "example \"../Orders/bin/Debug/net10.0/orders.json\" — or the URL it is served from, for " +
+        "example \"https://orders-staging.example.com/swagger/v1/swagger.json\".";
 
     private const string SpecSectionRule =
         "It must declare spec.source, the path to the OpenAPI document relative to the project " +
-        "directory — for example \"spec\": { \"source\": \"../Orders/bin/Debug/net10.0/orders.json\" }.";
+        "directory (or the URL it is served from) — for example " +
+        "\"spec\": { \"source\": \"../Orders/bin/Debug/net10.0/orders.json\" }.";
 
     private const string ProjectSectionRule =
         "It must declare project.rootNamespace and project.testBaseClass — for example " +
@@ -114,21 +116,27 @@ public static class ConfigLoader
             throw new ConfigLoadException($"spec.source in {FileName} is empty. {SpecSourceRule}");
         }
 
-        // The empty source's twin, and it needed the same treatment for the same reason: it does
-        // not fail on its own terms either. Path.Combine(projectRoot, "https://example.com/x.json")
-        // appends the URL as a relative segment, so SpecLoader reported "Spec file not found:"
-        // against a path spliced out of a Windows separator and a URL — a path the adopter never
-        // wrote, phrased as a file that is merely missing rather than as a kind of source InTest
-        // cannot read. Measured, not inferred: the message was
+        // A URL spec.source is now a supported kind of source (§9), so what is left to check is
+        // that it is a well-formed one. The question this guard asks changed; the reason it sits
+        // here did not. Until URL support landed, this branch refused every URL outright, because
+        // Path.Combine(projectRoot, "https://example.com/x.json") appends the URL as a relative
+        // segment and SpecLoader then reported "Spec file not found:" against a path spliced out
+        // of a Windows separator and a URL — a path the adopter never wrote, phrased as a file
+        // that is merely missing. Measured at the time, not inferred:
         // "Spec file not found: <projectRoot>\https://example.com/openapi.json" at exit 2.
         //
-        // Refused here rather than only at `init` because `init` is not how most URLs get here.
-        // The help text said "Path or URL" and getting started's Phase 1 instructed adopters to
-        // "Point spec.source at the URL" — a hand edit, which no argument guard sees. One loader
-        // covers generate and fixtures repair both, which is this type's whole reason for being.
-        if (SpecLoader.IsUrl(specSource))
+        // A value that clears SpecLoader.IsUrl but not TryValidateUrl ("https://" alone) would
+        // reach exactly that defect today, which is why the guard survives its own original
+        // purpose rather than being deleted with it.
+        //
+        // Judged here rather than only at `init` because `init` is not how most URLs get here.
+        // getting started's Phase 1 instructs adopters to point spec.source at the URL — a hand
+        // edit, which no argument guard sees. One loader covers generate and fixtures repair
+        // both, which is this type's whole reason for being.
+        var specSourceIsUrl = SpecLoader.IsUrl(specSource);
+        if (specSourceIsUrl && !SpecFetcher.TryValidateUrl(specSource, "spec.source", out var urlReason))
         {
-            throw new ConfigLoadException(SpecLoader.UrlReason("spec.source", specSource, SpecSourceRule));
+            throw new ConfigLoadException($"{urlReason} {SpecSourceRule}");
         }
 
         var project = RequireSection(root, "project", ProjectSectionRule);
@@ -152,7 +160,7 @@ public static class ConfigLoader
                 $"{baseClassReason} Change project.testBaseClass in {FileName} — for example \"Orders.ApiTests.OrdersTestBase\".");
         }
 
-        return new LoadedConfig(specSource, rootNamespace, testBaseClass, intestVersion);
+        return new LoadedConfig(specSource, rootNamespace, testBaseClass, intestVersion, specSourceIsUrl);
     }
 
     /// <summary>

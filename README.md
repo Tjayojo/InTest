@@ -30,12 +30,17 @@ or in a pull request, never as part of the deployment pipeline.
 > extending it to cover them is still open work. Until then, "verified against three sample APIs"
 > is a claim about `init`/`generate`/`fixtures repair` only.
 >
+> **A URL `spec.source` now works** (§9): `generate` fetches the document, writes it into the
+> project as a committed `spec.json` snapshot, and everything downstream — `generate --check`,
+> `fixtures repair` — reads that snapshot rather than the network, so CI stays hermetic. JSON
+> only; the fetch is anonymous, so an authenticated Swagger endpoint still needs the fetch-it-
+> yourself route below. This has unit and end-to-end coverage but has **not** been through an
+> acceptance run against a live Swagger endpoint, so it is not in `docs/v0-acceptance.md`.
+>
 > **Not yet built:** variation tests, `intest survey`, `intest fixtures promote`,
-> `intest assertions add`, `intest generate --emit-plan`, YAML input, and **a URL `spec.source`**
-> — the OpenAPI document must be a local path today. `init` and `generate` both refuse a URL
-> outright rather than letting it fail as a mangled path; the `spec.json` snapshot that would
-> make a URL source work is designed (§9) and not written. Packages are unpublished and the IDs
-> are not reserved, so you cannot install this yet — build from source.
+> `intest assertions add`, `intest generate --emit-plan`, and YAML input — from a file or a URL
+> alike; a URL serving YAML is refused by name rather than failing as a parse error. Packages are
+> unpublished and the IDs are not reserved, so you cannot install this yet — build from source.
 >
 > The design spec is still the source of truth and is worth reading before the code:
 > [`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md)
@@ -66,7 +71,7 @@ Read these before evaluating — they are firm for v1, and they rule InTest out 
 |---|---|
 | Test project TFM | `net10.0`. Independent of your API's TFM — an API on `net8.0` is fine |
 | Test framework | **MSTest only in v1.** xUnit and NUnit are the highest-priority v2 work, and the architecture is built to keep them additive — but today, if you are standardised on either, InTest is not for you yet |
-| Spec | OpenAPI 3.x, JSON or YAML, local file or URL. **Today: JSON, local file only** |
+| Spec | OpenAPI 3.x, JSON or YAML, local file or URL. **Today: JSON only** — a local file, or a URL InTest can reach anonymously |
 | Target | A deployed, reachable API |
 
 ## What day one actually looks like

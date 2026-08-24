@@ -29,3 +29,13 @@
 # eol=crlf changes nothing already committed — the object database was, and remains, LF-normalized
 # by `* text=auto` above; only checkout was ever platform-dependent, and this makes it uniform.
 *.cs text eol=crlf
+
+# assets/icon.png ships inside both packed .nupkg files. It is safe under `* text=auto` today only
+# because Git's binary heuristic sees the PNG's NULs and skips conversion (measured across an
+# autocrlf=true clone: byte-identical) — pinned explicitly rather than left to that heuristic, the
+# same reasoning as every other rule in this file. assets/icon.svg is the master the PNG is
+# rendered from and is not itself packed, but its line endings genuinely do vary with `text=auto`,
+# so a CRLF and an LF checkout would start a re-render from different bytes; pinned to this repo's
+# current eol=crlf convention (see [crlf-everywhere] above) for the same reason *.cs is.
+*.png binary
+*.svg text eol=crlf
