@@ -61,6 +61,20 @@ public static class SpecFetcher
     /// the same answer either way rather than one sentence about YAML and one about a malformed
     /// document.
     /// </summary>
+    /// <summary>
+    /// What to say about a body that is not JSON and does not look like YAML either. The case
+    /// this exists for is the most likely mistake in this whole feature: pointing spec.source at
+    /// the Swagger <i>UI</i> page rather than the document it renders. That arrives as
+    /// <c>text/html</c> (so the Content-Type check does not fire) beginning
+    /// <c>&lt;!DOCTYPE html&gt;</c> (so the YAML sniff does not fire either), and answering it
+    /// with <see cref="YamlReason"/> would be a confident, wrong diagnosis — sending the adopter
+    /// hunting for a YAML/JSON toggle that has nothing to do with their problem.
+    /// </summary>
+    internal const string NotJsonReason =
+        "InTest reads OpenAPI documents as JSON. Check that spec.source names the document " +
+        "itself — a Swagger UI page, a login redirect or an error page is not the document, " +
+        "even when the URL that serves it looks right.";
+
     internal const string YamlReason =
         "The document appears to be YAML. InTest reads OpenAPI documents as JSON; YAML input is " +
         "designed but not built, from a file or a URL alike. Point spec.source at the JSON form " +
@@ -123,15 +137,39 @@ public static class SpecFetcher
         // a load balancer or an http->https upgrade redirects routinely, and refusing to follow
         // would reject a working URL for no benefit. The dangerous direction — an https URL
         // redirected down to http, which would silently drop TLS from a fetch the adopter asked
-        // to be secure — is refused by SocketsHttpHandler itself and needs no policy here;
-        // SpecFetcherTests.RefusesAnHttpsToHttpRedirect pins that rather than trusting this
-        // comment.
+        // to be secure — is refused by SocketsHttpHandler itself, so no policy is needed here.
         transport ??= new SocketsHttpHandler();
 
         try
         {
-            using var client = new HttpClient(transport, disposeHandler: false) { Timeout = FetchTimeout };
-            return await ReadAsync(client, url, cancellationToken).ConfigureAwait(false);
+            // Timeout.InfiniteTimeSpan, and the linked token below carries the deadline instead.
+            //
+            // This is not a way of saying "no timeout": HttpClient.Timeout is the wrong mechanism
+            // here and quietly does much less than it appears to. It stops applying the moment
+            // GetAsync returns, which — because ExchangeAsync asks for ResponseHeadersRead — is
+            // as soon as the *headers* arrive. Reads on the content stream afterwards are covered
+            // by nothing: SocketsHttpHandler has no read timeout of its own.
+            //
+            // Measured, because this is the opposite of what the property name suggests: a server
+            // that sends `HTTP/1.1 200 OK`, a Content-Length, 19 bytes of body and then stalls
+            // leaves a Timeout=5s client waiting past 60 seconds with no exception, no output and
+            // no exit. `intest generate` hangs indefinitely on a half-open connection — exactly
+            // the outcome FetchTimeout exists to prevent, and a plausible one, since a spec
+            // endpoint stalling mid-response is what a struggling API under deployment looks like.
+            //
+            // A linked CancellationTokenSource covers the whole exchange instead: it cancels the
+            // header phase and every body read alike, so one deadline means one thing. The catch
+            // in ReadAsync still tests the *caller's* token to tell a genuine Ctrl+C from this
+            // deadline firing — see there.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(FetchTimeout);
+
+            using var client = new HttpClient(transport, disposeHandler: false)
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+
+            return await ReadAsync(client, url, deadline.Token, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -164,33 +202,59 @@ public static class SpecFetcher
     /// </para>
     /// </summary>
     private static async Task<string> ReadAsync(
-        HttpClient client, string url, CancellationToken cancellationToken)
+        HttpClient client, string url, CancellationToken deadline, CancellationToken cancellationToken)
     {
         try
         {
-            return await ExchangeAsync(client, url, cancellationToken).ConfigureAwait(false);
+            return await ExchangeAsync(client, url, deadline).ConfigureAwait(false);
         }
-        catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Genuine cancellation (Ctrl+C), not the timeout. HttpClient reports both as
-            // TaskCanceledException, so the token is the only thing that tells them apart —
-            // without this branch, cancelling a slow fetch would be reported to the adopter as
-            // "the server did not respond within 30 seconds", blaming a healthy server for a
-            // keystroke. Rethrown rather than wrapped: Program's crash floor already handles it.
+            // Genuine cancellation (Ctrl+C), not the deadline. Both arrive here as an
+            // OperationCanceledException and the caller's token is the only thing that separates
+            // them — without this branch, cancelling a slow fetch would be reported to the
+            // adopter as "the server did not respond within 30 seconds", blaming a healthy server
+            // for a keystroke. Rethrown rather than wrapped: Program's crash floor handles it.
+            //
+            // Tested on the *caller's* token deliberately, never on the linked one: the linked
+            // token is cancelled in both cases, so testing it would collapse the distinction this
+            // branch exists to draw.
             throw;
         }
-        catch (TaskCanceledException ex)
+        catch (OperationCanceledException ex)
         {
+            // Caught as OperationCanceledException rather than TaskCanceledException: the two
+            // phases surface differently — the header phase raises TaskCanceledException (a
+            // subclass), while a cancelled body read raises the base type — and catching only the
+            // subclass would let the body case escape to the crash floor.
             throw new SpecLoadException(
                 $"spec.source '{url}' did not respond within {FetchTimeout.TotalSeconds:0} seconds. " +
                 "Check that the API is running and that the URL is reachable from here.", ex);
         }
         catch (HttpRequestException ex)
         {
-            // Covers DNS failure, connection refused, TLS validation failure and a connection
-            // lost mid-body alike. The inner message is included rather than flattened to "could
-            // not be reached": those have entirely different remedies, and the adopter cannot
-            // tell which one happened from a sentence that describes all of them equally well.
+            // Covers DNS failure, connection refused and TLS validation failure. The inner
+            // message is included rather than flattened to "could not be reached": those have
+            // entirely different remedies, and the adopter cannot tell which one happened from a
+            // sentence that describes all of them equally well.
+            throw new SpecLoadException(
+                $"spec.source '{url}' could not be fetched: {ex.Message}", ex);
+        }
+        catch (IOException ex)
+        {
+            // A connection dropped part-way through the body, which is NOT an
+            // HttpRequestException however much it looks like one: since .NET 8 a premature EOF
+            // on the content stream raises System.Net.Http.HttpIOException, which derives from
+            // IOException. Measured against a real socket that sends headers, 19 bytes and then
+            // closes: "System.Net.Http.HttpIOException … The response ended prematurely, with at
+            // least 982 additional bytes expected. (ResponseEnded)", with `is
+            // HttpRequestException` false and `is IOException` true.
+            //
+            // Without this clause that escapes both of GenerateCommand's catches and reaches
+            // Program's crash floor as "intest: unexpected failure: HttpIOException" — the tool
+            // blamed for the network, and the exact sentence this type's messages exist to avoid.
+            // Kept as IOException rather than HttpIOException so an ordinary socket IOException
+            // is covered by the same clause.
             throw new SpecLoadException(
                 $"spec.source '{url}' could not be fetched: {ex.Message}", ex);
         }
@@ -314,18 +378,45 @@ public static class SpecFetcher
         mediaType.Contains("yaml", StringComparison.OrdinalIgnoreCase) ||
         mediaType.Contains("yml", StringComparison.OrdinalIgnoreCase);
 
-    private static bool LooksLikeYaml(string text)
+    /// <summary>
+    /// Whether <paramref name="text"/> opens like a YAML OpenAPI document. Examines the first
+    /// non-blank, non-comment line and nothing further: a JSON document's first non-whitespace
+    /// character is always one of <c>{ [ " -</c>, a digit, or <c>t</c>/<c>f</c>/<c>n</c>, none of
+    /// which can begin <c>openapi:</c> or <c>swagger:</c>. A JSON string whose <i>value</i> is
+    /// <c>"openapi: 3.0.3"</c> still starts its line with a quote.
+    /// <para>
+    /// Internal because <see cref="SpecSnapshot.Reprint"/> asks the same question from the other
+    /// side — see its own comment for why the answer has to be conditional there rather than
+    /// assumed.
+    /// </para>
+    /// <para>
+    /// Scans to the first line break rather than <c>Split('\n')</c>-ing the whole body. Against
+    /// the <see cref="MaxBytes"/> cap that split would materialise the entire document a third
+    /// time (buffer, string, then array of lines) purely to read one line, which undercuts the
+    /// point of having a cap at all.
+    /// </para>
+    /// </summary>
+    internal static bool LooksLikeYaml(string text)
     {
-        foreach (var line in text.Split('\n'))
+        var index = 0;
+        while (index < text.Length)
         {
-            var trimmed = line.Trim();
-            if (trimmed.Length == 0 || trimmed.StartsWith('#'))
+            var lineEnd = text.IndexOf('\n', index);
+            if (lineEnd < 0)
+            {
+                lineEnd = text.Length;
+            }
+
+            var line = text.AsSpan(index, lineEnd - index).Trim();
+            index = lineEnd + 1;
+
+            if (line.Length == 0 || line[0] == '#')
             {
                 continue;
             }
 
-            return trimmed.StartsWith("openapi:", StringComparison.OrdinalIgnoreCase) ||
-                   trimmed.StartsWith("swagger:", StringComparison.OrdinalIgnoreCase);
+            return line.StartsWith("openapi:", StringComparison.OrdinalIgnoreCase) ||
+                   line.StartsWith("swagger:", StringComparison.OrdinalIgnoreCase);
         }
 
         return false;

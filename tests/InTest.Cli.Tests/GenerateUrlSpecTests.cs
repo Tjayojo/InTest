@@ -272,6 +272,67 @@ public class GenerateUrlSpecTests
         File.Exists(SnapshotPath).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// A snapshot that cannot be written is refused with a sentence, not a stack trace. Without
+    /// the translation this escapes both of <c>RunAsync</c>'s catches and lands on
+    /// <c>Program</c>'s crash floor as "intest: unexpected failure:
+    /// UnauthorizedAccessException", naming neither the file nor anything the adopter can act on.
+    /// A read-only checkout is an ordinary condition, not a defect in the tool.
+    /// <para>
+    /// Skipped where the process can write regardless of the read-only bit — root on Linux, which
+    /// is how CI containers usually run. Asserting the guard from a context that cannot provoke it
+    /// would make this test pass for the wrong reason.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ExplainsASnapshotThatCannotBeWritten()
+    {
+        using var transport = new StubTransport(Spec);
+        await RunAsync(transport);
+
+        var snapshot = new FileInfo(SnapshotPath);
+        snapshot.IsReadOnly = true;
+        try
+        {
+            using var probe = File.OpenWrite(SnapshotPath);
+            Assert.Inconclusive(
+                "this process can write a read-only file (running as root?), so the guard " +
+                "cannot be provoked here");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The read-only bit is enforced for this process — the precondition holds.
+        }
+
+        try
+        {
+            var (exitCode, error) = await RunCapturingErrorAsync(transport);
+
+            exitCode.ShouldBe(ExitCode.ToolError);
+            error.ShouldNotContain("unexpected failure");
+            error.ShouldContain(SpecSnapshot.FileName);
+        }
+        finally
+        {
+            snapshot.IsReadOnly = false;
+        }
+    }
+
+    /// <summary>
+    /// The write leaves no <c>.tmp</c> sibling behind. A stray <c>spec.json.tmp</c> in a committed
+    /// project is its own small confusion, and the temp file is the price of writing atomically —
+    /// see <c>GenerateCommand.WriteSnapshotAsync</c> for why that price is worth paying for this
+    /// one artefact.
+    /// </summary>
+    [TestMethod]
+    public async Task LeavesNoTemporaryFileBesideTheSnapshot()
+    {
+        using var transport = new StubTransport(Spec);
+        await RunAsync(transport);
+
+        Directory.GetFiles(_root, "*.tmp").ShouldBeEmpty();
+    }
+
     // ---- [no-refetch] --------------------------------------------------------------------------
 
     /// <summary>

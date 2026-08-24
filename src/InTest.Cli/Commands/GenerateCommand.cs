@@ -370,9 +370,73 @@ public static class GenerateCommand
         var snapshot = SpecSnapshot.Reprint(fetched);
         var spec = await SpecLoader.LoadFromTextAsync(snapshot, cancellationToken).ConfigureAwait(false);
 
-        await File.WriteAllTextAsync(snapshotPath, snapshot, cancellationToken).ConfigureAwait(false);
+        await WriteSnapshotAsync(snapshotPath, snapshot, cancellationToken).ConfigureAwait(false);
 
         return new ResolvedSpec(spec, ExitCode.Ok);
+    }
+
+    /// <summary>
+    /// Writes the snapshot atomically — to a sibling temp file, then <see cref="File.Move(string,
+    /// string, bool)"/> over the target — and translates a write failure into a sentence rather
+    /// than a stack trace.
+    ///
+    /// <para>
+    /// <b>Why this one write is atomic when the <c>Generated/</c> writes are not.</b> Not
+    /// inconsistency: <c>spec.json</c> is the only artefact written <i>before</i> the drift gate,
+    /// on the routine path, and it is an <i>input</i> to every command that follows. A Ctrl+C or
+    /// a full disk part-way through a plain write leaves a truncated snapshot sitting in the
+    /// project, and from that point `--check` and `fixtures repair` both fail on a corrupt file —
+    /// reporting a spec problem the adopter did not cause and cannot diagnose from the message.
+    /// A half-written file under <c>Generated/</c> is recoverable by re-running `generate`; a
+    /// half-written <c>spec.json</c> is what `generate` reads.
+    /// </para>
+    /// <para>
+    /// <see cref="File.Move(string, string, bool)"/> rather than <c>File.Replace</c>: replace
+    /// requires the destination to exist, which it does not on the first run.
+    /// </para>
+    /// </summary>
+    private static async Task WriteSnapshotAsync(
+        string snapshotPath, string content, CancellationToken cancellationToken)
+    {
+        // Beside the target, not in the system temp directory: File.Move is only atomic within a
+        // single volume, and a project on a different drive from %TEMP% would silently degrade to
+        // a copy — which is exactly the non-atomic write this method exists to avoid.
+        var temporaryPath = snapshotPath + ".tmp";
+
+        try
+        {
+            await File.WriteAllTextAsync(temporaryPath, content, cancellationToken).ConfigureAwait(false);
+            File.Move(temporaryPath, snapshotPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Otherwise this escapes both of RunAsync's catches and lands on Program's crash
+            // floor: `chmod 444 spec.json` reported "intest: unexpected failure:
+            // UnauthorizedAccessException", which names neither the file nor anything the adopter
+            // can act on. A read-only or full checkout is an ordinary condition, not a defect in
+            // the tool.
+            throw new SpecLoadException(
+                $"The spec snapshot could not be written to '{snapshotPath}': {ex.Message} " +
+                "spec.json is generator-owned and must be writable — check the file is not " +
+                "read-only and that there is space on the volume.", ex);
+        }
+        finally
+        {
+            // A failed Move leaves the temp file behind, and a stray spec.json.tmp in a committed
+            // project is its own small confusion. Best-effort: a cleanup failure must not replace
+            // the real error above with a less useful one.
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                // Deliberately swallowed — see above.
+            }
+        }
     }
 
     /// <summary>

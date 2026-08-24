@@ -85,8 +85,23 @@ public static class SpecSnapshot
         }
         catch (JsonException ex)
         {
+            // Conditional, never a blanket "this must be YAML". Funnelling every JsonException
+            // into the YAML sentence reads as thorough and is actively misleading for the most
+            // likely mistake in this feature: an adopter who points spec.source at the Swagger
+            // *UI* page instead of the document gets text/html (so SpecFetcher's Content-Type
+            // check does not fire) beginning "<!DOCTYPE html>" (so its body sniff does not
+            // either), and would then be told, confidently and wrongly, that their document
+            // "appears to be YAML" — sending them to look for a YAML/JSON toggle that has nothing
+            // to do with what went wrong.
+            //
+            // The same sniff SpecFetcher uses, so both layers reach the same verdict about the
+            // same bytes rather than disagreeing about what the adopter is looking at.
+            var diagnosis = SpecFetcher.LooksLikeYaml(json)
+                ? SpecFetcher.YamlReason
+                : SpecFetcher.NotJsonReason;
+
             throw new SpecLoadException(
-                $"The OpenAPI document could not be read as JSON: {ex.Message} {SpecFetcher.YamlReason}", ex);
+                $"The OpenAPI document could not be read as JSON: {ex.Message} {diagnosis}", ex);
         }
 
         using (document)

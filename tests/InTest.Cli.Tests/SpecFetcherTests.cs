@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Net.Http.Headers;
 using System.Text;
 using InTest.Cli.Spec;
@@ -7,8 +8,9 @@ using Shouldly;
 namespace InTest.Cli.Tests;
 
 /// <summary>
-/// <see cref="SpecFetcher"/>'s failure table, driven through a stub transport so every row runs
-/// without a socket. Each test asserts the <i>message</i> rather than only the throw, and asserts
+/// <see cref="SpecFetcher"/>'s failure table. Most rows are driven through a stub transport so
+/// they run without a socket; the body-failure rows below use a real one, for the reason stated
+/// there. Each test asserts the <i>message</i> rather than only the throw, and asserts
 /// the absence of "unexpected failure" — the same house rule <c>ConfigLoaderTests</c> states and
 /// for the same reason: an exit-code assertion alone would pass against the defect these messages
 /// exist to fix, since every one of these was already exit 2 before it had a sentence.
@@ -219,79 +221,138 @@ public class SpecFetcherTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
+    // ---- failures that happen while the BODY is read -------------------------------------------
+    //
+    // These use a REAL socket, not the stub transport the rest of this class uses, and that is the
+    // whole point of them. An earlier version of this file tested these two cases through a stub
+    // that threw `new TaskCanceledException(...)` and `new HttpRequestException(...)` by hand —
+    // both green, and both asserting the handling of exceptions the runtime does not actually
+    // produce on this path. Measured against real sockets, the truth is:
+    //
+    //   * a stalled body raises NOTHING AT ALL — HttpClient.Timeout stops applying once
+    //     ResponseHeadersRead has returned the headers, so the read simply waited past 60 seconds
+    //     against a 5-second timeout;
+    //   * a dropped connection raises System.Net.Http.HttpIOException, which derives from
+    //     IOException and NOT from HttpRequestException.
+    //
+    // A hand-thrown exception can only ever confirm the assumption that chose it. Where the
+    // *type* or the *existence* of a failure is the thing in question, the test has to let the
+    // runtime produce it.
+
     /// <summary>
-    /// A failure that happens while the <i>body</i> is being read, not while the headers are.
-    /// This is a real gap that reaching for <see cref="HttpCompletionOption.ResponseHeadersRead"/>
-    /// opens up and that a naive implementation misses: with that option the <c>GetAsync</c> call
-    /// returns as soon as the headers arrive, so a server that hangs, or drops the connection,
-    /// part-way through a large document fails <i>after</i> the code that translates transport
-    /// exceptions into adopter-facing sentences has already run.
+    /// A server that sends headers and then stalls part-way through the body must fail on
+    /// <see cref="SpecFetcher"/>'s own deadline rather than hanging forever.
     /// <para>
-    /// Left unhandled it escapes as a raw <c>TaskCanceledException</c> and reaches
-    /// <c>Program</c>'s crash floor, so a slow API — an entirely ordinary thing for a spec
-    /// endpoint to be — is reported to the adopter as "intest: unexpected failure". Same exit
-    /// code, and a sentence that blames the tool for the network.
+    /// This is the test that fails outright — by timing out — against a <c>HttpClient.Timeout</c>
+    /// implementation, which covers only the header phase. A spec endpoint stalling mid-response
+    /// is what a struggling API under deployment looks like, so this is an ordinary condition,
+    /// not a contrived one.
     /// </para>
     /// </summary>
     [TestMethod]
-    public async Task ReportsATimeoutThatHappensWhileReadingTheBody()
+    [Timeout(120_000)]
+    public async Task FailsRatherThanHangingWhenTheServerStallsMidBody()
     {
-        var reason = await ReasonForAsync(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StreamContent(new ThrowingStream(() => new TaskCanceledException("timed out"))),
-        });
+        using var server = new StallingServer(dropInstead: false);
 
-        reason.ShouldContain("30 seconds");
-        reason.ShouldContain(Url, Case.Sensitive);
+        var reason = (await Should.ThrowAsync<SpecLoadException>(
+            () => SpecFetcher.FetchAsync(server.Url, transport: null, CancellationToken.None))).Message;
+
+        reason.ShouldNotContain("unexpected failure");
+        reason.ShouldContain("seconds",
+            customMessage: "a stalled body must be reported as a timeout, not left to hang");
     }
 
-    /// <summary>The same gap, reached by a connection dropped mid-body rather than a stall.</summary>
+    /// <summary>
+    /// A connection dropped mid-body. <c>HttpIOException</c> derives from <see cref="IOException"/>,
+    /// so a <c>catch (HttpRequestException)</c> alone lets it reach <c>Program</c>'s crash floor
+    /// as "intest: unexpected failure: HttpIOException" — the tool blamed for the network, and
+    /// precisely the sentence <see cref="ReasonForAsync"/>'s house assertion exists to prevent.
+    /// </summary>
     [TestMethod]
-    public async Task ReportsAConnectionLostWhileReadingTheBody()
+    [Timeout(120_000)]
+    public async Task ReportsAConnectionDroppedMidBodyAsAFetchFailure()
     {
-        var reason = await ReasonForAsync(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StreamContent(new ThrowingStream(
-                () => new HttpRequestException("The response ended prematurely."))),
-        });
+        using var server = new StallingServer(dropInstead: true);
 
-        reason.ShouldContain(Url, Case.Sensitive);
-        reason.ShouldContain("ended prematurely");
+        var reason = (await Should.ThrowAsync<SpecLoadException>(
+            () => SpecFetcher.FetchAsync(server.Url, transport: null, CancellationToken.None))).Message;
+
+        reason.ShouldNotContain("unexpected failure");
+        reason.ShouldContain(server.Url, Case.Sensitive);
+        reason.ShouldContain("could not be fetched");
     }
 
-    /// <summary>Cancellation stays cancellation even when it happens mid-body.</summary>
+    /// <summary>Cancellation stays cancellation when it happens mid-body, rather than being
+    /// relabelled as the deadline expiring.</summary>
     [TestMethod]
+    [Timeout(120_000)]
     public async Task PropagatesCancellationThatHappensWhileReadingTheBody()
     {
-        using var cancelled = new CancellationTokenSource();
-        using var transport = new StubTransport(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StreamContent(new ThrowingStream(() =>
-            {
-                cancelled.Cancel();
-                return new TaskCanceledException("cancelled");
-            })),
-        });
+        using var server = new StallingServer(dropInstead: false);
+        using var cancelling = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
         await Should.ThrowAsync<OperationCanceledException>(
-            () => SpecFetcher.FetchAsync(Url, transport, cancelled.Token));
+            () => SpecFetcher.FetchAsync(server.Url, transport: null, cancelling.Token));
     }
 
-    /// <summary>A stream that fails on the first read, with whatever the test asks for.</summary>
-    private sealed class ThrowingStream(Func<Exception> failure) : Stream
+    /// <summary>
+    /// Answers a well-formed response head and a partial body, then either stalls indefinitely or
+    /// drops the connection. A raw <see cref="TcpListener"/> rather than anything higher-level
+    /// because both behaviours are protocol violations that a well-behaved HTTP server will not
+    /// perform on request.
+    /// </summary>
+    private sealed class StallingServer : IDisposable
     {
-        public override bool CanRead => true;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => throw new NotSupportedException();
-        public override long Position { get => 0; set => throw new NotSupportedException(); }
-        public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => throw failure();
-        public override ValueTask<int> ReadAsync(
-            Memory<byte> buffer, CancellationToken cancellationToken = default) => throw failure();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        private readonly TcpListener _listener;
+        private readonly CancellationTokenSource _stop = new();
+
+        public StallingServer(bool dropInstead)
+        {
+            _listener = new TcpListener(IPAddress.Loopback, 0);
+            _listener.Start();
+            Url = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}/swagger.json";
+            _ = ServeAsync(dropInstead);
+        }
+
+        public string Url { get; }
+
+        private async Task ServeAsync(bool dropInstead)
+        {
+            try
+            {
+                using var client = await _listener.AcceptTcpClientAsync(_stop.Token);
+                var stream = client.GetStream();
+
+                // A Content-Length far larger than what is actually sent is what makes the client
+                // keep waiting: it has been promised bytes that never arrive.
+                await stream.WriteAsync(Encoding.ASCII.GetBytes(
+                    "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nContent-Type: application/json\r\n\r\n"),
+                    _stop.Token);
+                await stream.WriteAsync(Encoding.ASCII.GetBytes("{\"openapi\":\"3.0.3\""), _stop.Token);
+                await stream.FlushAsync(_stop.Token);
+
+                if (dropInstead)
+                {
+                    client.Close();
+                    return;
+                }
+
+                await Task.Delay(Timeout.InfiniteTimeSpan, _stop.Token);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or SocketException or IOException
+                                          or ObjectDisposedException)
+            {
+                // Disposal, or the client giving up first. Either is the test succeeding.
+            }
+        }
+
+        public void Dispose()
+        {
+            _stop.Cancel();
+            _listener.Dispose();
+            _stop.Dispose();
+        }
     }
 
     [TestMethod]
@@ -369,6 +430,34 @@ public class SpecFetcherTests
         });
 
         (await SpecFetcher.FetchAsync(Url, transport, CancellationToken.None)).ShouldBe(body);
+    }
+
+    /// <summary>
+    /// The https→http downgrade refusal that justifies leaving <c>AllowAutoRedirect</c> on. An
+    /// earlier comment in <see cref="SpecFetcher"/> claimed a test of this name already pinned
+    /// this; it did not exist, so the safety property rested on the comment alone. It exists now.
+    /// <para>
+    /// <see cref="SocketsHttpHandler"/> refuses to follow a redirect that drops TLS, and surfaces
+    /// the 3xx to the caller instead of following it — so InTest reports the status rather than
+    /// silently fetching the spec over plaintext.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task DoesNotFollowAnHttpsToHttpRedirect()
+    {
+        using var transport = new StubTransport(request =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Found);
+            response.Headers.Location = new Uri("http://insecure.example.com/openapi.json");
+            return response;
+        });
+
+        var message = (await Should.ThrowAsync<SpecLoadException>(
+            () => SpecFetcher.FetchAsync(Url, transport, CancellationToken.None))).Message;
+
+        message.ShouldNotContain("unexpected failure");
+        message.ShouldContain("302",
+            customMessage: "the redirect is reported, not followed down to plaintext");
     }
 
     // ---- TryValidateUrl -----------------------------------------------------------------------

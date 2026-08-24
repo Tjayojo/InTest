@@ -139,4 +139,38 @@ public class SpecSnapshotTests
         reason.ShouldContain("YAML");
         reason.ShouldNotContain("unexpected failure");
     }
+
+    /// <summary>
+    /// The most likely mistake in this whole feature, and the one a blanket YAML diagnosis gets
+    /// confidently wrong: pointing <c>spec.source</c> at the Swagger <b>UI</b> page rather than
+    /// the document it renders.
+    /// <para>
+    /// That body arrives as <c>text/html</c> — so <c>SpecFetcher</c>'s Content-Type check does not
+    /// fire — beginning <c>&lt;!DOCTYPE html&gt;</c>, so its body sniff does not either. Funnelling
+    /// every <c>JsonException</c> into the YAML sentence would then tell the adopter their
+    /// document "appears to be YAML" and send them looking for a YAML/JSON toggle that has nothing
+    /// to do with what went wrong. A wrong diagnosis delivered confidently is worse than a vague
+    /// one: it spends the adopter's time in the wrong place.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    [DataRow("<!DOCTYPE html>\n<html><head><title>Swagger UI</title></head></html>", DisplayName = "Swagger UI page")]
+    [DataRow("<html><body>502 Bad Gateway</body></html>", DisplayName = "proxy error page")]
+    [DataRow("just some words, no markup", DisplayName = "plain prose")]
+    public void DoesNotBlameYamlForABodyThatIsSimplyNotJson(string body)
+    {
+        var reason = Should.Throw<SpecLoadException>(() => SpecSnapshot.Reprint(body)).Message;
+
+        // Asserted against the diagnosis sentence rather than the bare word "YAML", which is not
+        // the same thing: System.Text.Json quotes the offending input back in its own message, so
+        // a body that merely mentions yaml would fail a keyword assertion while the diagnosis was
+        // entirely correct. (Found the hard way — an earlier fixture here read "not json, not
+        // yaml, just words" and failed on its own echo.)
+        reason.ShouldNotContain("appears to be YAML",
+            customMessage: "a confident wrong diagnosis sends the adopter to the wrong problem");
+        reason.ShouldContain("JSON");
+        reason.ShouldContain("Swagger UI",
+            customMessage: "the message should name the mistake the adopter most likely made");
+        reason.ShouldNotContain("unexpected failure");
+    }
 }
