@@ -9,8 +9,13 @@ HTTP, from its OpenAPI document. Two shipped packages (`InTest.Cli`, `InTest.Run
 sample APIs used as fixtures, four test suites. Nothing is published to NuGet; build from source.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
+A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
+snapshot (§9), which `generate --check` and `fixtures repair` then read instead of the network.
 `survey`, `fixtures promote`, `assertions add`, `generate --emit-plan`, variation tests and YAML
-input do **not** exist yet — do not assume they do.
+input do **not** exist yet — do not assume they do. YAML is unbuilt from a file *and* from a URL;
+so is §9's build-time copy of the spec to the output directory (`init` scaffolds the
+`<InTestSpecSource>` property, but nothing consumes it and the runtime reads
+`Generated/spec-schemas.json`).
 
 ## Commands
 
@@ -67,16 +72,31 @@ SHA — see CONTRIBUTING.md's dependency policy.
 
 - Central package management: **all** versions live in `Directory.Packages.props`. A
   `PackageReference` with an inline `Version` in a project file is a build error.
-- `Directory.Build.props` sets `net10.0`, nullable, `TreatWarningsAsErrors=true`, and pins
-  `Version` to `0.1.0` — the scaffold emits `InTest.Runtime 0.1.0`, so the SDK's default of
-  `1.0.0` would break every scaffolded restore.
-- **Package versions are duplicated by design in three places** and must be changed together:
-  `Directory.Packages.props`, the scaffolded `.csproj` string in `InitCommand.cs`, and the
-  hand-written test project in `CompileVerificationTests.cs`. `InTest.Architecture.Tests`'
-  `PackageVersionCouplingTests` enforces this mechanically — it fails, by package name with both
-  versions and both files, if a hardcoded version in either scaffold site disagrees with
-  `Directory.Packages.props` (or, for `InTest.Runtime`, with `Directory.Build.props`' own
-  `Version`, since that package is deliberately not centrally versioned).
+- `Directory.Build.props` sets `net10.0`, nullable, and `TreatWarningsAsErrors=true`. It carries
+  no `<Version>` element — MinVer (build-time only, `PrivateAssets="all"`) derives `Version`,
+  `PackageVersion`, `AssemblyVersion` and `InformationalVersion` from git tags and commit height
+  instead (`[version-from-git]`,
+  `docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`). `Directory.Build.props` also
+  carries `InTestEnsureNotShallowClone`, a build target that fails loudly if the checkout is a
+  shallow git clone — MinVer would otherwise silently compute a plausible-looking but wrong
+  version there. See `CONTRIBUTING.md`'s "Branching and how a release is cut" for the full
+  explanation of both.
+- The scaffold's `InTest.Runtime` reference is **not** a hardcoded literal — `InitCommand.cs`
+  interpolates `CliVersion.Current` (`[scaffold-reads-itself]`, same plan), so whatever version the
+  running CLI was built as is exactly what a freshly scaffolded project references. `intest
+  upgrade` reads a scaffolded `.csproj` and *reports* (never rewrites) when that reference has
+  drifted from the running CLI's version.
+- **Third-party package versions are still duplicated by design in three places** and must be
+  changed together: `Directory.Packages.props`, the scaffolded `.csproj` string in
+  `InitCommand.cs`, and the hand-written test project in `CompileVerificationTests.cs`.
+  `InTest.Architecture.Tests`' `PackageVersionCouplingTests` enforces this mechanically — it fails,
+  by package name with both versions and both files, if a hardcoded version in either scaffold
+  site disagrees with `Directory.Packages.props`. `InTest.Runtime` is checked separately from this
+  three-way rule, not as a fourth member of it: it has no `Directory.Packages.props` entry at all
+  (it is InTest's own version, not a third-party one), so `PackageVersionCouplingTests` instead
+  confirms the scaffold's source text still interpolates `CliVersion.Current` rather than any
+  literal, plus a behavioral test that actually scaffolds a project and compares the emitted
+  reference against `CliVersion.Current` directly.
 - `.github/dependabot.yml` proposes weekly version bumps to `Directory.Packages.props` and to the
   SHA-pinned actions in `.github/workflows/build-and-test.yml`. It only ever edits
   `Directory.Packages.props`, so a bump to `MSTest.TestFramework`, `MSTest.TestAdapter`,
@@ -90,6 +110,13 @@ SHA — see CONTRIBUTING.md's dependency policy.
 ### The generation pipeline (`src/InTest.Cli`)
 
 `SpecLoader` -> `TestPlanBuilder` -> `TemplateRenderer` -> files under `Generated/`.
+
+`Spec/` splits three ways, and the split is deliberate: `SpecLoader` turns *text* into an
+`OpenApiDocument` and knows nothing about where the text came from; `SpecFetcher` owns HTTP policy
+(timeout, size cap, status and content-type handling) for a URL source; `SpecSnapshot` owns the
+committed `spec.json` — its name, its bytes, and the reprint that makes `--check` stable. Do not
+fold fetching back into the loader: parsing and transport are different concerns with different
+failure vocabularies.
 
 - **`Planning/`** is the single source of truth. `TestPlanBuilder.Build` decides which operations
   produce cases, which are skipped (with a reason), and which get a non-removing coverage *note*.
@@ -107,12 +134,19 @@ SHA — see CONTRIBUTING.md's dependency policy.
 | Directory | Written by | Never touched by |
 |---|---|---|
 | `Generated/` | `generate` (deleted and rewritten wholesale) | humans |
+| `spec.json` | `generate`, when `spec.source` is a URL — the committed snapshot (§9) | humans; `fixtures repair` and `--check` only *read* it |
 | `fixtures/` | `fixtures repair` only | `generate` — it only *reports* drift |
 | everything else | the adopting team | InTest, with one narrow exception: `upgrade` writes `.gitattributes` if the project does not already have one, never overwriting an existing one |
 
-`generate` detects fixture drift **before** writing anything and exits `1`. Exit codes are public
-API: `0` ok, `1` work outstanding, `2` tool error, `3` already initialised (`init` only),
-`4` tool/config version mismatch (`generate --check` only).
+`generate` detects fixture drift **before** writing any generated *output* and exits `1`. The one
+deliberate exception is `spec.json`, written as soon as a fetched document parses and therefore
+before the drift gate — it is the materialized *input*, not output, and writing it later
+deadlocks the drift/repair cycle. `[snapshot-is-input]` in
+`docs/superpowers/plans/2026-08-24-intest-url-spec-source.md` is the canonical explanation, with
+the worked loop; `GenerateCommand.ResolveSpecAsync` points at it.
+
+Exit codes are public API: `0` ok, `1` work outstanding, `2` tool error, `3` already initialised
+(`init` only), `4` tool/config version mismatch (`generate --check` only).
 
 ### Three separate text-safety rules — keep them separate
 

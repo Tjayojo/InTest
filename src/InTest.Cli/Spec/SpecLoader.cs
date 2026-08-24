@@ -45,51 +45,37 @@ public static class SpecLoader
     }
 
     /// <summary>
-    /// Whether a spec source names something this loader cannot read. Lives here, on the type
-    /// that has the limitation: <see cref="SpecLoader"/> reads a spec from text and from a file,
-    /// and from nothing else. When URL support lands — §9's <c>spec.json</c> snapshot, which
-    /// gives a URL-sourced spec a reviewable diff — it lands as a sibling of
-    /// <see cref="LoadFromFileAsync"/>, and this member and <see cref="UrlReason"/> go away with
-    /// the limitation they describe.
+    /// Whether a spec source names a URL rather than a path — the routing question §9's snapshot
+    /// turns on. A URL is fetched by <see cref="SpecFetcher"/> and materialized as
+    /// <see cref="SpecSnapshot"/>; a path is read straight through
+    /// <see cref="LoadFromFileAsync"/>.
+    /// <para>
+    /// <b>This predicate carries more weight than it used to.</b> Until URL support landed it
+    /// only chose which refusal to print, next to a <c>UrlReason</c> constant that apologised for
+    /// the capability being absent; both it and that constant were documented as going away
+    /// together when §9 was built. What actually happened is that the constant went and this
+    /// stayed, promoted to deciding <i>which code path runs</i>. A wrong answer here no longer
+    /// produces a differently-worded error — it produces a command reading the wrong document.
+    /// </para>
     /// <para>
     /// The prefix test is deliberately narrow, and a general "is this an absolute URI" check is
     /// deliberately <i>not</i> used: <c>Uri.TryCreate("C:/specs/orders.json", UriKind.Absolute, …)</c>
-    /// succeeds with scheme <c>file</c>, so the general check refuses the single most ordinary
-    /// <c>spec.source</c> value on Windows. Only <c>http</c> and <c>https</c> are refused because
-    /// only they were ever promised — the help text said "Path or URL" and getting started's
-    /// Phase 1 pointed at a Swagger endpoint. Anything else with a scheme still fails as a path,
-    /// which is what it is.
+    /// succeeds with scheme <c>file</c>, so the general check would route the single most
+    /// ordinary <c>spec.source</c> value on Windows down the fetch path. Only <c>http</c> and
+    /// <c>https</c> are treated as URLs, because those are the two schemes
+    /// <see cref="SpecFetcher"/> can actually fetch. Anything else with a scheme is tried as a
+    /// path, which is what it is. <c>ConfigLoaderTests.LoadsASpecSourceThatIsNotAUrl</c> pins the
+    /// false positives this narrowness exists to avoid.
     /// </para>
     /// <para>
-    /// Note what this is <i>not</i>. It is not a fifth member of the four value-safety rules
-    /// <see cref="Configuration.ConfigLoader"/> maps. Those govern text reaching a grammar that
-    /// could misread it, and the fix is escaping or refusal. This governs <i>capability</i>: the
-    /// value is perfectly well-formed and means exactly what it says — InTest just cannot read
-    /// that kind of source yet.
+    /// Well-formedness is a separate question, asked afterwards by
+    /// <see cref="SpecFetcher.TryValidateUrl"/>: <c>https://</c> alone passes this test and is
+    /// not a URL anyone can fetch.
     /// </para>
     /// </summary>
     public static bool IsUrl(string source) =>
         source.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
         source.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// The one sentence InTest says about a URL spec source, in the shape every other refusal in
-    /// this repository uses (see <see cref="Naming.CSharpIdentifier.EmptyValueReason"/>): name
-    /// the setting, quote what was written, say what is wrong with it, then the caller's rule and
-    /// remedy. One constant rather than two literals that agree today — <c>InitCommand</c> and
-    /// <see cref="Configuration.ConfigLoader"/> both say it, about <c>--spec</c> and about
-    /// <c>spec.source</c>, and the adopter's next move is the same either way.
-    /// <para>
-    /// It names the roadmap because the alternative is worse: an adopter who read "Path or URL"
-    /// and followed getting started's URL branch is not making a mistake they can diagnose from
-    /// "unsupported" alone. What went wrong is that the documentation described a capability
-    /// ahead of the build.
-    /// </para>
-    /// </summary>
-    public static string UrlReason(string setting, string source, string rule) =>
-        $"{setting} '{source}' is a URL, and InTest reads the OpenAPI document from a local file. " +
-        "Reading the spec from a URL — snapshotting it to a committed spec.json so it still " +
-        $"arrives as a reviewable diff — is designed but not built. {rule}";
 
     public static Task<LoadedSpec> LoadFromFileAsync(string path, CancellationToken cancellationToken = default)
     {

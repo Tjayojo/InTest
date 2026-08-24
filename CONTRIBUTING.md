@@ -392,6 +392,99 @@ Covered by semver: the runtime's exported types, the `intest.json` schema, CLI c
 and exit codes, and the coverage report's JSON shape. Not covered: failure message text, the
 internal `TestPlan` JSON, and template internals.
 
+## Branching and how a release is cut
+
+One branch, `main`, protected and continuous
+(`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`, `[tag-is-the-release]`). There is
+no `develop` branch and none is planned: a second long-lived branch would just encode, a second
+time, the same fact a tag already encodes, and the two can disagree about whether something has
+shipped. This supersedes an earlier `develop`/`main` decision recorded in the design spec's §7 —
+see that section for the fuller argument and the measurements behind it.
+
+**What a merge produces.** Every push to `main` is packed and verified in CI
+(`.github/workflows/pack.yml`, via `scripts/ci/pack-and-verify.ps1`). The version is derived by
+MinVer from git tags and commit height, with no CI-injected suffix and no counter to maintain:
+`0.1.0-preview.0.<height>` today, since nothing has been tagged yet. **That artifact is not
+published anywhere.** It exists only as a downloadable file attached to the Actions run that built
+it. This distinction is load-bearing, not pedantic — nuget.org versions are permanent and
+undeletable once pushed, so treating a merge artifact as published would burn the version space of
+a package that has not shipped once. Publishing stays a separate, manual, deliberate act
+(`[publish-stays-manual]`); nothing in this repository has ever pushed a package to nuget.org.
+
+**What a tag produces.** `git tag 0.1.0-preview.1` (a publishable preview) or `git tag 0.1.0` (the
+first stable release), pushed with `git push origin <tag>`, makes the build at that commit exact —
+no prerelease height, because MinVer only appends `.<height>` to a commit that is not itself an
+exact tag match. `pack.yml` also runs on any tag push, on any branch, and its tag-match check
+(`scripts/ci/pack-and-verify.ps1 -ExpectedTag`) fails the build if the packed version and the
+pushed tag ever disagree. The result is still only a workflow artifact, not a published package —
+pushing it to nuget.org is the manual step the readiness spec's §8 checklist walks through
+(`docs/superpowers/specs/2026-08-23-nuget-publish-readiness-design.md`), none of which has been
+performed yet.
+
+**Cutting a release, end to end, as this repository defines it today:**
+
+1. Merge whatever should ship into `main`.
+2. Tag that commit and push the tag: `git tag 0.1.0-preview.1 && git push origin 0.1.0-preview.1`
+   (or `0.1.0` for a stable release).
+3. `pack.yml` packs and verifies both packages at exactly that tag's version and uploads them as
+   workflow artifacts on the resulting Actions run.
+4. Download the artifacts and follow the readiness spec's §8 checklist to verify and push them.
+   Nothing automated does this step — it is deliberately a human decision every time.
+
+**One honest gap in this path today:** `pack.yml` has never completed a real run on GitHub
+Actions. Its command sequences were exercised locally, on both platforms, by hand, and the
+workflow file passes `actionlint` — but the GitHub Actions runtime itself (trigger firing, matrix
+fan-out, artifact upload) is unexercised, and there is no green run or badge for it yet. Treat the
+first real tag push as the first genuine test of this path, not as something already proven.
+
+**Patching an old major.** There are zero shipped releases today, so nothing needs this yet.
+Once one exists, cut `release/N.x` **on demand**, from the relevant tag, rather than maintaining a
+permanent branch against a need that has not arrived — the same practice `dotnet/runtime` follows,
+and the reason a second long-lived branch was rejected above.
+
+**Two things `versioning.md` recommends and this scheme deliberately does not do**, recorded so a
+future reader sees a decision rather than an oversight — full reasoning in the versioning plan's
+`[version-from-git]` section:
+
+- *"CONSIDER only including a major version in the `AssemblyVersion`."* MinVer already gives
+  `{Major}.0.0.0` (measured `0.0.0.0` today, since nothing is tagged past `0.x`) — satisfied for
+  free, nothing to decide.
+- *"CONSIDER including a continuous integration build number as the `AssemblyFileVersion`
+  revision."* **Not done, and not planned under this scheme** — MinVer's commit-height suffix lives
+  in the prerelease label, not in a version component, and there is no CI build number to put there
+  in the first place. Both recommendations exist chiefly to reduce .NET Framework binding-redirect
+  pain; InTest is not strong-named and targets `net10.0`, where that pain does not apply.
+
+### The shallow-clone guard
+
+MinVer needs real tag history to compute a version at all. In a **shallow clone** (the default
+depth for `actions/checkout`, and for a plain `git clone --depth 1`) it sees no tags, computes
+height zero, and silently produces `0.1.0-preview.0` for *every* commit — no warning, no error.
+`MINVER1001` does not fire for this case at all, and even where it fires for a different reason it
+stays only a warning under `TreatWarningsAsErrors` (it is an MSBuild task warning, not a compiler
+one), so neither mechanism catches a shallow clone on its own.
+
+A plausible-looking wrong version is worse than a build failure: a failure stops at the point of
+the mistake, while a wrong-but-plausible version ships silently and only surfaces later, if ever,
+as a confusing report from whoever installed it — exactly the anti-pattern CLAUDE.md names, "never
+substitute plausible defaults that let a suite pass while asserting nothing." Two independent
+things guard against it here:
+
+- Every `actions/checkout` step across both workflow files sets `fetch-depth: 0`, so CI never
+  clones shallow in the first place.
+- `Directory.Build.props`'s `InTestEnsureNotShallowClone` target asks git directly instead of
+  trusting either signal above — a `.git` present *and* reporting the checkout as shallow — and
+  fails the build before it can produce a version at all, on both `dotnet build` and `dotnet pack`.
+  This is deliberately independent of `fetch-depth: 0`: that setting is one line per checkout step
+  that a future edit can drop without anyone noticing, and this guard exists to catch exactly that
+  silently.
+
+**If this guard fires,** the checkout is shallow: run `git fetch --unshallow`, or re-clone without
+`--depth`, then rebuild. It does **not** fire for an ordinary (non-shallow) clone, and it does not
+fire outside a git repository at all — `scripts/local-e2e-test.ps1` packs from a non-git copy of
+`src/` by design, so it hits a plain `MINVER1001` warning instead, and that fallback is accepted
+for that harness specifically (see the script's own header comment for why).
+
 ## Testing against a local build
 
 Nothing is published to NuGet yet, so trying the documented adoption path

@@ -16,15 +16,17 @@ public static class InitCommand
 
     /// <summary>
     /// The one remedy sentence for <c>--spec</c>, appended to whichever rule rejected the value.
-    /// Two rules can reject it and they are deliberately different questions — is there a value
-    /// at all (<see cref="CommandArguments"/>), and can XML 1.0 represent the value there is
-    /// (<see cref="Naming.MSBuildPropertyValue"/>) — but the adopter's next move is the same
-    /// either way, so they must not answer it in two voices. One constant, not two literals that
-    /// agree today.
+    /// Three rules can reject it and they are deliberately different questions — is there a value
+    /// at all (<see cref="CommandArguments"/>), is a value that looks like a URL a well-formed one
+    /// (<see cref="Spec.SpecFetcher.TryValidateUrl"/>), and can XML 1.0 represent the value there
+    /// is (<see cref="Naming.MSBuildPropertyValue"/>) — but the adopter's next move is the same
+    /// either way, so they must not answer it in three voices. One constant, not three literals
+    /// that agree today.
     /// </summary>
     private const string SpecRemedy =
         "Pass the path to the OpenAPI document to `intest init --spec` — for example " +
-        "\"../Orders/bin/Debug/net10.0/orders.json\".";
+        "\"../Orders/bin/Debug/net10.0/orders.json\" — or the URL it is served from, for example " +
+        "\"https://orders-staging.example.com/swagger/v1/swagger.json\".";
 
     /// <summary>
     /// The exact bytes `init` scaffolds at <c>.gitattributes</c> — hoisted to a named constant,
@@ -61,6 +63,23 @@ public static class InitCommand
     /// FixtureDocument objects, not bytes) but not to a byte-for-byte comparison such as
     /// `generate --check`.
     /// </para>
+    /// <para>
+    /// <c>spec.json</c> joins the list for a URL <c>spec.source</c> (§9): `generate` writes it,
+    /// it is committed, and <see cref="Spec.SpecSnapshot.Reprint"/> emits it as pure CRLF like
+    /// every other writer here. It is scaffolded unconditionally, for a path source too, because
+    /// `init` cannot know that a project will never switch — and a pin for a file that does not
+    /// exist matches nothing and costs nothing.
+    /// </para>
+    /// <para>
+    /// <b>One gap worth naming rather than relying on silently:</b> <c>UpgradeCommand</c> writes
+    /// this file only when a project has none, never overwriting one that exists (CLAUDE.md's
+    /// ownership table). A project scaffolded before <c>spec.json</c> was pinned here, which then
+    /// switches to a URL source, therefore keeps a <c>.gitattributes</c> without that line. That
+    /// is tolerable only because nothing byte-compares <c>spec.json</c> — it is deliberately not
+    /// in <c>GenerateCommand.BuildOutputs</c> (see <see cref="Spec.SpecSnapshot"/>), so a checkout
+    /// that flattens it to LF costs a noisy diff on the next `generate`, not a wrong verdict from
+    /// `--check`. The remedy is one hand-added line; no command will add it for them.
+    /// </para>
     /// </summary>
     internal const string GitattributesContent = """
     # InTest writes these files with CRLF interior line endings (a template Normalize step for
@@ -70,6 +89,7 @@ public static class InitCommand
     Generated/** text eol=crlf
     coverage-report.json text eol=crlf
     fixtures/**/*.json text eol=crlf
+    spec.json text eol=crlf
     """;
 
     /// <summary>
@@ -111,10 +131,17 @@ public static class InitCommand
             return ExitCode.ToolError;
         }
 
-        // Normalised once, before either escaping step, and reused at both sites below — the
-        // intest.json JSON string and the csproj's <InTestSpecSource> element must agree on the
-        // same slash-normalised value, or ConfigLoader.Load and the built project would disagree
-        // on what "the spec" is.
+        // Normalised once, before either escaping step. For a path source it is reused at both
+        // sites below — the intest.json JSON string and the csproj's <InTestSpecSource> element
+        // must agree on the same slash-normalised value, or ConfigLoader.Load and the built
+        // project would disagree on what "the spec" is. For a URL source only intest.json carries
+        // it, because the csproj names the snapshot instead (see buildTimeSpecPath below); the
+        // two still agree, they just agree that the URL is the source and spec.json is where the
+        // build finds it.
+        //
+        // Harmless on a URL, not merely tolerable: a backslash is not valid unescaped in a URL
+        // path, so a well-formed URL contains none for this to rewrite. Pinned rather than
+        // assumed — InitCommandTests asserts a URL reaches intest.json byte-for-byte as typed.
         var normalizedSpecSource = specSource.Replace("\\", "/");
 
         // projectName seeds project.rootNamespace, project.testBaseClass, baseClassName, and the
@@ -145,27 +172,33 @@ public static class InitCommand
         }
 
         // The same rule as the blank guard above — `init` never writes a config it knows
-        // `generate` will reject — and the case that needed it most, because here `init` did not
-        // merely fail to help. Measured before this guard existed:
+        // `generate` will reject. A URL is a supported kind of source now (§9), so what is left
+        // to judge is whether it is a well-formed one; "https://" alone clears SpecLoader.IsUrl
+        // and is not a URL anyone can fetch.
+        //
+        // This guard's ancestor refused every URL, and the defect it was built for is worth
+        // keeping on the record because it is what justifies judging --spec here at all rather
+        // than leaving it to `generate`. Measured before any guard existed:
         // `init --spec https://example.com/openapi.json` printed "Initialised Orders.ApiTests.
-        // Next: `intest generate`." and exited 0, writing the whole scaffold. It confirmed the
-        // belief the help text had created ("Path or URL"), and displaced the contradiction onto
-        // a different command one step later, where it surfaced as
-        // "Spec file not found: <projectRoot>\https://example.com/openapi.json" — a missing file,
-        // supposedly, rather than an unsupported kind of source.
+        // Next: `intest generate`." and exited 0, writing the whole scaffold — then displaced the
+        // contradiction onto a different command one step later, where it surfaced as
+        // "Spec file not found: <projectRoot>\https://example.com/openapi.json". A malformed URL
+        // reaches exactly that outcome today if it gets past here.
         //
         // Ahead of the escaping guard below rather than after it: a URL is perfectly
         // representable in XML, so TryEscape would pass it through and this sentence would only
         // be reached for a URL that also carried something XML 1.0 cannot represent. "Is this a
-        // kind of source InTest can read" is the question that makes the escaping question
-        // meaningful, the same ordering the blank check above already uses.
+        // source InTest can read" is the question that makes the escaping question meaningful,
+        // the same ordering the blank check above already uses.
         //
         // Judged on the normalised value, like the escaping guard below and unlike the blank
         // check above: normalisation runs before both, and it is the normalised value that
-        // reaches intest.json, so this refuses exactly what would have been written.
-        if (SpecLoader.IsUrl(normalizedSpecSource))
+        // reaches intest.json, so this judges exactly what would have been written.
+        var specSourceIsUrl = SpecLoader.IsUrl(normalizedSpecSource);
+        if (specSourceIsUrl &&
+            !SpecFetcher.TryValidateUrl(normalizedSpecSource, "--spec", out var urlReason))
         {
-            Console.Error.WriteLine(SpecLoader.UrlReason("--spec", normalizedSpecSource, SpecRemedy));
+            Console.Error.WriteLine($"{urlReason} {SpecRemedy}");
             return ExitCode.ToolError;
         }
 
@@ -188,6 +221,26 @@ public static class InitCommand
             Console.Error.WriteLine($"{specReason} {SpecRemedy}");
             return ExitCode.ToolError;
         }
+
+        // What <InTestSpecSource> names is a *local file the build can copy*, which for a URL
+        // source is the snapshot rather than the source. MSBuild cannot copy from https://, and
+        // §9 is explicit that a URL source's .csproj copies "that local file … exactly as above" —
+        // the snapshot is precisely what makes the two source kinds identical from the build's
+        // point of view. intest.json still records the URL: that is the *source*, and spec.json
+        // is its materialization (SpecSnapshot).
+        //
+        // Note this property has no consumer in the scaffold today — §9's
+        // <Content Include="$(InTestSpecSource)" Link="spec.json" …> item is designed and not
+        // built, and TestHost reads spec-schemas.json rather than spec.json. Setting it correctly
+        // now costs nothing and means that item needs no second fix when it lands. See the plan's
+        // "What does not change".
+        //
+        // Escaping still runs on the value the adopter typed, above, even when its result is
+        // discarded here: TryEscape is also what stops an unpaired surrogate reaching
+        // JsonSerializer below, where it would silently become U+FFFD and write a *different*
+        // spec.source into intest.json with no error at all. That hazard belongs to the value,
+        // not to where it ends up.
+        var buildTimeSpecPath = specSourceIsUrl ? SpecSnapshot.FileName : specSourceEscaped;
 
         if (File.Exists(Path.Combine(projectRoot, "intest.json")))
         {
@@ -213,6 +266,40 @@ public static class InitCommand
         }
         """);
 
+        // [scaffold-reads-itself] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md,
+        // Task 1): InTest.Runtime's PackageReference below used to hardcode "0.1.0". A CLI built
+        // as a prerelease (say 0.1.0-preview.3) would then scaffold a project asking for
+        // InTest.Runtime 0.1.0 exactly — a version that will not exist on nuget.org until the
+        // first stable release, so the scaffolded restore could never succeed. CliVersion.Current
+        // is already in hand a couple of hundred lines above (intestVersion, in the intest.json
+        // write); emitting it here too makes the scaffold self-consistent by construction —
+        // whatever version this CLI was built as, that is what it references, with no literal to
+        // drift.
+        //
+        // Neither of this repository's two escaping rules applies to the interpolation below, and
+        // that is a deliberate reading rather than an oversight:
+        //   - Naming.CSharpLiteral governs values pasted inside a C# string literal in *generated*
+        //     source — mstest-class.scriban's output, read by a C# compiler later. This string is
+        //     a C# interpolated raw string literal in InitCommand.cs itself; raw string literals
+        //     have no escape sequences to begin with, and an interpolation hole is filled by
+        //     .ToString() verbatim, so there is no C#-literal-escaping step here at all, let alone
+        //     one CSharpLiteral would need to perform.
+        //   - Naming.MSBuildPropertyValue governs adopter-supplied text landing in MSBuild
+        //     *element* text content — see <InTestSpecSource>{specSourceEscaped}</InTestSpecSource>
+        //     above. Its XML layer escapes '&' and '<' but deliberately never the double-quote
+        //     that delimits an *attribute* value (see its own remarks), because it was written for
+        //     the element-text position. Version="..." below is an attribute value, a different
+        //     grammatical slot; reusing an escaper shaped for the wrong slot would silently mis-
+        //     escape a literal '"' if one ever reached it (it would not be turned into &quot;, so
+        //     it would prematurely close the attribute), rather than actually being safe here.
+        // Applying either would also be solving a problem CliVersion.Current cannot pose: unlike
+        // --spec, this is not adopter input. It is CliVersion.Read()'s output — an
+        // AssemblyInformationalVersionAttribute value stripped at the first '+' — constrained by
+        // construction to SemVer 2.0's grammar (ASCII letters, digits, '.', '-'; semver.org §9),
+        // which contains none of '&', '<', '"', '%', '$', '@', ';', '?', '*': every character
+        // either escaping rule exists to guard against. A build that somehow produced an
+        // informational version outside that grammar would be a build-system defect to fix at the
+        // source, not a value either escaper could safely paper over here.
         Write(projectRoot, $"{projectName}.csproj", $"""
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
@@ -221,7 +308,7 @@ public static class InitCommand
             <ImplicitUsings>enable</ImplicitUsings>
             <IsPackable>false</IsPackable>
             <RunSettingsFilePath>$(MSBuildProjectDirectory)/{projectName}.runsettings</RunSettingsFilePath>
-            <InTestSpecSource>{specSourceEscaped}</InTestSpecSource>
+            <InTestSpecSource>{buildTimeSpecPath}</InTestSpecSource>
           </PropertyGroup>
           <ItemGroup>
             <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
@@ -229,7 +316,7 @@ public static class InitCommand
             <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
             <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
             <PackageReference Include="Shouldly" Version="4.3.0" />
-            <PackageReference Include="InTest.Runtime" Version="0.1.0" />
+            <PackageReference Include="InTest.Runtime" Version="{CliVersion.Current}" />
           </ItemGroup>
           <ItemGroup>
             <Content Include="Generated/spec-schemas.json" Link="spec-schemas.json" CopyToOutputDirectory="PreserveNewest" />

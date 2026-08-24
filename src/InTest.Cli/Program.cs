@@ -24,7 +24,12 @@ generate.SetAction((parseResult, cancellationToken) =>
         check: parseResult.GetValue(checkOption)));
 
 var nameOption = new Option<string>("--name") { Description = "Test project name.", Required = true };
-var specOption = new Option<string>("--spec") { Description = "Path of the OpenAPI document, relative to the test project directory.", Required = true };
+// "Path or URL" is finally true. This sentence has a history worth one line of comment: it said
+// "Path or URL" while `init` and `generate` both refused a URL outright, which is the
+// documentation-ahead-of-the-build defect the deleted SpecLoader.UrlReason existed to apologise
+// for. §9's snapshot shipped; the promise the help text was making is now kept. A URL is fetched
+// by `generate` and snapshotted to spec.json — see SpecSnapshot.
+var specOption = new Option<string>("--spec") { Description = "Path of the OpenAPI document relative to the test project directory, or the URL it is served from.", Required = true };
 
 var init = new Command("init", "Scaffold a test project.");
 init.Options.Add(projectOption);

@@ -1,6 +1,7 @@
 using InTest.Cli;
 using InTest.Cli.Commands;
 using InTest.Cli.Fixtures;
+using InTest.Cli.Spec;
 using Shouldly;
 
 namespace InTest.Cli.Tests;
@@ -360,4 +361,64 @@ public class FixturesRepairCommandTests
         error.ShouldContain("for example");
     }
 
+    // ---- a URL spec.source ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Repoints this project's config at a URL, leaving everything else `init` scaffolded intact.
+    /// The snapshot, if the test wants one, is written separately — which is the whole point:
+    /// repair never fetches, so the only way it can see a spec is if `generate` already put one
+    /// there.
+    /// </summary>
+    private void UseUrlSpecSource() => File.WriteAllText(Path.Combine(_root, "intest.json"), """
+    { "schemaVersion": 1, "spec": { "source": "https://orders-staging.example.com/swagger/v1/swagger.json" },
+      "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
+    """);
+
+    /// <summary>
+    /// [no-refetch]: repair reads the committed snapshot `generate` took, and opens no socket to
+    /// do it. Deciding what the spec now says is `generate`'s job, deliberately, on a branch,
+    /// where the resulting spec.json diff is reviewable — and if repair fetched too, the two
+    /// commands could plan against different upstream revisions, producing drift repair cannot
+    /// fix.
+    /// <para>
+    /// This project's snapshot happens to already sit at spec.json, because that is the file name
+    /// §9 fixes and <see cref="SpecSnapshot.FileName"/> names. What changes here is only which
+    /// setting sends repair to it.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ReadsTheSnapshotForAUrlSpecSource()
+    {
+        UseUrlSpecSource();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(ExitCode.Ok);
+
+        File.Exists(FixturePath).ShouldBeTrue(
+            "the snapshot is where a URL-sourced project's spec lives");
+    }
+
+    /// <summary>
+    /// The state an adopter reaches by running `fixtures repair` before `generate` on a fresh
+    /// URL project. Letting <c>SpecLoader.LoadFromFileAsync</c> report this would say
+    /// "Spec file not found: &lt;projectRoot&gt;/spec.json" — naming a file the adopter never
+    /// wrote, never chose the name of, and cannot usefully create by hand. That is the same
+    /// defect class the pre-§9 URL refusal existed to fix (an accurate sentence about the wrong
+    /// thing), and this test is what stops it being reintroduced one file over.
+    /// </summary>
+    [TestMethod]
+    public async Task ExplainsAMissingSnapshotRatherThanReportingAFileTheAdopterNeverNamed()
+    {
+        UseUrlSpecSource();
+        File.Delete(Path.Combine(_root, SpecSnapshot.FileName));
+
+        var (exitCode, error) = await RunCapturingErrorAsync();
+
+        exitCode.ShouldBe(ExitCode.ToolError);
+        error.ShouldContain("intest generate",
+            customMessage: "the remedy is the command that takes the snapshot");
+        error.ShouldNotContain("Spec file not found",
+            customMessage: "an accurate sentence about the wrong thing sends the adopter hunting " +
+                           "for a file that was never theirs to create");
+        error.ShouldNotContain("unexpected failure");
+    }
 }

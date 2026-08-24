@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using InTest.Cli.Configuration;
 
 namespace InTest.Cli.Commands;
@@ -263,8 +264,136 @@ public static class UpgradeCommand
                 ? " Also scaffolded .gitattributes, which this project did not have yet — see " +
                   "InitCommand.GitattributesContent for what it pins and why."
                 : string.Empty));
+
+        // [prerelease-reference-migration]: a pure read, run after every write above already
+        // succeeded, never before — see DetectRuntimeReferenceMismatch's own doc comment for why
+        // this reports rather than rewrites, and why an unrecognised .csproj shape produces
+        // silence rather than a crash or a guess.
+        var runtimeReferenceNote = DetectRuntimeReferenceMismatch(projectRoot, newVersion);
+        if (runtimeReferenceNote is not null)
+        {
+            report.WriteLine(runtimeReferenceNote);
+        }
+
         return ExitCode.Ok;
     }
+
+    /// <summary>
+    /// <b>[prerelease-reference-migration]</b> (docs/superpowers/plans/
+    /// 2026-08-23-trunk-based-versioning.md): the one place <c>upgrade</c> looks inside the
+    /// adopting team's <c>.csproj</c> — and, deliberately, the only thing it does there is look.
+    /// <para>
+    /// <b>Why this exists at all.</b> Once InTest.Runtime versions can be prereleases
+    /// ([scaffold-reads-itself], the same plan's Task 1), a project scaffolded while intest was a
+    /// prerelease pins <c>InTest.Runtime</c> at that exact prerelease — say
+    /// <c>0.1.0-preview.7</c>. NuGet resolves a version *range* to its *lowest* satisfying member,
+    /// so once <c>0.1.0</c> stable ships, a reference still pinned at
+    /// <c>0.1.0-preview.7</c> keeps resolving the prerelease forever — a green build, zero
+    /// warnings, and no InTest command currently reads the runtime package's own version to
+    /// notice (<c>generate --check</c> compares only <c>intestVersion</c> against
+    /// <see cref="CliVersion.Current"/>, <c>GenerateCommand.cs</c>). An adopter who ran `upgrade`
+    /// and saw it report success would reasonably believe they are on stable when they are not.
+    /// </para>
+    /// <para>
+    /// <b>Why detect-and-report rather than rewrite.</b> <c>upgrade</c> already has a precedent
+    /// for touching adopter-owned files surgically — Decision 1's targeted edits to
+    /// <c>intest.json</c> and <c>.config/dotnet-tools.json</c> above — but both of those are
+    /// InTest's own generated shape, produced and re-read by InTest alone. A <c>.csproj</c> is the
+    /// adopting team's build, in whatever shape their own tooling has since put it in: attributes
+    /// reordered, <c>VersionOverride</c>, central package management, the reference moved into
+    /// <c>Directory.Packages.props</c> entirely. A regex confident enough to match every scaffold
+    /// `init` has ever produced is not thereby confident enough to safely rewrite a real project's
+    /// build file — a false-positive match rewriting the wrong thing is a worse failure than a
+    /// true negative saying nothing, because the former corrupts a build the adopting team owns
+    /// and the latter merely fails to help. So this method only ever reads: it returns the
+    /// message <see cref="RunAsync"/> should print, or <see langword="null"/>, and never writes to
+    /// <paramref name="projectRoot"/> itself.
+    /// </para>
+    /// <para>
+    /// <b>Silence, not a crash, whenever the shape does not match.</b> No <c>.csproj</c> found, or
+    /// more than one (ambiguous — this command has no way to know which is "the" project), or an
+    /// <c>IOException</c> reading it, or the file found but not matching
+    /// <see cref="RuntimePackageReferencePattern"/> even once (no InTest.Runtime
+    /// <c>PackageReference</c> at all, or one that does not look like what <c>init</c> writes) —
+    /// every one of these returns <see langword="null"/> rather than throwing. This mitigation is
+    /// explicitly a best-effort report layered on top of a command whose primary job (regenerating
+    /// and bumping the two files above) has already succeeded by the time this runs; a detector
+    /// that could fail the whole upgrade over a shape it merely failed to recognise would be a
+    /// worse trade than the gap it exists to narrow. See the type's own doc comment,
+    /// "This mitigates, it does not close" — the durable fix is <c>generate --check</c> learning
+    /// the runtime's version directly, out of scope here.
+    /// </para>
+    /// </summary>
+    internal static string? DetectRuntimeReferenceMismatch(string projectRoot, string runningVersion)
+    {
+        string[] csprojFiles;
+        try
+        {
+            csprojFiles = Directory.GetFiles(projectRoot, "*.csproj", SearchOption.TopDirectoryOnly);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+
+        // Zero: nothing to check (not this command's job to diagnose a missing .csproj — the
+        // regenerate-first steps above already required intest.json and dotnet-tools.json to
+        // exist). More than one: ambiguous which project this upgrade is about; guessing wrong
+        // would misdirect an adopter, so this says nothing rather than pick one.
+        if (csprojFiles.Length != 1)
+        {
+            return null;
+        }
+
+        string csprojText;
+        try
+        {
+            csprojText = File.ReadAllText(csprojFiles[0]);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+
+        var matches = RuntimePackageReferencePattern.Matches(csprojText);
+
+        // Zero: no InTest.Runtime PackageReference in the one shape `init` is known to write —
+        // central package management, a ProjectReference, or a real adopter's build reformatted
+        // enough that this narrow pattern no longer recognises it (see this method's own doc
+        // comment for why guessing here is worse than silence). More than one: never produced by
+        // `init`; still safer to say nothing than to report against an arbitrary pick.
+        if (matches.Count != 1)
+        {
+            return null;
+        }
+
+        var current = matches[0].Groups[1].Value;
+        if (current == runningVersion)
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(csprojFiles[0]);
+        return
+            $"NOTE: {fileName} pins <PackageReference Include=\"InTest.Runtime\" Version=\"{current}\" />, " +
+            $"but the running intest is {runningVersion}. `intest upgrade` does not rewrite this " +
+            "file (see [prerelease-reference-migration]) — change " +
+            $"Version=\"{current}\" to Version=\"{runningVersion}\" by hand.";
+    }
+
+    /// <summary>
+    /// Matches the exact shape <c>InitCommand</c>'s scaffold writes for InTest.Runtime's own
+    /// <c>PackageReference</c> — <c>Include</c> before <c>Version</c>, a self-closing tag — the
+    /// same restriction <c>PackageVersionCouplingTests.PackageReferencePattern</c> accepts more
+    /// broadly (any package name) but this narrows to InTest.Runtime specifically, since that is
+    /// the only reference <see cref="DetectRuntimeReferenceMismatch"/> has any business reporting
+    /// on. A real adopter's project that reformatted this line — reordered attributes, added
+    /// <c>VersionOverride</c>, moved to central package management — simply will not match, which
+    /// is by design: see that method's own doc comment for why a non-match means silence rather
+    /// than a looser pattern reaching further into adopter-owned text.
+    /// </summary>
+    private static readonly Regex RuntimePackageReferencePattern =
+        new(@"<PackageReference\s+Include=""InTest\.Runtime""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
 
     /// <summary>
     /// <paramref name="runningVersionAsFallback"/> is passed in rather than read from

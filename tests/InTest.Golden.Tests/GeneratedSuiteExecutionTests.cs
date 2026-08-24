@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using InTest.Cli;
 using InTest.Cli.Commands;
 using Shouldly;
 
@@ -1231,15 +1232,32 @@ public class GeneratedSuiteExecutionTests
         File.WriteAllText(path, json);
     }
 
-    /// <summary>The scaffold references InTest.Runtime from NuGet, which is not published.</summary>
+    /// <summary>
+    /// The scaffold references InTest.Runtime from NuGet, which is not published. The needle
+    /// tracks <see cref="CliVersion.Current"/> rather than a hardcoded "0.1.0" -- see
+    /// ScaffoldCompileVerificationTests.UseProjectReferenceInsteadOfPackage's identical needle
+    /// for the full account of why a hardcoded literal here silently stopped matching (a
+    /// coincidence of InTest.Cli's own version happening to equal "0.1.0" is not the same as this
+    /// needle being correct by construction) and asserted, not merely interpolated, so a future
+    /// scaffold-format drift fails loudly here rather than several steps downstream as a
+    /// confusing NU1101 against nuget.org.
+    /// </summary>
     private void UseProjectReferenceInsteadOfPackage()
     {
         var runtimeProject = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime", "InTest.Runtime.csproj"));
 
         var path = Path.Combine(_root, "Stub.ApiTests.csproj");
-        var csproj = File.ReadAllText(path).Replace(
-            """<PackageReference Include="InTest.Runtime" Version="0.1.0" />""",
+        var csprojText = File.ReadAllText(path);
+
+        var needle = $"""<PackageReference Include="InTest.Runtime" Version="{CliVersion.Current}" />""";
+        csprojText.ShouldContain(needle, Case.Sensitive,
+            "InitCommand's scaffold no longer writes InTest.Runtime's PackageReference in the " +
+            "expected shape (Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\") -- " +
+            "update this needle alongside whatever changed.");
+
+        var csproj = csprojText.Replace(
+            needle,
             $"""<ProjectReference Include="{runtimeProject}" />""",
             StringComparison.Ordinal);
 

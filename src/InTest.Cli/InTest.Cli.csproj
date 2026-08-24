@@ -8,6 +8,7 @@
     <RootNamespace>InTest.Cli</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
     <PackageReference Include="Microsoft.OpenApi" />
     <PackageReference Include="NJsonSchema" />
     <PackageReference Include="Scriban" />
