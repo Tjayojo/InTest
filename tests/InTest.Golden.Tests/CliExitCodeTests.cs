@@ -199,10 +199,13 @@ public class CliExitCodeTests
     }
 
     /// <summary>
-    /// The help text is a promise the tool makes in its own voice, and it was the one the tool
-    /// could not keep: <c>--spec</c> read "Path or URL of the OpenAPI document", while both
-    /// commands that consume the value hand <c>Path.Combine(projectRoot, source)</c> to
-    /// <c>SpecLoader.LoadFromFileAsync</c>, which opens files. Pinned here for the same reason
+    /// The help text is a promise the tool makes in its own voice, and for a long time it was the
+    /// one promise the tool could not keep: <c>--spec</c> read "Path or URL of the OpenAPI
+    /// document" while both commands that consume the value handed
+    /// <c>Path.Combine(projectRoot, source)</c> to <c>SpecLoader.LoadFromFileAsync</c>, which
+    /// opens files. §9's snapshot closed that gap, so this test now pins the promise being kept
+    /// rather than withdrawn — the sentence is the same, and it finally means something. Pinned
+    /// here for the same reason
     /// every other test in this class is: <c>Program</c>'s option definitions are above every
     /// command, so <c>InTest.Cli.Tests</c> — which calls <c>Command.Run</c> methods directly —
     /// never executes them and could not observe this.
@@ -213,7 +216,7 @@ public class CliExitCodeTests
     /// </para>
     /// </summary>
     [TestMethod]
-    public async Task SpecHelpPromisesAPathAndNotAUrl()
+    public async Task SpecHelpPromisesAPathOrAUrl()
     {
         var (_, output) = await RunCliAsync("init --help");
 
@@ -221,27 +224,33 @@ public class CliExitCodeTests
         specLine.ShouldNotBeNull($"init --help must document --spec:{Environment.NewLine}{output}");
 
         specLine.ShouldContain("Path of the OpenAPI document");
-        specLine.ShouldNotContain("URL",
-            customMessage: "the help text must not promise an input the tool cannot accept — " +
-                           "URL support is designed (the spec.json snapshot) and not built");
+        specLine.ShouldContain("URL",
+            customMessage: "§9's snapshot shipped, so the promise the help text makes is finally " +
+                           "one the tool keeps — a URL is fetched and snapshotted to spec.json");
     }
 
     /// <summary>
-    /// The refusal that replaced a success. Measured before it existed: this exact command line
+    /// A URL <c>--spec</c> scaffolds, out of process, exit 0 — the capability the help text one
+    /// line above has always described.
+    /// <para>
+    /// This replaces a refusal test, and the history is worth keeping because it is why `init`
+    /// judges <c>--spec</c> at all. Measured before any guard existed, this exact command line
     /// printed "Initialised Orders.ApiTests. Next: `intest generate`." and exited <b>0</b>,
     /// writing the whole scaffold; `generate` then failed with
     /// <c>Spec file not found: &lt;projectRoot&gt;\https://example.com/openapi.json</c>, exit 2.
-    /// So the tool accepted the value its help had promised, and contradicted itself one command
-    /// later in the vocabulary of a missing file.
+    /// The tool accepted the value its help had promised, then contradicted itself one command
+    /// later in the vocabulary of a missing file. Exit 0 is now the right answer for the first
+    /// time — but for a reason (§9's snapshot exists), not by omission.
+    /// </para>
     /// <para>
-    /// Out of process rather than in <c>InitCommandTests</c>, which pins the same refusal:
+    /// Out of process rather than in <c>InitCommandTests</c>, which pins the same scaffold:
     /// <c>init</c> is the command that <i>takes</i> <c>--spec</c>, so its exit code is what a
-    /// pipeline sees, and §5 separates 2 from 1 precisely so a mistyped argument cannot report
-    /// itself as fixture drift. Exit 0 was worse than either.
+    /// pipeline sees. What a malformed URL does is the refusal half, and lives in
+    /// <c>InitCommandTests.RefusesAMalformedUrlSpec</c>.
     /// </para>
     /// </summary>
     [TestMethod]
-    public async Task AUrlSpecExitsToolErrorAndScaffoldsNothing()
+    public async Task AUrlSpecScaffoldsAProjectPointingTheBuildAtTheSnapshot()
     {
         var root = Path.Combine(Path.GetTempPath(), "intest-urlspec-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(root);
@@ -250,16 +259,15 @@ public class CliExitCodeTests
             var (exitCode, output) = await RunCliAsync(
                 $"init --project \"{root}\" --name Orders.ApiTests --spec https://example.com/openapi.json");
 
-            exitCode.ShouldBe(ExitCode.ToolError, output);
-            output.ShouldContain("--spec", Case.Sensitive,
-                customMessage: "a refusal leads with the setting the adopter got wrong");
-            output.ShouldContain("URL",
-                customMessage: "a refusal names the kind of value it is refusing, so the adopter " +
-                               "is not sent looking for a file");
-            output.ShouldNotContain("Initialised",
-                customMessage: "the defect was `init` confirming the belief the help text created");
-            Directory.GetFileSystemEntries(root).ShouldBeEmpty(
-                "§5's exit 2 is \"nothing was written\"");
+            exitCode.ShouldBe(ExitCode.Ok, output);
+            output.ShouldContain("Initialised");
+
+            File.ReadAllText(Path.Combine(root, "intest.json"))
+                .ShouldContain("https://example.com/openapi.json",
+                    customMessage: "the URL is the source, and is what intest.json records");
+            File.ReadAllText(Path.Combine(root, "Orders.ApiTests.csproj"))
+                .ShouldContain("<InTestSpecSource>spec.json</InTestSpecSource>",
+                    customMessage: "MSBuild cannot copy from https:// — the build points at the snapshot");
         }
         finally
         {

@@ -211,36 +211,67 @@ public class ConfigLoaderTests
     }
 
     /// <summary>
-    /// A URL <c>spec.source</c> is the empty source's twin, and it fails the same way: not on its
-    /// own terms. <c>Path.Combine(projectRoot, "https://example.com/openapi.json")</c> treats the
-    /// URL as a relative segment, so <c>SpecLoader</c> reported
+    /// A URL <c>spec.source</c> loads, and says so: §9's snapshot shipped, so a URL is a
+    /// supported kind of source rather than a refusal with a roadmap attached.
+    /// <para>
+    /// This test replaces a refusal test rather than deleting one, because the defect that
+    /// refusal was built for is still the reason this value is judged here at all.
+    /// <c>Path.Combine(projectRoot, "https://example.com/openapi.json")</c> treats the URL as a
+    /// relative segment, so <c>SpecLoader</c> reported
     /// <c>Spec file not found: &lt;projectRoot&gt;\https://example.com/openapi.json</c> — a path
     /// the adopter never wrote, a Windows separator spliced onto a URL, phrased as though the
-    /// file were merely missing rather than as though the kind of source were unsupported.
+    /// file were merely missing. A malformed URL reaches exactly that outcome today if it gets
+    /// past <see cref="Spec.SpecFetcher.TryValidateUrl"/>, which is what
+    /// <see cref="RefusesAMalformedUrlSpecSource"/> pins.
+    /// </para>
     /// <para>
-    /// This is the documented path, not a typo: the <c>--spec</c> help text promised "Path or
-    /// URL" and getting started's Phase 1 instructed adopters to "Point <c>spec.source</c> at the
-    /// URL". Refusing here rather than at <c>init</c> alone is what reaches an adopter who
-    /// followed that instruction by hand-editing the config, and it covers <c>fixtures repair</c>
-    /// as well as <c>generate</c> — one loader, one answer.
+    /// <see cref="LoadedConfig.SpecSourceIsUrl"/> is asserted, not just the absence of a throw:
+    /// the flag is what decides whether <c>generate</c> fetches and whether
+    /// <c>fixtures repair</c> reads <c>spec.json</c>, so "it loaded" is only half the contract.
     /// </para>
     /// </summary>
     [TestMethod]
-    public void ExplainsAUrlSpecSourceRatherThanReportingAMangledPathAsAMissingSpec()
+    [DataRow("https://example.com/openapi.json", DisplayName = "https")]
+    [DataRow("http://example.com/openapi.json", DisplayName = "http")]
+    [DataRow("HTTPS://EXAMPLE.COM/openapi.json", DisplayName = "uppercase scheme")]
+    [DataRow("https://orders-staging.example.com/swagger/v1/swagger.json", DisplayName = "a real swagger endpoint shape")]
+    public void LoadsAUrlSpecSourceAndMarksItAsOne(string source)
     {
-        var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "https://example.com/openapi.json" },
+        WriteConfig($$"""
+        { "schemaVersion": 1, "spec": { "source": "{{source}}" },
+          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+        """);
+
+        var config = ConfigLoader.Load(_root);
+
+        config.SpecSource.ShouldBe(source, "the URL reaches the loader exactly as it was written");
+        config.SpecSourceIsUrl.ShouldBeTrue(
+            "this flag is what routes generate to SpecFetcher and repair to the snapshot");
+    }
+
+    /// <summary>
+    /// The value that clears <see cref="Spec.SpecLoader.IsUrl"/>'s prefix test and is still not a
+    /// URL anyone can fetch. Without this guard it would be handed to
+    /// <c>Path.Combine(projectRoot, …)</c> and resurface as the mangled-path defect described on
+    /// <see cref="LoadsAUrlSpecSourceAndMarksItAsOne"/> — the refusal that was deleted when URLs
+    /// became supported, minus the one case that still needs it.
+    /// </summary>
+    [TestMethod]
+    [DataRow("https://", DisplayName = "scheme only")]
+    [DataRow("http://", DisplayName = "scheme only, http")]
+    public void RefusesAMalformedUrlSpecSource(string source)
+    {
+        var reason = ReasonFor($$"""
+        { "schemaVersion": 1, "spec": { "source": "{{source}}" },
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
         reason.ShouldContain("spec.source", Case.Sensitive);
-        reason.ShouldContain("https://example.com/openapi.json", Case.Sensitive,
+        reason.ShouldContain(source, Case.Sensitive,
             customMessage: "a refusal quotes what the adopter actually wrote");
-        reason.ShouldContain("URL",
-            customMessage: "a refusal names the kind of value it is refusing, not just that it failed");
         reason.ShouldNotContain("Spec file not found",
-            customMessage: "the defect was an accurate sentence about the wrong thing — the spec " +
-                           "is not a file that is missing, it is a kind of source InTest cannot read");
+            customMessage: "the defect this guard inherited was an accurate sentence about the " +
+                           "wrong thing — a malformed URL is not a file that is missing");
     }
 
     /// <summary>
@@ -262,7 +293,16 @@ public class ConfigLoaderTests
           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
         """);
 
-        ConfigLoader.Load(_root).SpecSource.ShouldBe(source);
+        var config = ConfigLoader.Load(_root);
+
+        config.SpecSource.ShouldBe(source);
+
+        // The assertion that matters more since §9 landed. While a URL was refused, a false
+        // positive here produced a confusing error message; now it produces a `generate` that
+        // tries to fetch "C:/specs/orders.json" over HTTP and a `fixtures repair` that reads
+        // spec.json instead of the adopter's actual spec. Same predicate, far worse failure.
+        config.SpecSourceIsUrl.ShouldBeFalse(
+            "a path must never be routed down the fetch-and-snapshot path");
     }
 
     // ---- project -------------------------------------------------------------------------

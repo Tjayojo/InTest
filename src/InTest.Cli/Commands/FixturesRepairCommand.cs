@@ -44,7 +44,31 @@ public static class FixturesRepairCommand
             // is given up by refusing here, because repair cannot repair intest.json.
             var config = ConfigLoader.Load(projectRoot);
 
-            var spec = await SpecLoader.LoadFromFileAsync(Path.Combine(projectRoot, config.SpecSource), cancellationToken)
+            // Repair never fetches ([no-refetch]). A URL spec.source is read from the committed
+            // snapshot `generate` took (§9), for the same reason --check reads it: deciding what
+            // the spec now says is `generate`'s job, deliberately, on a branch, where the
+            // resulting spec.json diff is reviewable. A command whose entire output is fixtures/
+            // has no business making that call, and if it did, `generate` and `repair` could plan
+            // against two different upstream revisions — a skew that would surface as drift
+            // repair cannot fix.
+            var specPath = Path.Combine(
+                projectRoot, config.SpecSourceIsUrl ? SpecSnapshot.FileName : config.SpecSource);
+
+            // The snapshot has to exist before repair can say anything about fixtures, and
+            // letting LoadFromFileAsync report that is a worse sentence than it looks: it would
+            // say "Spec file not found: <projectRoot>/spec.json", naming a file the adopter never
+            // wrote, never chose the name of, and cannot create by hand. That is the same defect
+            // class the pre-§9 URL refusal existed to fix (an accurate sentence about the wrong
+            // thing); reintroducing it one file over would be a poor trade for four saved lines.
+            if (config.SpecSourceIsUrl && !File.Exists(specPath))
+            {
+                throw new SpecLoadException(
+                    $"spec.source is a URL and no {SpecSnapshot.FileName} snapshot exists yet, so " +
+                    "there is nothing for `fixtures repair` to read. Run `intest generate` first — " +
+                    "it fetches the document and writes the snapshot — then run this again.");
+            }
+
+            var spec = await SpecLoader.LoadFromFileAsync(specPath, cancellationToken)
                                        .ConfigureAwait(false);
 
             // Iterates the test plan, not the raw document: TestPlanBuilder is the sole authority
