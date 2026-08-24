@@ -1,11 +1,41 @@
 # NuGet publish readiness
 
-**Status:** Design · Revision 4
+**Status:** Design · Revision 6
 **Date:** 2026-08-23
-**Supersedes:** Revision 3 — §7 was an open question; the owner has now decided it (prerelease
-from `develop`, release from `main`), which turns out to block on a scaffold defect §7 now
-describes. Revision 2's errors are recorded below. Revision 1 deferred `PackageIcon`; revision 2
-brought it in scope; it has since **shipped**.
+**Supersedes:** Revision 5 — §8's publishing checklist still assumed a manual local `dotnet
+pack` as the only way to get an artifact. By the time this revision was written, the versioning
+plan's Task 3 (`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`) had shipped
+`.github/workflows/pack.yml`, which already packs and verifies both projects in CI on every merge
+to `main` and every tag — unpublished, but a real artifact, not a hypothetical one. §8 is
+rewritten below to make CI-then-download the ordinary path and a manual `dotnet pack` the
+fallback, without claiming anything is published or that `dotnet tool restore` works from a bare
+clone — neither is true. Revision 4's supersession of `develop`/`main` (below) and revision 2's
+errors (below) are unchanged from revision 5.
+
+**Revision 4:** §7 recorded *"decided: prerelease from `develop`, release from
+`main`"* as settled. The owner subsequently chose trunk-based versioning with tag-driven releases
+instead — one branch, `main`, continuous; a tag marks a release; `release/N.x` cut on demand only
+when an old major needs servicing
+(`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`, `[tag-is-the-release]`). §7 is
+rewritten for that below, in the style it already used for revision 3. Revision 2's errors are
+recorded below. Revision 1 deferred `PackageIcon`; revision 2 brought it in scope; it has since
+**shipped**.
+
+## What revision 4 got wrong
+
+Two things, both inside §7, both surfaced by the versioning plan rather than by re-reading this
+spec.
+
+1. **The `develop`/`main` decision recorded as settled was itself reconsidered before this spec's
+   ink dried.** See the Supersedes note above and §7 below for the replacement,
+   `[tag-is-the-release]`.
+2. **§7's "what this touches" list claimed a prerelease channel would make adopters "hit exit 4
+   frequently and run `upgrade` to clear it."** That is wrong, independent of which branching model
+   ships: `.config/dotnet-tools.json` pins the CLI version and CI runs `dotnet tool restore`, so CI
+   runs the pinned version by construction, and versions differ only when someone bumps the pin —
+   which `upgrade` does alongside `intestVersion` (v1-e plan, `[exact-match]`). A fast-moving
+   channel changes nothing about how often exit 4 fires. Retracted in §7 below rather than quietly
+   dropped.
 
 ## What revision 2 got wrong
 
@@ -214,24 +244,55 @@ Harmless on the Runtime today — single TFM, no published baseline to diff — 
 once one exists. `PackageValidationBaselineVersion` is deliberately not set: the baseline check
 needs a *previously published* version. §8 captures it for the release after the first.
 
-## 7. Versioning — decided: prerelease from `develop`, release from `main`
+## 7. Versioning — decided: trunk-based, tag-driven releases (supersedes `develop`/`main`)
+
+> **This section's revision-4 decision is superseded.** Revision 4 recorded *"decided: prerelease
+> from `develop`, release from `main`"*. The owner reconsidered and chose trunk-based versioning
+> with tag-driven releases instead, argued and measured in full in
+> `docs/superpowers/plans/2026-08-23-trunk-based-versioning.md` (`[tag-is-the-release]`). Recorded
+> here rather than silently replaced — the same style this section already used for revision 3's
+> "was an open question, now decided", and the style the versioning plan's own revision notes use.
+>
+> **Why the change, argued at length in the plan and only summarised here:** a second long-lived
+> branch encodes the same fact a tag already encodes — a commit on `main` that has not been tagged
+> is neither clearly released nor clearly not, so `develop` and a tag become two sources of truth
+> that can disagree. `develop`/`main` earns its cost once a shipped release must be patched while
+> the next one is developed; **there are zero shipped releases**, so that need is not live yet. It
+> is real later — `CONTRIBUTING.md`'s 12-month previous-major support commitment guarantees it —
+> and is served then by cutting `release/N.x` **on demand**, not by maintaining a permanent branch
+> against a need that has not arrived. Verified against practice, not only argued: `dotnet/runtime`
+> is trunk-based with `release/*` cut on demand, and carries no `develop` branch.
 
 versioning.md: **"DO include a prerelease suffix when releasing a nonstable package."** The repo's
 own words agree — `README.md` says "v0. Working, but early", four commands are unbuilt, and
 `docs/v0-acceptance.md` records that `generate --check` and `upgrade` have no multi-sample
 acceptance run.
 
-**The decision:** merges into `develop` produce **prerelease** versions; `main` produces
-**release** versions.
+**The decision:** one branch, `main`, protected and continuous. Every merge to it produces a
+versioned artifact — not a *published* one; publishing stays manual and out of scope here and in
+the versioning plan (`[publish-stays-manual]`). A tag is what marks a release: `git tag
+0.1.0-preview.1` for a publishable preview, `git tag 0.1.0` for the first stable release. **Every
+merge produces a versioned artifact; every tag produces a publishable one.** `release/N.x`
+branches exist only once an old major needs servicing while `main` has moved past it, and are cut
+on demand — not maintained continuously alongside `main`.
 
-`CliVersion` already supports this. `CliVersion.cs:47` strips the informational version at the
-**first `+` only**, so a SemVer 2 build label is discarded while a prerelease label survives
-(`1.0.0-rc.1+sha` → `1.0.0-rc.1`). Confirmed during v1-e Task 1 by building at
-`-p:Version=1.0.0-rc.1`: `init` wrote that version into `intest.json` and `generate` read it back.
+The honest tradeoff, carried over from the plan rather than re-argued here: under this model
+`main` is *continuous*, not "the released thing". The last tag is the released thing, and `main`
+runs ahead of it.
+
+**How the version itself is produced is also decided, and it is not a hand-rolled suffix.** There
+is no CI-injected `-p:VersionSuffix` and no counter for CI to choose. MinVer
+(`[version-from-git]` in the versioning plan) derives `Version` directly from git tags and commit
+height: untagged commits on `main` get `0.1.0-preview.0.<height>`; a commit exactly on a tag
+`0.1.0` gets `0.1.0` with no height; a commit after that tag gets `0.2.0-preview.0.<height>`
+(minor auto-increment). `CliVersion.cs:47`'s first-`+`-only strip still applies unchanged —
+confirmed during v1-e Task 1 by building at `-p:Version=1.0.0-rc.1`, and MinVer stamps
+`InformationalVersion` the same shape. Anywhere else this document implies a hand-rolled,
+CI-injected suffix mechanism, that implication is superseded by this paragraph.
 
 ### The defect this decision exposes, which blocks it
 
-`InitCommand.cs:227` **hardcodes** the scaffolded reference:
+`InitCommand.cs:232` **hardcodes** the scaffolded reference:
 
 ```xml
 <PackageReference Include="InTest.Runtime" Version="0.1.0" />
@@ -244,8 +305,8 @@ output, and it is the `[paired]` shape this repository has now hit nine times: a
 with no reachable fix.
 
 **The scaffold must emit the running CLI's own version rather than a literal.** `CliVersion.Current`
-is already the value `init` writes to `intestVersion` (`InitCommand.cs:139`), so the data is in hand
-at the point the `.csproj` string is built.
+is already the value `init` writes to `intestVersion` (`InitCommand.cs:204`), so the data is in
+hand at the point the `.csproj` string is built.
 
 Note this is *stricter* than §3's compatibility contract, which permits any CLI `N.y` with any
 runtime `N.x`. Emitting the exact version is safe within that contract and removes a hand-maintained
@@ -253,43 +314,63 @@ literal; a looser floor would be defensible but is not required.
 
 ### What this touches beyond the scaffold
 
-Each of these is a real consequence, not a checklist item — settle them before implementing:
+Rewritten against the real model — each item below was re-verified against the repository as it
+stands today (2026-08-23), not carried forward from the `develop`/`main` draft:
 
 - **`PackageVersionCouplingTests` compares the scaffold's literal against `Directory.Build.props`'
-  `<Version>`.** Once the scaffold emits `CliVersion.Current`, there is no literal to compare and
-  the guard's `InTest.Runtime` case needs rewriting against the new mechanism. **Do not delete it** —
-  it is what would have caught this defect.
-- **How the suffix is produced.** `Directory.Build.props` holds the base `<Version>`; the suffix
-  has to come from somewhere per-build. A CI-injected `-p:Version=` is the obvious route, but it
-  makes the shipped version differ from the file every test reads, which is exactly the split that
-  makes the coupling guard ambiguous. Decide the mechanism and the label format together.
-- **`develop` does not exist yet** (`git branch -a`). Creating it is step one.
-- **CI triggers on `push: [main]` only.** `develop` must be added, or nothing on it is ever built.
-- **Dependabot has no `target-branch`,** so it opens PRs against `main`. Under this model it should
-  almost certainly target `develop` instead.
-- **`--check`'s `[exact-match]` exits 4 on *any* version difference**, by design. A prerelease
-  channel that moves on every merge means adopters tracking it hit exit 4 frequently and run
-  `upgrade` to clear it. That is the contract working as specified, not a bug — but it is a real
-  ergonomic consequence of publishing a fast-moving prerelease, and it should be documented for
-  anyone who opts into that channel.
+  `<Version>`.** Unaffected by the branching change, still real: once the scaffold emits
+  `CliVersion.Current`, there is no literal to compare and the guard's `InTest.Runtime` case needs
+  rewriting against the new mechanism. **Do not delete it** — it is what would have caught this
+  defect. (Versioning plan, Task 1 Step 2 and Task 2 Step 2.)
+- **The suffix mechanism this list used to ask for does not exist to build.** Superseded by
+  `[version-from-git]` above: MinVer reads git tags and history directly, so there is no per-build
+  suffix to inject from CI and no counter to choose.
+- **`develop` does not need creating.** Re-verified today (`git branch -a`): it still does not
+  exist, and under this decision it never will — there is exactly one long-lived branch.
+- **CI triggers need no change on this account.** Re-verified today
+  (`.github/workflows/build-and-test.yml`): triggers remain `push: [main]` and `pull_request`, with
+  no `develop` job to add. (The versioning plan's Task 3 adds a tag trigger for release-artifact
+  production — a genuinely new trigger, but not the `develop` one this list used to ask for.)
+- **Dependabot needs no `target-branch` change on this account.** Re-verified today
+  (`.github/dependabot.yml`): it sets no `target-branch`, so it already opens PRs against the
+  default branch, `main` — exactly where trunk-based wants them. There was never a `develop` to
+  retarget away from.
+- **Retracted — the exit-4 claim was wrong, independent of which branching model ships.** This
+  list previously said: *"`--check`'s `[exact-match]` exits 4 on any version difference... A
+  prerelease channel that moves on every merge means adopters tracking it hit exit 4 frequently
+  and run `upgrade` to clear it."* **That is false.** `.config/dotnet-tools.json` pins the CLI
+  version and CI runs `dotnet tool restore`, so CI runs the pinned version by construction —
+  versions differ only when someone bumps the pin, and `upgrade` bumps it alongside `intestVersion`
+  in the same edit (v1-e plan, `[exact-match]`). A fast-moving prerelease channel does not change
+  how often exit 4 fires; the claim's premise — that the channel's speed matters here — was wrong
+  from the start. Recorded rather than quietly dropped, per this repo's own convention for a
+  plausible-but-wrong claim (see "What revision 4 got wrong" above).
 
 ### Scope
 
-This section records the decision and its consequences. **Implementing the branching model — the
-branch, the CI triggers, the version mechanism, the Dependabot target — is not part of this
-readiness pass** and should be planned separately; it is a workflow change, not package metadata.
-What *is* in scope here: the scaffold defect above must be fixed before any prerelease is published,
+This section records the decision and its consequences. **Implementing it — the tag trigger, the
+MinVer wiring, the scaffold fix, the on-demand `release/N.x` process — is not part of this
+readiness pass.** `docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`'s Tasks 1 through 4
+are where that happens; this readiness pass is package metadata, not the workflow change. What
+*is* in scope here: the scaffold defect above must be fixed before any prerelease is published,
 because publishing a CLI that scaffolds unrestorable projects is worse than not publishing.
 
 ## 8. `CONTRIBUTING.md`: publishing checklist
 
-New subsection between "## Releases" and "## Testing against a local build". None of this is
-performed by this change.
+New subsection between "## Releases" and "## Testing against a local build". None of the
+metadata/publishing work below is performed by this change. **Since revision 5, two of the
+prerequisites this checklist used to name as future work are done, and step 5 is reconciled
+accordingly** — the versioning plan
+(`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`) shipped separately from this
+readiness pass and now has its own "Branching and how a release is cut" section in
+`CONTRIBUTING.md`, which this checklist defers to rather than re-explaining.
 
-1. §7 is decided — prerelease from `develop`, release from `main`. Before the first prerelease
-   push, confirm the scaffold defect (§7) is fixed: a CLI at `0.1.0-preview.N` must scaffold a
-   `PackageReference` to a runtime version that actually exists, or the generated project cannot
-   restore.
+1. §7 is decided — trunk-based, tag-driven releases (`main` continuous, a tag marks a release).
+   **The scaffold defect this step used to ask you to confirm is fixed**
+   (`[scaffold-reads-itself]`, same plan): `InitCommand.cs`'s scaffold interpolates
+   `CliVersion.Current` rather than a literal, and `PackageVersionCouplingTests` guards the
+   regression mechanically. Nothing to do here now beyond the ordinary "tests are green" check —
+   this step stays only as a pointer for a reader who hasn't read the versioning plan.
 2. Reserve the `InTest.` **ID prefix** with NuGet (nuget.md's "CONSIDER choosing a package name with
    a prefix that meets NuGet's prefix reservation criteria"). The IDs are unreserved today, and the
    first push claims them.
@@ -298,17 +379,45 @@ performed by this change.
 4. **Clear the local NuGet cache** (`dotnet nuget locals global-packages --clear`, or delete
    `~/.nuget/packages/intest.*`). Local packing has twice left an `intest.runtime 0.1.0` in the
    cache with different content; NuGet caches by exact version and never re-fetches, so a stale
-   entry silently shadows the published package.
-5. `dotnet pack -c Release` both projects. Set `ContinuousIntegrationBuild=true` explicitly for
-   this pack, or accept non-deterministic release artifacts — see §9.
-6. **Verify the artifacts before pushing.** Unzip both `.nupkg` and confirm: `README.md` present,
-   `icon.png` present, `THIRD-PARTY-NOTICES.md` present in `InTest.Cli`, and a non-empty
-   `<repository … commit="…">`. Then `dotnet tool install --global --add-source <dir> InTest.Cli
-   --version <v>` and run `intest --help`. **`scripts/local-e2e-test.ps1` is not a substitute** — it
-   packs at `0.1.0-local.<timestamp>` from a non-git copy, so it never exercises the artifact being
-   pushed and never resolves Source Link.
+   entry silently shadows the published package. Applies whether the `.nupkg` about to be pushed
+   was packed locally (step 5) or downloaded from a CI run (see below) — the cache does not care
+   where the file came from.
+5. **Get the artifact.** Two ways, and CI producing versioned artifacts (Task 3 of the versioning
+   plan, `.github/workflows/pack.yml`) changed which is the default:
+   - **Tag the release commit and let CI pack it**
+     (`CONTRIBUTING.md`, "Branching and how a release is cut"): `git tag 0.1.0 && git push origin
+     0.1.0`, then download both `.nupkg`s from the resulting `pack.yml` Actions run. This is now
+     the ordinary path — it is what CI already verified matches the tag exactly
+     (`scripts/ci/pack-and-verify.ps1 -ExpectedTag`), so re-packing locally would only be
+     re-deriving a version CI already produced and checked.
+   - **`dotnet pack -c Release` both projects by hand**, if the artifact is needed before tagging,
+     or on a machine without access to the Actions run. Set `ContinuousIntegrationBuild=true`
+     explicitly for this pack, or accept non-deterministic release artifacts — see §9.
+
+   **Neither path resolves §9 on its own.** `ContinuousIntegrationBuild` is not wired up anywhere
+   in this repository today (confirmed by search — no `Directory.Build.props` condition on
+   `GITHUB_ACTIONS` or similar exists yet), so a `pack.yml`-produced artifact carries the same
+   non-deterministic Source Link paths as a local pack; downloading from CI is not a substitute for
+   deciding §9's open question. And **`pack.yml` has never completed a real run on GitHub Actions**
+   — its commands were verified locally on both platforms and the workflow file passes
+   `actionlint`, but the scheduling, trigger firing, matrix fan-out and artifact upload are
+   unexercised, and there is no badge or green run for it. Treat the first tag push as the first
+   genuine test of this path, not as something already proven.
+6. **Verify the artifacts before pushing**, regardless of which of step 5's two paths produced
+   them. Unzip both `.nupkg` and confirm: `README.md` present, `icon.png` present,
+   `THIRD-PARTY-NOTICES.md` present in `InTest.Cli`, and a non-empty `<repository …
+   commit="…">`. Then `dotnet tool install --global --add-source <dir> InTest.Cli --version <v>`
+   and run `intest --help`. **Neither `scripts/local-e2e-test.ps1` nor `scripts/ci/pack-and-verify.ps1`
+   is a substitute for this step** — `local-e2e-test.ps1` packs at `0.1.0-local.<timestamp>` from a
+   non-git copy, so it never exercises the artifact being pushed and never resolves Source Link;
+   `pack-and-verify.ps1` packs the real version and proves the scaffold agrees with it, but it
+   never installs the tool or runs `intest --help`, and — like everything else CI does — it does
+   not push anything, so it cannot confirm what nuget.org itself will accept.
 7. `dotnet nuget push` both `.nupkg` and `.snupkg`. Confirm the `.snupkg` is accepted (§2 records
-   this as unproven for a tool package).
+   this as unproven for a tool package). **This step remains entirely unexercised.** Nothing in
+   this repository, in CI or otherwise, has ever pushed a package to nuget.org — no ID is reserved,
+   `dotnet tool restore` cannot resolve `intest.cli` from a bare clone, and that stays true until a
+   human performs this step by hand.
 8. Flip `README.md`'s "Status: v0 … nothing published yet" callout (`README.md:12-41`).
 9. For the release *after* the first: set `PackageValidationBaselineVersion` on `InTest.Runtime`
    only (§6).

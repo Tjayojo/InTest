@@ -751,6 +751,74 @@ public class UpgradeCommandTests
             "the sole exception Task 4 Step 1b decides: upgrade scaffolds .gitattributes when absent");
     }
 
+    // ---- [prerelease-reference-migration]: detect and report, never rewrite -------------------
+
+    /// <summary>
+    /// Fires the case docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's
+    /// [prerelease-reference-migration] exists for: a project scaffolded while intest was a
+    /// prerelease, upgraded once intest is a different (here, effectively "stable" relative to the
+    /// stale reference) version. init itself always scaffolds InTest.Runtime at CliVersion.Current
+    /// ([scaffold-reads-itself]) — this test manufactures the drift by hand-editing the .csproj
+    /// afterward, the same way InitProject manufactures an old intestVersion above, since a single
+    /// test process can only ever be "one running intest version" at a time.
+    /// </summary>
+    [TestMethod]
+    public async Task ReportsWhenTheScaffoldedRuntimeReferenceDiffersFromTheRunningVersion()
+    {
+        InitProject(Spec);
+
+        var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
+        var csprojText = File.ReadAllText(csprojPath);
+        var scaffolded = $"Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\"";
+        csprojText.ShouldContain(scaffolded, Case.Sensitive,
+            customMessage: "init is expected to scaffold InTest.Runtime at the running tool's own version");
+
+        var stalePrereleaseVersion = CliVersion.Current + "-preview.7";
+        File.WriteAllText(csprojPath, csprojText.Replace(
+            scaffolded, $"Include=\"InTest.Runtime\" Version=\"{stalePrereleaseVersion}\""));
+
+        var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.Ok);
+        report.ShouldContain("Orders.ApiTests.csproj", Case.Sensitive,
+            customMessage: "the note must name the file");
+        report.ShouldContain(
+            $"Version=\"{stalePrereleaseVersion}\" to Version=\"{CliVersion.Current}\"", Case.Sensitive,
+            customMessage: "the note must name the current value and the exact replacement");
+
+        // Read only: upgrade must not rewrite the .csproj, even though it just told the adopter
+        // exactly what to change there by hand.
+        File.ReadAllText(csprojPath).ShouldContain(
+            $"Include=\"InTest.Runtime\" Version=\"{stalePrereleaseVersion}\"", Case.Sensitive,
+            customMessage: "upgrade must never rewrite the .csproj — see [prerelease-reference-migration]");
+    }
+
+    /// <summary>
+    /// The converse of the test above, and the one this decision's own doc comment insists on as
+    /// hard as the positive case: a .csproj that does not match the one shape `init` is known to
+    /// write — here, central package management dropping the Version attribute entirely — must
+    /// produce silence, not a crash and not a guessed report against a match that was never made.
+    /// </summary>
+    [TestMethod]
+    public async Task SilentWhenTheCsprojDoesNotMatchTheExpectedRuntimeReferenceShape()
+    {
+        InitProject(Spec);
+
+        var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
+        var csprojText = File.ReadAllText(csprojPath);
+        var scaffolded = $"<PackageReference Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\" />";
+        csprojText.ShouldContain(scaffolded, Case.Sensitive);
+        File.WriteAllText(csprojPath, csprojText.Replace(
+            scaffolded, "<PackageReference Include=\"InTest.Runtime\" />"));
+
+        var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.Ok);
+        report.ShouldNotContain("NOTE:",
+            customMessage: "a .csproj shape DetectRuntimeReferenceMismatch does not recognise must " +
+                            "produce silence, not a guess");
+    }
+
     // ---- no version metadata: refuses rather than laundering "0.0.0" into intestVersion --------
 
     /// <summary>

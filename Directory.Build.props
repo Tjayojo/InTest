@@ -1,8 +1,5 @@
 <Project>
   <PropertyGroup>
-    <!-- The scaffolded project pins InTest.Runtime 0.1.0, so the packages must pack as 0.1.0;
-         the SDK default of 1.0.0 would make the scaffolded restore fail. -->
-    <Version>0.1.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -24,4 +21,96 @@
     <RepositoryUrl>https://github.com/Tjayojo/intest.git</RepositoryUrl>
     <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
+
+  <!-- [version-from-git] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md, Task 2):
+       there is no <Version> element here any more. It used to be pinned to "0.1.0" — first as
+       the product's own version, later (after Task 1's [scaffold-reads-itself]) purely to serve
+       InitCommand.cs's scaffold string, which by then read CliVersion.Current instead of this
+       element and had nothing left to compare it against. Both roles are gone: MinVer (referenced
+       build-time-only, PrivateAssets="all", by src/InTest.Cli and src/InTest.Runtime only — see
+       those .csproj files) now derives Version, PackageVersion, AssemblyVersion and
+       InformationalVersion from git tags and commit height at build time, and
+       PackageVersionCouplingTests.ReadRuntimeSelfVersion reads CliVersion.Current's own build
+       output instead of this file.
+
+       Measured on SDK 10.0.400, MinVer 7.0.0, in a scratch clone of this repository (see this
+       task's own report for the exact commands run):
+         untagged commits on main   -> 0.1.0-preview.0.<height>  (height = commits since the
+                                        nearest ancestor tag, or since the root commit if none)
+         exactly on tag "0.1.0"     -> 0.1.0, clean — no prerelease suffix
+         a commit after that tag    -> 0.2.0-preview.0.<height>  (MinVerAutoIncrement=minor bumps
+                                        the minor component for untagged commits past a release)
+         tagged "0.2.0-preview.1"   -> 0.2.0-preview.1, exactly as tagged
+       That is exactly [tag-is-the-release]'s three behaviours, with no CI logic and no counter to
+       choose or hand-maintain.
+
+       MinVerMinimumMajorMinor floors the untagged-root-commit case at 0.1 rather than MinVer's
+       own default of 0.0.0-alpha.0 — otherwise this repository's very first commit, which
+       predates any tag, would resolve one major below the README's own "v0, working but early"
+       framing. "preview", dotted, was chosen over "ci"/"dev" (reserved by Arcade for unpublished
+       builds) and "beta" (sorts before "preview" under NuGet's own comparer, which would make a
+       later move from preview to beta impossible) — see [version-from-git] for the full
+       comparer measurement this rests on. -->
+  <PropertyGroup>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerAutoIncrement>minor</MinVerAutoIncrement>
+  </PropertyGroup>
+
+  <!-- [shallow-clone-is-a-defect]: in a shallow clone MinVer sees no tags, computes height 0, and
+       silently produces "0.1.0-preview.0" for every commit — no warning, no error. MINVER1001
+       does not fire for this case at all, and even where it does fire it is measured to stay a
+       warning under TreatWarningsAsErrors above (it is an MSBuild task warning, not a compiler
+       one), so neither of those catches it on its own. That is CLAUDE.md's own named
+       anti-pattern — "never substitute plausible defaults that let a suite pass while asserting
+       nothing" — so CI's fetch-depth: 0 (set on every actions/checkout step in
+       .github/workflows/build-and-test.yml) is bought back here with a second, independent guard
+       rather than trusted alone: fetch-depth is one line per checkout step that a future edit can
+       silently drop.
+
+       A guard keyed on the resolved version string cannot work here: a shallow clone, a
+       legitimate untagged root commit, and building entirely outside a git repository (which
+       scripts/local-e2e-test.ps1 does by design — see that script's own header for why it packs
+       from a non-git copy of src/) were all measured to produce the identical
+       "0.1.0-preview.0" string. And a guard keyed on MINVER1001 misses the shallow-clone case —
+       the one that matters most — entirely, since that case emits no diagnostic at all. So this
+       asks git directly instead of trusting either signal: fail only when a .git is present *and*
+       git itself reports the checkout as shallow. A normal (non-shallow) repository and the total
+       absence of a .git are both allowed — the latter is exactly what
+       scripts/local-e2e-test.ps1's non-git copy needs; MINVER1001 fires there, a warning, by
+       construction, and that fallback is accepted for that harness specifically (see this task's
+       report for the reasoning).
+
+       Runs BeforeTargets="BeforeBuild" so both `dotnet build` and `dotnet pack` (which depends on
+       Build unless run with the no-rebuild option) fail loudly before producing a plausible-looking wrong
+       version, rather than a test alone that would only protect people who remember to run
+       tests. -->
+  <Target Name="InTestEnsureNotShallowClone" BeforeTargets="BeforeBuild">
+    <Exec Command="git rev-parse --is-inside-work-tree"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_InTestGitRepoCheckExitCode" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_InTestGitRepoCheckOutput" />
+    </Exec>
+    <PropertyGroup>
+      <_InTestGitRepoCheckValue>@(_InTestGitRepoCheckOutput)</_InTestGitRepoCheckValue>
+      <_InTestIsGitRepo Condition="'$(_InTestGitRepoCheckExitCode)' == '0' and '$(_InTestGitRepoCheckValue)' == 'true'">true</_InTestIsGitRepo>
+    </PropertyGroup>
+    <Exec Condition="'$(_InTestIsGitRepo)' == 'true'"
+          Command="git rev-parse --is-shallow-repository"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_InTestGitShallowExitCode" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_InTestGitShallowOutput" />
+    </Exec>
+    <PropertyGroup Condition="'$(_InTestIsGitRepo)' == 'true'">
+      <_InTestGitShallowValue>@(_InTestGitShallowOutput)</_InTestGitShallowValue>
+    </PropertyGroup>
+    <Error Condition="'$(_InTestIsGitRepo)' == 'true' and '$(_InTestGitShallowExitCode)' == '0' and '$(_InTestGitShallowValue)' == 'true'"
+           Text="This checkout is a shallow git clone (git rev-parse --is-shallow-repository -> true). MinVer cannot see tag history here and will silently compute a plausible-looking but wrong version (0.1.0-preview.0 for every commit, with no warning) — see [shallow-clone-is-a-defect], docs/superpowers/plans/2026-08-23-trunk-based-versioning.md. Fetch full history before building, e.g. 'git fetch --unshallow', or clone/checkout without --depth. Every actions/checkout step in .github/workflows/build-and-test.yml sets fetch-depth: 0 for exactly this reason — if you hit this in CI, that setting was removed from an existing step or a new checkout step was added without it." />
+  </Target>
 </Project>

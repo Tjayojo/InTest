@@ -51,6 +51,15 @@ jobs:
         # and the resulting commit was fetched and its date/message checked against the release
         # before use, not trusted on the ref name alone.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # [shallow-clone-is-a-defect] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md):
+          # actions/checkout defaults to a depth-1 (shallow) clone, under which MinVer sees no tags
+          # and silently computes a plausible-looking but wrong version for every commit, with no
+          # warning at all. Full history is required for MinVer to see tag distance correctly.
+          # Directory.Build.props' InTestEnsureNotShallowClone target fails the build loudly if this
+          # setting is ever dropped from a checkout step -- keep both, the target is the backstop
+          # this one line can silently stop being, not a replacement for it.
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         # actions/setup-dotnet, pinned the same way (releases/latest -> v6.0.0 -> refs/tags ->
@@ -129,6 +138,15 @@ jobs:
       # rule is about reasoning, not about avoiding all repeated YAML.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # [shallow-clone-is-a-defect] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md):
+          # actions/checkout defaults to a depth-1 (shallow) clone, under which MinVer sees no tags
+          # and silently computes a plausible-looking but wrong version for every commit, with no
+          # warning at all. Full history is required for MinVer to see tag distance correctly.
+          # Directory.Build.props' InTestEnsureNotShallowClone target fails the build loudly if this
+          # setting is ever dropped from a checkout step -- keep both, the target is the backstop
+          # this one line can silently stop being, not a replacement for it.
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -186,6 +204,15 @@ jobs:
       # how each SHA was resolved.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # [shallow-clone-is-a-defect] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md):
+          # actions/checkout defaults to a depth-1 (shallow) clone, under which MinVer sees no tags
+          # and silently computes a plausible-looking but wrong version for every commit, with no
+          # warning at all. Full history is required for MinVer to see tag distance correctly.
+          # Directory.Build.props' InTestEnsureNotShallowClone target fails the build loudly if this
+          # setting is ever dropped from a checkout step -- keep both, the target is the backstop
+          # this one line can silently stop being, not a replacement for it.
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
