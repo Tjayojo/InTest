@@ -1,0 +1,270 @@
+name: Release
+
+# Publishes InTest.Cli and InTest.Runtime to nuget.org via NuGet Trusted Publishing (OIDC) --
+# [tag-is-the-release] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md): a tag
+# produces a *publishable* artifact, and this workflow is what actually publishes it.
+# [publish-stays-manual] is retired by this file, not silently -- see
+# docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's superseded-decision note and
+# CONTRIBUTING.md's "Branching and how a release is cut" for the record of why that premise
+# expired.
+#
+# ---- Why trusted publishing, and why no secret is added here ------------------------------------
+# nuget.org's trusted-publishing policy binds a *package owner* (a nuget.org account/organization),
+# not a package ID -- confirmed by reading the policy's own field list: Repository Owner,
+# Repository, Workflow File (file name only), an optional Environment, and a Package owner
+# dropdown. There is no package-ID field, so this works even though `InTest.Cli` and
+# `InTest.Runtime` are not reserved on nuget.org yet (CONTRIBUTING.md publishing checklist, step
+# 2) -- the first push still claims the ID, same as it always would have. That is why no
+# `NUGET_API_KEY` secret is defined anywhere in this repository: NuGet/login (below) exchanges a
+# GitHub-issued OIDC token for a short-lived (~1 hour) nuget.org API key at push time, and nothing
+# long-lived is ever stored.
+#
+# ---- Why a SEPARATE workflow file, not a job added to pack.yml ----------------------------------
+# Two independent reasons, both load-bearing:
+#
+# 1. id-token: write must never be reachable from the merge-to-main path. pack.yml already runs on
+#    every push to main (that is the artifact [tag-is-the-release] promises for every merge, not
+#    just every tag) -- if the OIDC permission lived anywhere in that file, every merge to main
+#    would run in a job *capable* of minting a nuget.org publish key, whether or not a publish step
+#    actually ran. Keeping the permission out of pack.yml's file entirely, rather than trusting an
+#    `if:` to gate it, means there is no job in that file a reviewer needs to re-audit every time
+#    pack.yml changes.
+# 2. nuget.org's own policy names the workflow by **file name only** (e.g. "release.yml"), not by
+#    job name or trigger condition -- so the file identity IS the security boundary the policy
+#    matches against. A second job inside pack.yml would still satisfy a policy scoped to
+#    "pack.yml", which is exactly the file that already runs on unreviewed PR-adjacent pushes to
+#    main. A dedicated file makes the policy's Workflow File field name something that only ever
+#    runs on a tag push gated by a GitHub Environment (below) -- see "The security shape" below.
+#
+# ---- The security shape (this drives every other decision in this file) -------------------------
+# pack.yml's own header comment records that `on.push.tags: ['*']` fires for a tag pushed on *any*
+# branch, and nuget.org's job_workflow_ref validation accepts `@.*` -- any ref. Without a further
+# control, anyone with push access to any branch could push a tag carrying their own edited copy of
+# this workflow file and mint a publishing key for InTest.*, because the `if:` guard below and even
+# the tag-pattern filter both live inside the file an attacker with push access could edit before
+# pushing the tag.
+#
+# The control that survives that attack is the `environment: nuget-release` on the publish job
+# below, matched by an identical Environment field in the nuget.org trusted-publishing policy.
+# GitHub issues the `environment` claim in the OIDC token itself, computed from the *job's own
+# `environment:` key as evaluated by GitHub's own environment-protection machinery* -- not from
+# anything the workflow file's logic asserts about itself. An attacker who edits this file can
+# change what the workflow *does*, but cannot forge the `environment` claim without also satisfying
+# whatever protection rules the repository owner attaches to the `nuget-release` environment on
+# GitHub (required reviewers, deployment branch/tag policies, wait timers) -- configured in repo
+# settings, not in this file, and therefore not editable by a pull request. **The repository owner
+# has not yet confirmed this environment exists or is configured** -- see this task's report for
+# what still needs doing in repo settings.
+#
+# ---- Why this tag pattern, not pack.yml's `['*']` -----------------------------------------------
+# pack.yml intentionally accepts any tag shape, because its job is only to pack-and-verify an
+# artifact and upload it as a workflow artifact -- a wrong-shaped tag there wastes a few CI minutes
+# at worst. This file *publishes*, permanently and irrevocably (nuget.org versions cannot be
+# deleted, only unlisted), so the trigger is narrowed on purpose:
+#
+#   tags:
+#     - '[0-9]+.[0-9]+.[0-9]+'
+#     - '[0-9]+.[0-9]+.[0-9]+-*'
+#
+# GitHub's tag-filter glob is not a full regex -- there is no way to express SemVer's actual
+# prerelease/build-metadata grammar (dot-separated alphanumeric identifiers, no leading zeros on
+# numeric ones, etc.) in this syntax, and `[0-9]+` matches a run of digits via GitHub's documented
+# `+` ("one or more of the preceding character") and `[]` (character class) filter operators, the
+# same syntax already relied on nowhere else in this repository but documented at
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#patterns-to-match-branches-and-tags-in-the-filter-pattern-cheat-sheet.
+# The two lines accept `0.1.0` / `1.2.3` (the first pattern) and `0.1.0-preview.1` / any
+# `X.Y.Z-<anything>` prerelease (the second, where `-*` matches a literal hyphen followed by zero or
+# more characters). What it deliberately does NOT reject: a tag like `1.2.3-` with an empty
+# prerelease label, or `01.2.3` with a leading zero -- tightening further than GitHub's glob syntax
+# allows is not worth chasing, because **the environment gate above is the actual security control,
+# not this filter.** This filter's job is narrower and cheaper: stop the obviously-wrong shapes
+# (`latest`, `nightly-build`, a branch name someone tagged by mistake) from even attempting a
+# publish run, so a malformed tag fails visibly at "no workflow ran" rather than inside the pack
+# step. `pack.yml` is unchanged and keeps accepting `'*'` -- narrowing it would silently stop
+# verifying non-SemVer tags that someone might still push for other reasons (an internal
+# checkpoint tag, for instance), and pack.yml never publishes, so there is nothing there for a
+# narrower filter to protect.
+#
+# ---- What this workflow deliberately does not do -------------------------------------------------
+# It does not reserve the InTest. NuGet ID prefix (CONTRIBUTING.md publishing checklist step 2 --
+# unrelated to trusted publishing and still a separate manual step). It does not run the
+# CONTRIBUTING.md "Verify, then tag" artifact-install smoke test
+# (`dotnet tool install ... && intest --help`) before pushing -- that step needs a human decision
+# about whether the artifact looks right, the same reason the readiness spec calls it out as a step
+# no existing script can substitute for; it belongs BEFORE the tag is even pushed, using the
+# artifact pack.yml already produced from the same commit, which is precisely why this workflow
+# never sees it (this workflow's own trigger is the tag push that step is meant to precede). It
+# does not flip README.md's "Status: v0" callout or set PackageValidationBaselineVersion -- both
+# remain manual, one-time, human edits performed after the publish this workflow performs, not
+# before it.
+#
+# Action pins follow [pin-actions-by-sha] (CONTRIBUTING.md's dependency policy, extended to
+# actions): every third-party action here is pinned by commit SHA, resolved the same way as every
+# existing pin in this repository -- `gh api .../releases/latest` for the tag, then
+# `.../git/refs/tags/<tag>` for the commit, then the commit's own date/message checked against the
+# release rather than trusted on the tag name alone. actions/checkout, actions/setup-dotnet and
+# actions/cache reuse the exact pins already verified in pack.yml/build-and-test.yml -- same
+# actions, same versions, nothing to re-resolve. actions/download-artifact and NuGet/login are new
+# to this repository; both were resolved and verified this task (see the report for the exact
+# commands and the dates checked).
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+
+# Workflow-level permission stays read-only, matching pack.yml and build-and-test.yml. id-token
+# is granted ONLY on the publish job below, per "The security shape" above -- the pack job needs
+# nothing beyond reading the checkout.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  pack:
+    name: Pack (verify against tag)
+    # Single OS, deliberately. pack.yml's own matrix (ubuntu-latest + windows-latest) already
+    # proves both platforms produce an artifact whose scaffolded reference matches the packed
+    # InTest.Runtime version (Task 3 Step 3 of the versioning plan) -- re-proving cross-platform
+    # parity here would duplicate that job for no new evidence. What THIS job needs is one
+    # verified-correct artifact set to hand to the publish job, and ubuntu-latest is the cheaper
+    # runner minute for that. If pack.yml's cross-platform proof is ever found to not hold (see
+    # "What remains unexercised" in this task's report -- pack.yml has never completed a real run),
+    # revisit this choice.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # Same pin, same [shallow-clone-is-a-defect] reasoning as pack.yml's checkout step: MinVer
+        # needs full tag history to resolve a version at all, not merely to avoid a warning.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        # Identical key shape to pack.yml/build-and-test.yml -- see those files' comments for why
+        # Directory.Packages.props, every csproj and Directory.Build.props all belong in the key.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # Reuses scripts/ci/pack-and-verify.ps1 unchanged (beyond this task's Task 2 artifact-content
+      # assertions, which run here too, for free -- a malformed package fails this job before it
+      # ever reaches the publish job). -ExpectedTag is always populated here, unlike pack.yml's
+      # conditional use of it: every trigger of *this* workflow is a tag push by construction (see
+      # the `on:` block above), so [tag-is-the-release]'s "no prerelease height on a tagged build"
+      # check always applies.
+      - name: Pack and verify InTest.Cli / InTest.Runtime
+        run: >-
+          ./scripts/ci/pack-and-verify.ps1
+          -RepoRoot ${{ github.workspace }}
+          -OutputDir ${{ runner.temp }}/intest-release-pack
+          -ScaffoldRoot ${{ runner.temp }}/intest-release-pack-scaffold
+          -ExpectedTag '${{ github.ref_name }}'
+
+      - name: Upload packed artifacts
+        # Both extensions, unlike pack.yml's upload step (which globs *.nupkg only, because
+        # pack.yml's job is proving the pack succeeds and matches the scaffold -- it never pushes,
+        # so the .snupkg it also produces is simply not collected there). This job's whole purpose
+        # is handing artifacts to a push, and `dotnet nuget push` picks up a sibling .snupkg
+        # automatically when both files sit in the same directory -- so both need to survive the
+        # upload/download round trip intact, in one directory, together.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: intest-release-packages
+          path: |
+            ${{ runner.temp }}/intest-release-pack/*.nupkg
+            ${{ runner.temp }}/intest-release-pack/*.snupkg
+          if-no-files-found: error
+
+      - name: Confirm the working tree is still clean
+        # Same belt-and-suspenders check as pack.yml -- packing and scaffold verification both
+        # write outside github.workspace by construction, confirmed rather than trusted.
+        run: |
+          $status = git status --porcelain
+          if ($status) {
+            Write-Host "::error::Working tree is not clean after packing:"
+            Write-Host $status
+            exit 1
+          }
+          Write-Host "Working tree clean."
+
+  publish:
+    name: Publish to nuget.org
+    needs: pack
+    runs-on: ubuntu-latest
+    # This is the control "The security shape" above depends on. The value here ("nuget-release")
+    # must be typed identically into the Environment field of the nuget.org trusted-publishing
+    # policy the repository owner creates -- see this task's report for exactly what that setup
+    # still requires. Configure required reviewers and/or a deployment tag policy on this
+    # environment in the repository's own Settings > Environments; that configuration is what
+    # makes the `environment` claim in the OIDC token mean something an attacker cannot self-grant
+    # by editing this file.
+    environment: nuget-release
+    # Scoped to this job only, not the workflow -- the pack job above has no need of it, and
+    # putting it at the workflow level would grant it to a job that never uses it, widening the
+    # blast radius of anything that goes wrong in that job for no benefit.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # The weakest layer, named as such in this file's own header comment: this guard lives
+      # inside a file an attacker with push access could edit before pushing a tag, unlike the
+      # environment gate above, which does not. Kept anyway, as defense in depth against a future
+      # accidental trigger (e.g. someone adds workflow_dispatch to the `on:` block above without
+      # revisiting this guard) -- it costs nothing and the `on.push.tags` trigger should already
+      # make this always true.
+      - name: Confirm this run was triggered by a tag push
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          Write-Host "::error::Refusing to publish: github.ref is '${{ github.ref }}', not a tag ref. This should be unreachable given this workflow's own 'on: push: tags:' trigger -- if you are seeing this, something upstream of this job changed."
+          exit 1
+
+      - name: Download packed artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: intest-release-packages
+          path: ${{ runner.temp }}/intest-release-pack
+
+      # Exchanges this job's GitHub-issued OIDC token (available because of the id-token: write
+      # permission above) for a short-lived nuget.org API key -- no long-lived secret is read or
+      # stored anywhere in this repository. `user` is the nuget.org PROFILE NAME of the account the
+      # trusted-publishing policy names as Package Owner, not an email address -- confirmed by
+      # reading NuGet/login's own action.yml and README, both of which describe this input as "NuGet
+      # username" / "Your NuGet account username." Read from a repository (or, preferably,
+      # environment-scoped) VARIABLE rather than hardcoded here or stored as a secret: it is not
+      # sensitive -- NuGet/login's own README prints an example username in plain text -- so a
+      # `vars` reference is the right visibility level, and keeping it out of this file means
+      # rotating the publishing account later is a repo-settings change, not a workflow edit. The
+      # repository owner must add this variable before the first tag push reaches this job; see
+      # this task's report.
+      - name: Log in to nuget.org (OIDC trusted publishing)
+        id: nuget_login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_TRUSTED_PUBLISHING_USER }}
+
+      # dotnet nuget push resolves a sibling .snupkg automatically when it sits alongside its
+      # .nupkg in the same push -- no separate `dotnet nuget push *.snupkg` step, per NuGet's own
+      # documented behavior. --skip-duplicate turns "this exact version already exists on
+      # nuget.org" from a hard failure into a no-op push, which matters because this step has never
+      # run before (see "What remains unexercised" in this task's report) -- a transient failure
+      # partway through re-running this job should not be blocked by the first package having
+      # already landed. It does NOT allow re-publishing different content under an existing
+      # version; nuget.org itself refuses that regardless of this flag.
+      - name: Push to nuget.org
+        run: >-
+          dotnet nuget push
+          "${{ runner.temp }}/intest-release-pack/*.nupkg"
+          --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

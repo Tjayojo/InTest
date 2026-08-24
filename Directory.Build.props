@@ -20,6 +20,22 @@
     <PackageProjectUrl>https://github.com/Tjayojo/intest</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Tjayojo/intest.git</RepositoryUrl>
     <PackageIcon>icon.png</PackageIcon>
+
+    <!-- SourceLink itself is NOT set here: the .NET 10 SDK imports it implicitly for a repo whose
+         RepositoryUrl (above) points at GitHub, and referencing Microsoft.SourceLink.GitHub
+         explicitly would suppress that implicit import and replace a working in-box mechanism
+         with an out-of-band copy — see docs/superpowers/specs/
+         2026-08-23-nuget-publish-readiness-design.md §2. What's set here is what the implicit
+         import does not cover: symbol packaging and deterministic-build gating. -->
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Runs on InTest.Runtime only in practice: Microsoft.NET.PackTool.targets hard-sets this
+         false for PackAsTool projects (InTest.Cli), so it is a no-op there by SDK design, not an
+         oversight here — see the readiness spec §6. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
   </PropertyGroup>
 
   <!-- [version-from-git] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md, Task 2):

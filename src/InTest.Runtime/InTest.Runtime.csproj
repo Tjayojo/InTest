@@ -3,6 +3,8 @@
     <PackageId>InTest.Runtime</PackageId>
     <Description>Runtime support for InTest-generated API integration tests.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>testing;mstest;openapi;api-testing;test-runtime</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <!-- TestHost.RetainedFixtureContext is internal: only TestHost.CleanupAsync reads it, Task
@@ -34,5 +36,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
