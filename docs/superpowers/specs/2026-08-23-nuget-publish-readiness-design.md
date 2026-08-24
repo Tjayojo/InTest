@@ -1,8 +1,18 @@
 # NuGet publish readiness
 
-**Status:** Design · Revision 5
+**Status:** Design · Revision 6
 **Date:** 2026-08-23
-**Supersedes:** Revision 4 — §7 recorded *"decided: prerelease from `develop`, release from
+**Supersedes:** Revision 5 — §8's publishing checklist still assumed a manual local `dotnet
+pack` as the only way to get an artifact. By the time this revision was written, the versioning
+plan's Task 3 (`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`) had shipped
+`.github/workflows/pack.yml`, which already packs and verifies both projects in CI on every merge
+to `main` and every tag — unpublished, but a real artifact, not a hypothetical one. §8 is
+rewritten below to make CI-then-download the ordinary path and a manual `dotnet pack` the
+fallback, without claiming anything is published or that `dotnet tool restore` works from a bare
+clone — neither is true. Revision 4's supersession of `develop`/`main` (below) and revision 2's
+errors (below) are unchanged from revision 5.
+
+**Revision 4:** §7 recorded *"decided: prerelease from `develop`, release from
 `main`"* as settled. The owner subsequently chose trunk-based versioning with tag-driven releases
 instead — one branch, `main`, continuous; a tag marks a release; `release/N.x` cut on demand only
 when an old major needs servicing
@@ -347,13 +357,20 @@ because publishing a CLI that scaffolds unrestorable projects is worse than not 
 
 ## 8. `CONTRIBUTING.md`: publishing checklist
 
-New subsection between "## Releases" and "## Testing against a local build". None of this is
-performed by this change.
+New subsection between "## Releases" and "## Testing against a local build". None of the
+metadata/publishing work below is performed by this change. **Since revision 5, two of the
+prerequisites this checklist used to name as future work are done, and step 5 is reconciled
+accordingly** — the versioning plan
+(`docs/superpowers/plans/2026-08-23-trunk-based-versioning.md`) shipped separately from this
+readiness pass and now has its own "Branching and how a release is cut" section in
+`CONTRIBUTING.md`, which this checklist defers to rather than re-explaining.
 
 1. §7 is decided — trunk-based, tag-driven releases (`main` continuous, a tag marks a release).
-   Before the first prerelease push, confirm the scaffold defect (§7) is fixed: a CLI at
-   `0.1.0-preview.N` must scaffold a `PackageReference` to a runtime version that actually exists,
-   or the generated project cannot restore.
+   **The scaffold defect this step used to ask you to confirm is fixed**
+   (`[scaffold-reads-itself]`, same plan): `InitCommand.cs`'s scaffold interpolates
+   `CliVersion.Current` rather than a literal, and `PackageVersionCouplingTests` guards the
+   regression mechanically. Nothing to do here now beyond the ordinary "tests are green" check —
+   this step stays only as a pointer for a reader who hasn't read the versioning plan.
 2. Reserve the `InTest.` **ID prefix** with NuGet (nuget.md's "CONSIDER choosing a package name with
    a prefix that meets NuGet's prefix reservation criteria"). The IDs are unreserved today, and the
    first push claims them.
@@ -362,17 +379,45 @@ performed by this change.
 4. **Clear the local NuGet cache** (`dotnet nuget locals global-packages --clear`, or delete
    `~/.nuget/packages/intest.*`). Local packing has twice left an `intest.runtime 0.1.0` in the
    cache with different content; NuGet caches by exact version and never re-fetches, so a stale
-   entry silently shadows the published package.
-5. `dotnet pack -c Release` both projects. Set `ContinuousIntegrationBuild=true` explicitly for
-   this pack, or accept non-deterministic release artifacts — see §9.
-6. **Verify the artifacts before pushing.** Unzip both `.nupkg` and confirm: `README.md` present,
-   `icon.png` present, `THIRD-PARTY-NOTICES.md` present in `InTest.Cli`, and a non-empty
-   `<repository … commit="…">`. Then `dotnet tool install --global --add-source <dir> InTest.Cli
-   --version <v>` and run `intest --help`. **`scripts/local-e2e-test.ps1` is not a substitute** — it
-   packs at `0.1.0-local.<timestamp>` from a non-git copy, so it never exercises the artifact being
-   pushed and never resolves Source Link.
+   entry silently shadows the published package. Applies whether the `.nupkg` about to be pushed
+   was packed locally (step 5) or downloaded from a CI run (see below) — the cache does not care
+   where the file came from.
+5. **Get the artifact.** Two ways, and CI producing versioned artifacts (Task 3 of the versioning
+   plan, `.github/workflows/pack.yml`) changed which is the default:
+   - **Tag the release commit and let CI pack it**
+     (`CONTRIBUTING.md`, "Branching and how a release is cut"): `git tag 0.1.0 && git push origin
+     0.1.0`, then download both `.nupkg`s from the resulting `pack.yml` Actions run. This is now
+     the ordinary path — it is what CI already verified matches the tag exactly
+     (`scripts/ci/pack-and-verify.ps1 -ExpectedTag`), so re-packing locally would only be
+     re-deriving a version CI already produced and checked.
+   - **`dotnet pack -c Release` both projects by hand**, if the artifact is needed before tagging,
+     or on a machine without access to the Actions run. Set `ContinuousIntegrationBuild=true`
+     explicitly for this pack, or accept non-deterministic release artifacts — see §9.
+
+   **Neither path resolves §9 on its own.** `ContinuousIntegrationBuild` is not wired up anywhere
+   in this repository today (confirmed by search — no `Directory.Build.props` condition on
+   `GITHUB_ACTIONS` or similar exists yet), so a `pack.yml`-produced artifact carries the same
+   non-deterministic Source Link paths as a local pack; downloading from CI is not a substitute for
+   deciding §9's open question. And **`pack.yml` has never completed a real run on GitHub Actions**
+   — its commands were verified locally on both platforms and the workflow file passes
+   `actionlint`, but the scheduling, trigger firing, matrix fan-out and artifact upload are
+   unexercised, and there is no badge or green run for it. Treat the first tag push as the first
+   genuine test of this path, not as something already proven.
+6. **Verify the artifacts before pushing**, regardless of which of step 5's two paths produced
+   them. Unzip both `.nupkg` and confirm: `README.md` present, `icon.png` present,
+   `THIRD-PARTY-NOTICES.md` present in `InTest.Cli`, and a non-empty `<repository …
+   commit="…">`. Then `dotnet tool install --global --add-source <dir> InTest.Cli --version <v>`
+   and run `intest --help`. **Neither `scripts/local-e2e-test.ps1` nor `scripts/ci/pack-and-verify.ps1`
+   is a substitute for this step** — `local-e2e-test.ps1` packs at `0.1.0-local.<timestamp>` from a
+   non-git copy, so it never exercises the artifact being pushed and never resolves Source Link;
+   `pack-and-verify.ps1` packs the real version and proves the scaffold agrees with it, but it
+   never installs the tool or runs `intest --help`, and — like everything else CI does — it does
+   not push anything, so it cannot confirm what nuget.org itself will accept.
 7. `dotnet nuget push` both `.nupkg` and `.snupkg`. Confirm the `.snupkg` is accepted (§2 records
-   this as unproven for a tool package).
+   this as unproven for a tool package). **This step remains entirely unexercised.** Nothing in
+   this repository, in CI or otherwise, has ever pushed a package to nuget.org — no ID is reserved,
+   `dotnet tool restore` cannot resolve `intest.cli` from a bare clone, and that stays true until a
+   human performs this step by hand.
 8. Flip `README.md`'s "Status: v0 … nothing published yet" callout (`README.md:12-41`).
 9. For the release *after* the first: set `PackageValidationBaselineVersion` on `InTest.Runtime`
    only (§6).
