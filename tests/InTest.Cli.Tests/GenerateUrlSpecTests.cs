@@ -315,31 +315,41 @@ public class GenerateUrlSpecTests
     }
 
     /// <summary>
-    /// The other side of the <c>rename(2)</c> behaviour described on
-    /// <see cref="ExplainsASnapshotThatCannotBeWritten"/>: a read-only <c>spec.json</c> is
-    /// replaced rather than refused.
+    /// A read-only <c>spec.json</c> is refused, on <b>every</b> platform, and that uniformity is
+    /// the point of the test rather than a detail of it.
     /// <para>
-    /// Pinned deliberately rather than left as an accident of the atomic write. It is the right
-    /// outcome — <c>spec.json</c> is generator-owned (§5), so `generate` overwriting it is the
-    /// whole contract, and a read-only bit on a file the tool owns should not stop the tool
-    /// owning it. But it <i>is</i> a behaviour change from a plain <c>File.WriteAllText</c>,
-    /// which would have failed here, and an undocumented behaviour change is how the next reader
-    /// concludes the guard above is broken.
+    /// The atomic write makes this behaviour platform-divergent unless something decides
+    /// otherwise: on POSIX the move is <c>rename(2)</c>, which ignores the target file's mode and
+    /// replaces it; on Windows <c>MoveFileEx</c> honours the read-only attribute and fails. An
+    /// earlier version of this test asserted the POSIX outcome unconditionally — it passed on
+    /// ubuntu, failed on windows-latest, and only CI could have caught it, because this container
+    /// is Linux. Asserting one platform's behaviour as though it were the contract is what
+    /// produced that.
+    /// </para>
+    /// <para>
+    /// The convention chosen is refusal, matching what a plain <c>File.WriteAllText</c> did on
+    /// both platforms before the write became atomic — so no behaviour change rides along with
+    /// what was meant to be a durability fix. See <c>GenerateCommand.WriteSnapshotAsync</c>.
     /// </para>
     /// </summary>
     [TestMethod]
-    public async Task ReplacesAReadOnlySnapshot()
+    public async Task RefusesAReadOnlySnapshotOnEveryPlatform()
     {
         using var transport = new StubTransport(Spec);
         await RunAsync(transport);
 
+        var before = File.ReadAllBytes(SnapshotPath);
         var snapshot = new FileInfo(SnapshotPath) { IsReadOnly = true };
         try
         {
-            var (exitCode, report) = await RunAsync(transport);
+            var (exitCode, error) = await RunCapturingErrorAsync(transport);
 
-            exitCode.ShouldBe(ExitCode.Ok, report);
-            File.ReadAllText(SnapshotPath).ShouldBe(SpecSnapshot.Reprint(Spec));
+            exitCode.ShouldBe(ExitCode.ToolError);
+            error.ShouldNotContain("unexpected failure");
+            error.ShouldContain("read-only",
+                customMessage: "a refusal names the condition the adopter has to clear");
+            File.ReadAllBytes(SnapshotPath).ShouldBe(before,
+                "a refused write leaves the existing snapshot exactly as it was");
         }
         finally
         {

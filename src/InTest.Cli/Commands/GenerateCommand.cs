@@ -395,15 +395,11 @@ public static class GenerateCommand
     /// requires the destination to exist, which it does not on the first run.
     /// </para>
     /// <para>
-    /// <b>One behaviour this changes, deliberately.</b> On POSIX the move is <c>rename(2)</c>,
-    /// which checks write permission on the <i>directory</i> and ignores the target file's own
-    /// mode — so a read-only <c>spec.json</c> is replaced rather than refused, where a plain
-    /// <c>File.WriteAllText</c> would have failed. That is the right outcome (<c>spec.json</c> is
-    /// generator-owned per §5, and `generate` overwriting it is the entire contract) but it is a
-    /// change, so it is stated here and pinned by
-    /// <c>GenerateUrlSpecTests.ReplacesAReadOnlySnapshot</c> rather than left for someone to
-    /// rediscover as a bug report. What still fails, and is what the catch below is for, is an
-    /// unwritable <i>directory</i>: a full disk, a read-only checkout, a permissions problem.
+    /// <b>A read-only <c>spec.json</c> is refused on every platform</b>, by an explicit check
+    /// rather than by whatever the move happens to do — see the comment on that check for why
+    /// leaving it to the platform produced two different answers to the same command. The catch
+    /// below covers what remains: an unwritable <i>directory</i> — a full disk, a read-only
+    /// checkout, a permissions problem.
     /// </para>
     /// </summary>
     private static async Task WriteSnapshotAsync(
@@ -413,6 +409,32 @@ public static class GenerateCommand
         // single volume, and a project on a different drive from %TEMP% would silently degrade to
         // a copy — which is exactly the non-atomic write this method exists to avoid.
         var temporaryPath = snapshotPath + ".tmp";
+
+        // Uniformity, chosen rather than inherited. The atomic write makes this behaviour
+        // platform-divergent if left alone: on POSIX the move is rename(2), which checks write
+        // permission on the *directory* and ignores the target file's own mode, so a read-only
+        // spec.json is replaced; on Windows MoveFileEx honours the read-only attribute and fails.
+        // The same command, two answers, decided by whichever OS is running it — caught by CI's
+        // windows-latest leg after the ubuntu leg had gone green.
+        //
+        // This repository already rejected that shape once, for line endings, and the reasoning
+        // transfers verbatim (CommittedJsonOptions: "one fixed convention, chosen deliberately,
+        // beats one that tracks whatever the writing platform's default happens to be").
+        //
+        // Refusal is the convention chosen, for two reasons. It is what a plain
+        // File.WriteAllText did on both platforms before this write became atomic, so it is not a
+        // behaviour change smuggled in alongside an unrelated fix. And a read-only bit is a
+        // deliberate signal from whoever set it: generator-owned (§5) means `generate` is the
+        // only thing that *writes* spec.json, not that it should overrule a filesystem that has
+        // been told to protect it.
+        if (File.Exists(snapshotPath) && new FileInfo(snapshotPath).IsReadOnly)
+        {
+            throw new SpecLoadException(
+                $"The spec snapshot at '{snapshotPath}' is read-only, so `generate` cannot refresh " +
+                "it. spec.json is generator-owned and must stay writable — clear the read-only " +
+                "flag, or point spec.source at a path source if this project is not meant to " +
+                "snapshot from a URL.");
+        }
 
         try
         {
