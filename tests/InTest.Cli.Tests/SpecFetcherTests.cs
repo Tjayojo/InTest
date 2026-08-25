@@ -301,26 +301,37 @@ public class SpecFetcherTests
     }
 
     /// <summary>
-    /// A redirect whose <c>Location</c> cannot be parsed as a URI. <c>SocketsHttpHandler</c>
-    /// raises <see cref="UriFormatException"/> while resolving it — a <see cref="FormatException"/>,
-    /// so neither the transport clauses nor <c>GenerateCommand</c>'s catches see it, and it
-    /// reaches <c>Program</c>'s crash floor as "intest: unexpected failure: UriFormatException".
+    /// A redirect whose <c>Location</c> cannot be parsed as a URI — two different exception
+    /// shapes, both raised by <c>SocketsHttpHandler</c> while resolving the header, both of a
+    /// type neither the transport clauses above nor <c>GenerateCommand</c>'s catches recognise,
+    /// so both reach <c>Program</c>'s crash floor as "intest: unexpected failure: ..." unless
+    /// caught here.
+    /// <para>
+    /// <c>"//"</c> and <c>"///"</c> — no parseable host — raise <see cref="UriFormatException"/>,
+    /// a <see cref="FormatException"/>. <c>"file://server/share/x.json"</c> parses far enough to
+    /// accept <c>server</c> as a host but then fails resolving the resulting URI's <c>Port</c> —
+    /// measured as <see cref="ArgumentOutOfRangeException"/>, "port ('-1') must be >= '0'". Same
+    /// defect class, same consequence, a different .NET exception type entirely — caught
+    /// alongside <see cref="UriFormatException"/> in <c>SpecFetcher.ReadAsync</c> and reported
+    /// with the same sentence.
+    /// </para>
     /// <para>
     /// Real socket, not the stub: the stub replaces <c>SocketsHttpHandler</c> wholesale, so no
-    /// redirect resolution happens inside it and this exception can never be raised there. That
+    /// redirect resolution happens inside it and neither exception can ever be raised there. That
     /// is the same blind spot that let a vacuous redirect test sit in this file passing.
     /// </para>
     /// <para>
-    /// The values that trigger it are the ones with no parseable host. <c>file:///etc/passwd</c>
-    /// does <i>not</i> — that resolves and comes back as a curated 405 — which is worth recording
-    /// because it is the obvious thing to reach for and it proves nothing. No local file is read
-    /// on either path: resolution fails before any request is issued.
+    /// The values that trigger these are not just "anything file-scheme-shaped".
+    /// <c>file:///etc/passwd</c> does <i>not</i> — that resolves and comes back as a curated 405 —
+    /// which is worth recording because it is the obvious thing to reach for and it proves
+    /// nothing. No local file is read on any path: resolution fails before any request is issued.
     /// </para>
     /// </summary>
     [TestMethod]
     [Timeout(60_000)]
     [DataRow("///", DisplayName = "three slashes, no host")]
     [DataRow("//", DisplayName = "two slashes, no host")]
+    [DataRow("file://server/share/x.json", DisplayName = "file scheme with a host, port resolution fails")]
     public async Task ReportsAMalformedLocationHeaderRatherThanCrashing(string location)
     {
         using var server = new RedirectingServer(location);

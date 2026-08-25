@@ -188,10 +188,10 @@ public static class UpgradeCommand
         if (!File.Exists(dotnetToolsPath))
         {
             Console.Error.WriteLine(
-                $"No .config/dotnet-tools.json found at '{dotnetToolsPath}'. `intest upgrade` " +
-                "pins the tool version there and cannot proceed without it — `intest init` " +
-                "scaffolds one for a brand-new project; for an existing one, create it by hand:" +
-                Environment.NewLine + InitCommand.DotnetToolsJsonContent(newVersion));
+            $"No .config/dotnet-tools.json found at '{dotnetToolsPath}'. `intest upgrade` " +
+            "pins the tool version there and cannot proceed without it — `intest init` " +
+            "scaffolds one for a brand-new project; for an existing one, create it by hand:" +
+            Environment.NewLine + InitCommand.DotnetToolsJsonContent(newVersion));
             return ExitCode.ToolError;
         }
 
@@ -259,11 +259,11 @@ public static class UpgradeCommand
         }
 
         report.WriteLine(
-            $"Upgraded intest.json and .config/dotnet-tools.json to intest {newVersion}." +
-            (scaffoldedGitattributes
-                ? " Also scaffolded .gitattributes, which this project did not have yet — see " +
-                  "InitCommand.GitattributesContent for what it pins and why."
-                : string.Empty));
+        $"Upgraded intest.json and .config/dotnet-tools.json to intest {newVersion}." +
+        (scaffoldedGitattributes
+            ? " Also scaffolded .gitattributes, which this project did not have yet — see " +
+              "InitCommand.GitattributesContent for what it pins and why."
+            : string.Empty));
 
         // [prerelease-reference-migration]: a pure read, run after every write above already
         // succeeded, never before — see DetectRuntimeReferenceMismatch's own doc comment for why
@@ -357,14 +357,20 @@ public static class UpgradeCommand
 
         var matches = RuntimePackageReferencePattern.Matches(csprojText);
 
-        // Zero: no InTest.Runtime PackageReference in the one shape `init` is known to write —
-        // central package management, a ProjectReference, or a real adopter's build reformatted
-        // enough that this narrow pattern no longer recognises it (see this method's own doc
-        // comment for why guessing here is worse than silence). More than one: never produced by
-        // `init`; still safer to say nothing than to report against an arbitrary pick.
+        // Zero: no InTest.Runtime.MSTest PackageReference in the one shape `init` is known to
+        // write — central package management, a ProjectReference, a still-legacy bare
+        // InTest.Runtime reference (checked below), or a real adopter's build reformatted enough
+        // that this narrow pattern no longer recognises it (see this method's own doc comment for
+        // why guessing here is worse than silence). More than one: never produced by `init`; still
+        // safer to say nothing than to report against an arbitrary pick.
         if (matches.Count != 1)
         {
-            return null;
+            // [runtime-adapter-split]: the adapter reference is absent, so — and only so — check
+            // for the pre-split bare id and offer the migration note instead of silence. A project
+            // that legitimately pins both (unusual, but possible) already took the branch above
+            // via matches.Count == 1 and never reaches here, so it is never told to "migrate" a
+            // reference it already has.
+            return DetectLegacyRuntimeReferenceMigration(csprojText, csprojFiles[0]);
         }
 
         var current = matches[0].Groups[1].Value;
@@ -375,24 +381,69 @@ public static class UpgradeCommand
 
         var fileName = Path.GetFileName(csprojFiles[0]);
         return
-            $"NOTE: {fileName} pins <PackageReference Include=\"InTest.Runtime\" Version=\"{current}\" />, " +
+            $"NOTE: {fileName} pins <PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{current}\" />, " +
             $"but the running intest is {runningVersion}. `intest upgrade` does not rewrite this " +
             "file (see [prerelease-reference-migration]) — change " +
             $"Version=\"{current}\" to Version=\"{runningVersion}\" by hand.";
     }
 
     /// <summary>
-    /// Matches the exact shape <c>InitCommand</c>'s scaffold writes for InTest.Runtime's own
+    /// <b>[runtime-adapter-split]</b> migration note: called only when the adapter pattern found no
+    /// match, so a match here means a project still pinning the pre-split bare <c>InTest.Runtime</c>
+    /// id. Zero or more-than-one legacy matches are silence, for the same "guessing is worse than a
+    /// true negative" reason <see cref="DetectRuntimeReferenceMismatch"/>'s own doc comment gives
+    /// for the adapter pattern.
+    /// </summary>
+    private static string? DetectLegacyRuntimeReferenceMigration(string csprojText, string csprojFile)
+    {
+        var legacyMatches = LegacyRuntimePackageReferencePattern.Matches(csprojText);
+        if (legacyMatches.Count != 1)
+        {
+            return null;
+        }
+
+        var current = legacyMatches[0].Groups[1].Value;
+        var fileName = Path.GetFileName(csprojFile);
+        return
+            $"NOTE: {fileName} pins <PackageReference Include=\"InTest.Runtime\" Version=\"{current}\" />, " +
+            "which no longer carries TestHost/ApiTestBase now that the MSTest adapter has split out " +
+            "into its own package. `intest upgrade` does not rewrite this file (see " +
+            "[prerelease-reference-migration]) — change the PackageReference id to " +
+            "\"InTest.Runtime.MSTest\" by hand. No source change is needed: both packages declare " +
+            "their types in the same namespace InTest.Runtime.";
+    }
+
+    /// <summary>
+    /// Matches the exact shape <c>InitCommand</c>'s scaffold writes for the MSTest adapter's own
     /// <c>PackageReference</c> — <c>Include</c> before <c>Version</c>, a self-closing tag — the
     /// same restriction <c>PackageVersionCouplingTests.PackageReferencePattern</c> accepts more
-    /// broadly (any package name) but this narrows to InTest.Runtime specifically, since that is
-    /// the only reference <see cref="DetectRuntimeReferenceMismatch"/> has any business reporting
-    /// on. A real adopter's project that reformatted this line — reordered attributes, added
-    /// <c>VersionOverride</c>, moved to central package management — simply will not match, which
-    /// is by design: see that method's own doc comment for why a non-match means silence rather
-    /// than a looser pattern reaching further into adopter-owned text.
+    /// broadly (any package name) but this narrows to InTest.Runtime.MSTest specifically, since
+    /// that is the only reference <see cref="DetectRuntimeReferenceMismatch"/> has any business
+    /// reporting on. A real adopter's project that reformatted this line — reordered attributes,
+    /// added <c>VersionOverride</c>, moved to central package management — simply will not match,
+    /// which is by design: see that method's own doc comment for why a non-match means silence
+    /// rather than a looser pattern reaching further into adopter-owned text.
     /// </summary>
     private static readonly Regex RuntimePackageReferencePattern =
+        new(@"<PackageReference\s+Include=""InTest\.Runtime\.MSTest""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
+
+    /// <summary>
+    /// <b>[runtime-adapter-split]</b>: a scaffold written before the MSTest adapter existed pins
+    /// the bare <c>InTest.Runtime</c> id instead of <c>InTest.Runtime.MSTest</c>. That reference
+    /// still builds — the neutral package alone no longer carries <c>TestHost</c>/<c>ApiTestBase</c>,
+    /// so it would fail at compile time the moment anything in the generated project needs them,
+    /// which is every generated test class — so this is caught here, deliberately, as a proactive
+    /// migration note rather than left to surface as a confusing downstream compiler error with no
+    /// pointer back to what changed.
+    /// <para>
+    /// The fix is a one-line PackageReference id change and nothing else: both packages declare
+    /// their types in the same <c>namespace InTest.Runtime</c> ([shared-namespace] in the runtime
+    /// split plan), so no <c>using</c>, no type name, and no generated source changes. The note
+    /// below says exactly that, so an adopter does not go looking for a source-level migration that
+    /// does not exist.
+    /// </para>
+    /// </summary>
+    private static readonly Regex LegacyRuntimePackageReferencePattern =
         new(@"<PackageReference\s+Include=""InTest\.Runtime""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
 
     /// <summary>
@@ -443,8 +494,8 @@ public static class UpgradeCommand
             // silently skipped, so a future change that somehow does make this reachable fails
             // loudly instead of an upgrade quietly not upgrading anything.
             throw new InvalidOperationException(
-                $"{ConfigLoader.FileName} has no schemaVersion; ConfigLoader.Load should already " +
-                "have refused this file before upgrade reached it.");
+            $"{ConfigLoader.FileName} has no schemaVersion; ConfigLoader.Load should already " +
+            "have refused this file before upgrade reached it.");
         }
 
         var nameStart = bomLength + schemaVersion.NameStart;
@@ -489,8 +540,8 @@ public static class UpgradeCommand
         var body = toolsBytes.AsSpan(bomLength);
 
         var noIntestCliPin = "does not pin \"intest.cli\" under \"tools\" — upgrade cannot bump a pin " +
-                              "that is not there. Add it by hand: \"intest.cli\": { \"version\": \"" +
-                              newVersion + "\", \"commands\": [\"intest\"] }.";
+                             "that is not there. Add it by hand: \"intest.cli\": { \"version\": \"" +
+                             newVersion + "\", \"commands\": [\"intest\"] }.";
 
         if (!TryFindDirectChildProperty(body, "tools", out var tools))
         {
@@ -512,7 +563,7 @@ public static class UpgradeCommand
         {
             updatedBytes = toolsBytes;
             reason = "pins \"intest.cli\" but that entry has no \"version\" field for upgrade to " +
-                      "bump — add one by hand: \"version\": \"" + newVersion + "\".";
+                     "bump — add one by hand: \"version\": \"" + newVersion + "\".";
             return false;
         }
 

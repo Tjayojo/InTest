@@ -53,9 +53,9 @@ public static class ConfigLoader
         "\"spec\": { \"source\": \"../Orders/bin/Debug/net10.0/orders.json\" }.";
 
     private const string ProjectSectionRule =
-        "It must declare project.rootNamespace and project.testBaseClass — for example " +
-        "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", " +
-        "\"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\" }.";
+        "It must declare project.rootNamespace, project.testBaseClass and project.framework — " +
+        "for example \"project\": { \"rootNamespace\": \"Orders.ApiTests\", " +
+        "\"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\", \"framework\": \"mstest\" }.";
 
     private const string RootNamespaceRule =
         "It must be the C# namespace generated tests are declared in — for example \"Orders.ApiTests\".";
@@ -63,6 +63,15 @@ public static class ConfigLoader
     private const string TestBaseClassRule =
         "It must be the C# name of the class generated tests derive from — for example " +
         "\"Orders.ApiTests.OrdersTestBase\".";
+
+    /// <summary>
+    /// <c>mstest</c> is the only value accepted today. §3 designs InTest for three frameworks —
+    /// this list grows the day a second one ships, not before; naming a future framework here
+    /// would document a capability the tool does not have.
+    /// </summary>
+    private const string FrameworkRule =
+        "It must be the test framework generated tests target. Supported today: \"mstest\". " +
+        "InTest is designed to support additional frameworks (§3) but only ships MSTest so far.";
 
     public static LoadedConfig Load(string projectRoot)
     {
@@ -96,9 +105,9 @@ public static class ConfigLoader
         if (root.ValueKind != JsonValueKind.Object)
         {
             throw new ConfigLoadException(
-                $"{FileName} must be a JSON object with 'spec' and 'project' sections, but its top " +
-                $"level is {Describe(root.ValueKind)}. Compare it against the {FileName} that " +
-                "`intest init` writes.");
+            $"{FileName} must be a JSON object with 'spec' and 'project' sections, but its top " +
+            $"level is {Describe(root.ValueKind)}. Compare it against the {FileName} that " +
+            "`intest init` writes.");
         }
 
         RequireSupportedSchemaVersion(root);
@@ -152,15 +161,76 @@ public static class ConfigLoader
         if (!CSharpIdentifier.TryValidateDottedName(rootNamespace, "project.rootNamespace", out var namespaceReason))
         {
             throw new ConfigLoadException(
-                $"{namespaceReason} Change project.rootNamespace in {FileName} — for example \"Orders.ApiTests\".");
+            $"{namespaceReason} Change project.rootNamespace in {FileName} — for example \"Orders.ApiTests\".");
         }
         if (!CSharpIdentifier.TryValidateDottedName(testBaseClass, "project.testBaseClass", out var baseClassReason))
         {
             throw new ConfigLoadException(
-                $"{baseClassReason} Change project.testBaseClass in {FileName} — for example \"Orders.ApiTests.OrdersTestBase\".");
+            $"{baseClassReason} Change project.testBaseClass in {FileName} — for example \"Orders.ApiTests.OrdersTestBase\".");
         }
 
-        return new LoadedConfig(specSource, rootNamespace, testBaseClass, intestVersion, specSourceIsUrl);
+        var framework = RequireSupportedFramework(project);
+
+        return new LoadedConfig(specSource, rootNamespace, testBaseClass, framework, intestVersion, specSourceIsUrl);
+    }
+
+    /// <summary>
+    /// Unlike <see cref="ReadOptionalIntestVersion"/>, <c>project.framework</c> is required — read
+    /// with the same <see cref="RequireString"/> helper <c>rootNamespace</c> and
+    /// <c>testBaseClass</c> already use, not the optional path. That asymmetry is the one
+    /// genuinely debatable call in this method, so it is argued here rather than merely asserted:
+    /// <list type="bullet">
+    /// <item><c>framework</c> is a section-mate of <c>rootNamespace</c> and <c>testBaseClass</c>,
+    /// both required. <c>intestVersion</c> is the one optional setting in this file, and it is
+    /// optional for a stated reason, not by default: §5 says a config "grows by addition", so a
+    /// config predating a field — or hand-edited without it — must still load. That reason is
+    /// about <c>intestVersion</c> specifically; it does not generalize to every setting that
+    /// happens to be new.</item>
+    /// <item>§5 makes the test framework a <b>frozen</b> axis — a generated suite cannot be
+    /// migrated to a different framework in place. A config that declares no framework has no
+    /// answer to "which framework is this suite?", the same unanswerable question
+    /// <see cref="RequireSection"/> already refuses to leave open for the <c>project</c> section
+    /// itself.</item>
+    /// <item>Defaulting to <c>"mstest"</c> was considered and rejected: it is exactly the
+    /// plausible-default <c>CLAUDE.md</c>'s "Fail loudly" rule forbids. A config that says nothing
+    /// would silently behave as MSTest forever — correct only until a second framework ships,
+    /// at which point every adopter who never wrote the key is depending on a default they never
+    /// chose. <c>intestVersion</c> does not set a counter-precedent here: under
+    /// <c>[exact-match]</c>, <c>generate --check</c> compares it by string equality, so an absent
+    /// claim and a wrong claim merely render differently — <c>framework</c> instead selects
+    /// behaviour outright (which template renders), so absence and a wrong value are the same
+    /// failure, not two.</item>
+    /// <item>Safety net, verified rather than assumed: <c>InitCommand</c> has always written
+    /// <c>"framework": "mstest"</c> into every project it scaffolds, and both
+    /// <c>examples/Catalog.ApiTests/intest.json</c> and <c>examples/Orders.ApiTests/intest.json</c>
+    /// already declare it. Making the key required breaks no config this repository ships.</item>
+    /// </list>
+    /// <para>
+    /// The value itself accepts exactly <c>"mstest"</c> — lowercase, matching what
+    /// <c>InitCommand</c> writes — and nothing else, including differently-cased spellings like
+    /// <c>"MSTest"</c>. §5's config is adopter-facing JSON, not a C# identifier with
+    /// case-insensitive lookup rules; treating <c>"MSTest"</c> as equivalent would mean this
+    /// loader accepts spellings <c>init</c> never writes and no other setting on this surface
+    /// tolerates (<c>rootNamespace</c> and <c>testBaseClass</c> are both compared exactly as
+    /// written). One accepted spelling is also simpler to document and to grep for than a
+    /// case-insensitive set would be, with no adopter-facing upside: nothing hand-writes this key
+    /// in a different case today.
+    /// </para>
+    /// </summary>
+    private static string RequireSupportedFramework(JsonElement project)
+    {
+        var framework = RequireString(project, "project.framework", "framework", FrameworkRule);
+
+        if (framework != "mstest")
+        {
+            throw new ConfigLoadException(
+            $"project.framework in {FileName} is \"{framework}\", which intest does not support " +
+            "yet. Supported today: \"mstest\". InTest is designed to support additional test " +
+            "frameworks (§3's \"designed for three, ships one\"), but MSTest is the only one " +
+            "implemented so far. Set project.framework to \"mstest\".");
+        }
+
+        return framework;
     }
 
     /// <summary>
@@ -200,8 +270,8 @@ public static class ConfigLoader
         {
             var written = declared.ValueKind == JsonValueKind.Null ? "null" : Quote(declared);
             throw new ConfigLoadException(
-                $"intestVersion in {FileName} is {Describe(declared.ValueKind)}, not a string: " +
-                $"{written}. {rule}");
+            $"intestVersion in {FileName} is {Describe(declared.ValueKind)}, not a string: " +
+            $"{written}. {rule}");
         }
 
         var text = declared.GetString()!;
@@ -245,16 +315,16 @@ public static class ConfigLoader
         if (!root.TryGetProperty("schemaVersion", out var declared))
         {
             throw new ConfigLoadException(
-                $"{FileName} has no schemaVersion. It must declare \"schemaVersion\": {SupportedSchemaVersion} — " +
-                "the schema this intest implements, and how intest tells a config written for a " +
-                "different version from one it can read.");
+            $"{FileName} has no schemaVersion. It must declare \"schemaVersion\": {SupportedSchemaVersion} — " +
+            "the schema this intest implements, and how intest tells a config written for a " +
+            "different version from one it can read.");
         }
 
         if (declared.ValueKind != JsonValueKind.Number)
         {
             throw new ConfigLoadException(
-                $"schemaVersion in {FileName} is {Describe(declared.ValueKind)}, not a whole number: " +
-                $"{Quote(declared)}. {rule}");
+            $"schemaVersion in {FileName} is {Describe(declared.ValueKind)}, not a whole number: " +
+            $"{Quote(declared)}. {rule}");
         }
 
         // A fractional schemaVersion is still JsonValueKind.Number, so the kind check above does
@@ -262,17 +332,17 @@ public static class ConfigLoader
         if (!declared.TryGetInt32(out var version))
         {
             throw new ConfigLoadException(
-                $"schemaVersion in {FileName} is {Quote(declared)}, which is not a whole number. {rule}");
+            $"schemaVersion in {FileName} is {Quote(declared)}, which is not a whole number. {rule}");
         }
 
         if (version != SupportedSchemaVersion)
         {
             throw new ConfigLoadException(
-                $"{FileName} declares schemaVersion {version}, but this intest implements " +
-                $"schemaVersion {SupportedSchemaVersion}. They must match: run an intest that " +
-                $"implements schemaVersion {version}, or set schemaVersion to " +
-                $"{SupportedSchemaVersion} and reconcile {FileName} against what this version " +
-                "expects. Continuing would reinterpret settings under meanings they may not have.");
+            $"{FileName} declares schemaVersion {version}, but this intest implements " +
+            $"schemaVersion {SupportedSchemaVersion}. They must match: run an intest that " +
+            $"implements schemaVersion {version}, or set schemaVersion to " +
+            $"{SupportedSchemaVersion} and reconcile {FileName} against what this version " +
+            "expects. Continuing would reinterpret settings under meanings they may not have.");
         }
     }
 
@@ -300,8 +370,8 @@ public static class ConfigLoader
         if (section.ValueKind != JsonValueKind.Object)
         {
             throw new ConfigLoadException(
-                $"'{name}' in {FileName} is {Describe(section.ValueKind)}, not an object: " +
-                $"{Quote(section)}. {rule}");
+            $"'{name}' in {FileName} is {Describe(section.ValueKind)}, not an object: " +
+            $"{Quote(section)}. {rule}");
         }
 
         return section;
@@ -328,7 +398,7 @@ public static class ConfigLoader
             // method's own 'path2' parameter.
             var written = value.ValueKind == JsonValueKind.Null ? "null" : Quote(value);
             throw new ConfigLoadException(
-                $"{setting} in {FileName} is {Describe(value.ValueKind)}, not a string: {written}. {rule}");
+            $"{setting} in {FileName} is {Describe(value.ValueKind)}, not a string: {written}. {rule}");
         }
 
         return value.GetString()!;

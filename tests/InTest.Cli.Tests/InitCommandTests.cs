@@ -62,11 +62,11 @@ public class InitCommandTests
         InitCommand.Run(_root, "Orders.ApiTests", "../Orders/bin/Debug/net10.0/orders.json").ShouldBe(0);
 
         foreach (var file in new[]
-        {
-            "intest.json", "Orders.ApiTests.csproj", ".editorconfig", ".gitattributes", "AssemblyInfo.cs",
-            "TestStartup.cs", "OrdersTestBase.cs", "appsettings.json", "Orders.ApiTests.runsettings",
-            ".config/dotnet-tools.json"
-        })
+                 {
+                     "intest.json", "Orders.ApiTests.csproj", ".editorconfig", ".gitattributes", "AssemblyInfo.cs",
+                     "TestStartup.cs", "OrdersTestBase.cs", "appsettings.json", "Orders.ApiTests.runsettings",
+                     ".config/dotnet-tools.json"
+                 })
         {
             File.Exists(Path.Combine(_root, file)).ShouldBeTrue($"{file} was not scaffolded.");
         }
@@ -78,15 +78,15 @@ public class InitCommandTests
     // keeps its own local Spec constant), which keeps that test to one `generate` call with no
     // `fixtures repair` step in between.
     private const string SpecNeedingNoFixture = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Orders", "version": "1.0" },
-      "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
-        "responses": { "200": { "description": "ok", "content": { "application/json": {
-          "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
-      "components": { "schemas": { "Order": { "type": "object" } } }
-    }
-    """;
+                                                {
+                                                  "openapi": "3.0.3",
+                                                  "info": { "title": "Orders", "version": "1.0" },
+                                                  "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+                                                    "responses": { "200": { "description": "ok", "content": { "application/json": {
+                                                      "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
+                                                  "components": { "schemas": { "Order": { "type": "object" } } }
+                                                }
+                                                """;
 
     /// <summary>
     /// Proves the scaffolded .gitattributes actually does its job, rather than merely existing.
@@ -225,11 +225,11 @@ public class InitCommandTests
 
         const int previewBytes = 256;
         Assert.Fail(
-            $"{file} changed bytes across a core.autocrlf=input checkout: {before.Length} bytes " +
-            $"before, {after.Length} after; {crlfBefore} CRLF sequence(s) before the checkout, " +
-            $"{crlfAfter} after. Likely cause: {likelyCause}. First {previewBytes} bytes, hex — " +
-            $"before: {Convert.ToHexString(before, 0, Math.Min(before.Length, previewBytes))}; " +
-            $"after: {Convert.ToHexString(after, 0, Math.Min(after.Length, previewBytes))}.");
+        $"{file} changed bytes across a core.autocrlf=input checkout: {before.Length} bytes " +
+        $"before, {after.Length} after; {crlfBefore} CRLF sequence(s) before the checkout, " +
+        $"{crlfAfter} after. Likely cause: {likelyCause}. First {previewBytes} bytes, hex — " +
+        $"before: {Convert.ToHexString(before, 0, Math.Min(before.Length, previewBytes))}; " +
+        $"after: {Convert.ToHexString(after, 0, Math.Min(after.Length, previewBytes))}.");
     }
 
     private static int CountCrlf(byte[] bytes)
@@ -295,9 +295,9 @@ public class InitCommandTests
             // failure to launch a process. Name the actual cause: this class shells out to a
             // real `git` binary and has no fallback if one is not on PATH (v1-e review, minor 11).
             Assert.Fail(
-                $"Could not start 'git {arguments}' in \"{workingDirectory}\": {ex.Message}. Is " +
-                "git installed and on PATH? GitattributesSurvivesAnAutocrlfInputCheckout shells " +
-                "out to a real git binary and cannot run without one.");
+            $"Could not start 'git {arguments}' in \"{workingDirectory}\": {ex.Message}. Is " +
+            "git installed and on PATH? GitattributesSurvivesAnAutocrlfInputCheckout shells " +
+            "out to a real git binary and cannot run without one.");
             throw; // Unreachable — Assert.Fail always throws — but keeps `process` definitely assigned.
         }
 
@@ -315,18 +315,28 @@ public class InitCommandTests
             // write to it: a deadlock, not a slow test (v1-e review, Important 6).
             var stdout = new StringBuilder();
             var stderr = new StringBuilder();
-            process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null) stdout.AppendLine(e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null) stderr.AppendLine(e.Data);
+            };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
             if (!process.WaitForExit((int)GitTimeout.TotalMilliseconds))
             {
-                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { /* already exited */ }
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException)
+                {
+                    /* already exited */
+                }
                 Assert.Fail(
-                    $"git {arguments} in \"{workingDirectory}\" did not exit within " +
-                    $"{GitTimeout.TotalSeconds}s — killed to fail this test loudly instead of " +
-                    "wedging the run.");
+                $"git {arguments} in \"{workingDirectory}\" did not exit within " +
+                $"{GitTimeout.TotalSeconds}s — killed to fail this test loudly instead of " +
+                "wedging the run.");
             }
 
             // Per WaitForExit(int)'s own documentation: when reading redirected streams via the
@@ -409,7 +419,7 @@ public class InitCommandTests
 
         File.ReadAllText(Path.Combine(_root, "Orders.ApiTests.csproj"))
             .ShouldContain("fixtures/**/*.json",
-                customMessage: "FixtureStore loads from AppContext.BaseDirectory — this is the F1 defect repeating");
+            customMessage: "FixtureStore loads from AppContext.BaseDirectory — this is the F1 defect repeating");
     }
 
     [TestMethod]
@@ -435,11 +445,11 @@ public class InitCommandTests
         var scaffold = File.ReadAllText(Path.Combine(_root, "TestStartup.cs"));
 
         scaffold.ShouldContain("AuthHandler",
-            customMessage: "the scaffold must say AuthHandler is already attached, not send an adopter to write their own");
+        customMessage: "the scaffold must say AuthHandler is already attached, not send an adopter to write their own");
         scaffold.ShouldContain("ITestTokenProvider",
-            customMessage: "the scaffold must point at the extension point that now actually works");
+        customMessage: "the scaffold must point at the extension point that now actually works");
         scaffold.ShouldContain("InTestClients.Api",
-            customMessage: "the scaffold must still name the client AuthHandler is attached to");
+        customMessage: "the scaffold must still name the client AuthHandler is attached to");
     }
 
     [TestMethod]
@@ -458,10 +468,10 @@ public class InitCommandTests
         // "TestHost.CleanupAsync" substring: that bare form also appears in the method's own doc
         // comment, so it would stay present even if the method body were gutted.
         Regex.IsMatch(
-                startup,
-                @"\[AssemblyCleanup\]\s+public\s+static\s+async\s+Task\s+AssemblyCleanup\(TestContext\s+context\)" +
-                @"\s*\{\s*await\s+TestHost\.CleanupAsync\(context\);\s*\}",
-                RegexOptions.Singleline)
+            startup,
+            @"\[AssemblyCleanup\]\s+public\s+static\s+async\s+Task\s+AssemblyCleanup\(TestContext\s+context\)" +
+            @"\s*\{\s*await\s+TestHost\.CleanupAsync\(context\);\s*\}",
+            RegexOptions.Singleline)
             .ShouldBeTrue("expected [AssemblyCleanup] to directly wrap a call to TestHost.CleanupAsync(context)");
     }
 
@@ -489,7 +499,7 @@ public class InitCommandTests
         // authenticates nothing. AuthHandler already no-ops when no provider is registered (Task
         // 2(b)), which is exactly the state this scaffold must ship in.
         startup.ShouldContain("// services.AddSingleton<ITestTokenProvider",
-            customMessage: "the scaffold must show the registration, but only as a comment");
+        customMessage: "the scaffold must show the registration, but only as a comment");
     }
 
     [TestMethod]
@@ -646,18 +656,18 @@ public class InitCommandTests
         var (exitCode, error) = RunCapturingError(projectRoot ?? _root, name, spec);
 
         exitCode.ShouldBe(ExitCode.ToolError,
-            "§5 gives 2 for a tool error and 1 for outstanding work — an argument the adopter " +
-            "mistyped is a tool error, and reporting it as 1 makes it indistinguishable from drift");
+        "§5 gives 2 for a tool error and 1 for outstanding work — an argument the adopter " +
+        "mistyped is a tool error, and reporting it as 1 makes it indistinguishable from drift");
         error.ShouldStartWith(setting, Case.Sensitive,
-            customMessage: "a refusal leads with the setting the adopter got wrong");
+        customMessage: "a refusal leads with the setting the adopter got wrong");
         error.ShouldContain("is empty",
-            customMessage: "a refusal says what is wrong with the value, not just that something is");
+        customMessage: "a refusal says what is wrong with the value, not just that something is");
         // Not ShouldContain("for example"): that phrase is discriminating only if an actual
         // quoted value follows it, and a rule that said "for example" and then trailed off would
         // have satisfied it. "Carries", not "ends with" — --project's example sits mid-sentence,
         // ahead of the sentence telling the adopter they can omit the flag entirely.
         Regex.IsMatch(error, "for example \"[^\"]+\"").ShouldBeTrue(
-            "a refusal carries a value the adopter can copy");
+        "a refusal carries a value the adopter can copy");
     }
 
     /// <summary>
@@ -679,7 +689,7 @@ public class InitCommandTests
             exitCode.ShouldBe(ExitCode.ToolError);
             error.ShouldStartWith("--project", Case.Sensitive);
             Directory.GetFileSystemEntries(_root).ShouldBeEmpty(
-                "a blank --project must be refused, not resolved to the current directory");
+            "a blank --project must be refused, not resolved to the current directory");
         }
         finally
         {
@@ -715,12 +725,12 @@ public class InitCommandTests
 
         var config = ConfigLoader.Load(_root);
         config.SpecSource.ShouldBe(spec,
-            "the URL is the source, and reaches intest.json exactly as it was typed");
+        "the URL is the source, and reaches intest.json exactly as it was typed");
         config.SpecSourceIsUrl.ShouldBeTrue();
 
         var doc = XDocument.Load(Path.Combine(_root, "Orders.ApiTests.csproj"));
         doc.Descendants("InTestSpecSource").Single().Value.ShouldBe("spec.json",
-            "MSBuild cannot copy from https:// — the build points at the snapshot, not the source");
+        "MSBuild cannot copy from https:// — the build points at the snapshot, not the source");
     }
 
     /// <summary>
@@ -735,8 +745,8 @@ public class InitCommandTests
 
         File.ReadAllText(Path.Combine(_root, ".gitattributes"))
             .ShouldContain("spec.json text eol=crlf",
-                customMessage: "spec.json is committed, InTest-written and pure CRLF, like the " +
-                               "three paths already pinned beside it");
+            customMessage: "spec.json is committed, InTest-written and pure CRLF, like the " +
+                           "three paths already pinned beside it");
     }
 
     /// <summary>
@@ -755,15 +765,15 @@ public class InitCommandTests
 
         exitCode.ShouldBe(ExitCode.ToolError);
         Directory.GetFileSystemEntries(_root).ShouldBeEmpty(
-            "§5's exit 2 is \"nothing was written\", and an argument is judged before the first write");
+        "§5's exit 2 is \"nothing was written\", and an argument is judged before the first write");
         error.ShouldStartWith("--spec", Case.Sensitive,
-            customMessage: "a refusal leads with the setting the adopter got wrong");
+        customMessage: "a refusal leads with the setting the adopter got wrong");
         error.ShouldContain(spec,
-            customMessage: "a refusal quotes what the adopter actually wrote");
+        customMessage: "a refusal quotes what the adopter actually wrote");
         error.ShouldContain("URL",
-            customMessage: "a refusal names the kind of value it is refusing");
+        customMessage: "a refusal names the kind of value it is refusing");
         error.ShouldContain("for example \"",
-            customMessage: "a refusal carries a value the adopter can copy");
+        customMessage: "a refusal carries a value the adopter can copy");
     }
 
     /// <summary>
@@ -798,7 +808,7 @@ public class InitCommandTests
     // CompileVerificationTests (Task 10 item 7): it was the only out-of-process *build* that
     // lived in this assembly, and under a solution-level `dotnet test` this assembly's ~6s run
     // fully overlaps InTest.Golden.Tests' ~1m40s one, so two independent MSBuild invocations
-    // could build scaffolded projects that both ProjectReference the same InTest.Runtime.csproj
+    // could build scaffolded projects that both ProjectReference the same InTest.Runtime.MSTest.csproj
     // simultaneously — a known source of intermittent obj/ file-lock failures. (v1-e's
     // GitattributesSurvivesAnAutocrlfInputCheckout, added later, shells out to a real `git`
     // binary and so is also out-of-process, but it never invokes MSBuild, so the file-lock race

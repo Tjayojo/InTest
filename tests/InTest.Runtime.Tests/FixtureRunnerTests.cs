@@ -180,16 +180,19 @@ public class FixtureRunnerTests
     [TestMethod]
     public async Task ASkippedFixtureSaysSo()
     {
-        var log = new StringWriter();
+        var diagnostics = new TestSupport.RecordingDiagnostics();
         var fixture = new QaOnlyFixture();
 
-        await FixtureRunner.RunAsync([fixture], new FixtureContext(), "local", log, default);
+        await FixtureRunner.RunAsync([fixture], new FixtureContext(), "local", diagnostics, default);
 
         // A fixture silently not running because the profile did not match is indistinguishable
         // from one that ran and did nothing — and the second-run acceptance in Task 8 would pass
-        // for the wrong reason.
-        log.ToString().ShouldContain(nameof(QaOnlyFixture));
-        log.ToString().ShouldContain("local");
+        // for the wrong reason. Asserted against Warnings specifically, not just "logged
+        // somewhere": a skip must reach the operator even on a passing run (IRunDiagnostics.Warn's
+        // whole intent), so a skip line that landed in Notes instead would be exactly the silent
+        // failure this test exists to catch, and the weaker "log contains it somewhere" assertion
+        // this replaces could not tell the difference.
+        diagnostics.Warnings.ShouldContain(w => w.Contains(nameof(QaOnlyFixture)) && w.Contains("local"));
         // Strengthens the assertion above: it must actually have been skipped, not merely logged
         // alongside a run that happened anyway.
         fixture.Ran.ShouldBeFalse();
@@ -198,18 +201,19 @@ public class FixtureRunnerTests
     [TestMethod]
     public async Task AFixtureRunsWhenAppliesToIncludesTheCurrentProfile()
     {
-        var log = new StringWriter();
+        var diagnostics = new TestSupport.RecordingDiagnostics();
         var fixture = new QaOnlyFixture();
 
-        await FixtureRunner.RunAsync([fixture], new FixtureContext(), "qa", log, default);
+        await FixtureRunner.RunAsync([fixture], new FixtureContext(), "qa", diagnostics, default);
 
         // Guards against an implementation that always skips (which ASkippedFixtureSaysSo alone
-        // would not catch) or that logs a "profile" line unconditionally. ShouldNotContain
-        // rather than ShouldBeEmpty: the plan says log is where "skip and progress lines go", so
-        // a future progress line on a successful run (Task 5/6) must not make this fail — only a
-        // skip line would mean this fixture was wrongly treated as not applying.
+        // would not catch) or that warns unconditionally. Warnings.ShouldBeEmpty, not merely
+        // "does not contain 'Skipping'": today every Warn call in RunAsync is a skip line, so a
+        // matching profile that ran cleanly must produce no warning at all — stronger than the
+        // substring check this replaces, which could not distinguish "no skip line" from "a skip
+        // line worded differently."
         fixture.Ran.ShouldBeTrue();
-        log.ToString().ShouldNotContain("Skipping", customMessage: "a matching profile must run without being logged as skipped");
+        diagnostics.Warnings.ShouldBeEmpty("a matching profile must run without being logged as skipped");
     }
 
     [TestMethod]
@@ -219,7 +223,7 @@ public class FixtureRunnerTests
         {
             var context = new FixtureContext();
 
-            await FixtureRunner.RunAsync([new AllProfilesFixture()], context, profile, TextWriter.Null, default);
+            await FixtureRunner.RunAsync([new AllProfilesFixture()], context, profile, new TestSupport.RecordingDiagnostics(), default);
 
             context.Get("ran").ShouldBe("yes", $"an empty AppliesTo must run for profile '{profile}'");
         }
@@ -230,7 +234,7 @@ public class FixtureRunnerTests
     {
         var fixture = new NullAppliesToFixture();
 
-        await FixtureRunner.RunAsync([fixture], new FixtureContext(), "local", TextWriter.Null, default);
+        await FixtureRunner.RunAsync([fixture], new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), default);
 
         fixture.Ran.ShouldBeTrue("a null AppliesTo must be treated the same as empty — every profile");
     }
@@ -238,26 +242,29 @@ public class FixtureRunnerTests
     [TestMethod]
     public async Task ASkippedFixtureAlsoSkipsItsDependent()
     {
-        var log = new StringWriter();
+        var diagnostics = new TestSupport.RecordingDiagnostics();
         var qaOnly = new QaOnlyFixture();
         var dependent = new DependsOnQaOnlyFixture();
 
-        await FixtureRunner.RunAsync([qaOnly, dependent], new FixtureContext(), "local", log, default);
+        await FixtureRunner.RunAsync([qaOnly, dependent], new FixtureContext(), "local", diagnostics, default);
 
         // qaOnly is skipped for profile "local"; dependent declared a dependency on it, so
         // running dependent anyway would be exactly the silent-wrong-state failure AppliesTo
         // exists to prevent — it would seed against state qaOnly never built.
         qaOnly.Ran.ShouldBeFalse();
         dependent.Ran.ShouldBeFalse();
-        log.ToString().ShouldContain(nameof(DependsOnQaOnlyFixture));
-        log.ToString().ShouldContain(nameof(QaOnlyFixture));
-        log.ToString().ShouldContain("does not apply to profile 'local'");
+        // Both skip lines must have reached Warn (not merely Note), since a transitively skipped
+        // fixture is exactly as invisible-if-silent as a directly skipped one.
+        var combined = string.Join('\n', diagnostics.Warnings);
+        combined.ShouldContain(nameof(DependsOnQaOnlyFixture));
+        combined.ShouldContain(nameof(QaOnlyFixture));
+        combined.ShouldContain("does not apply to profile 'local'");
     }
 
     [TestMethod]
     public async Task ASkippedFixturePropagatesThroughATwoHopDependencyChain()
     {
-        var log = new StringWriter();
+        var diagnostics = new TestSupport.RecordingDiagnostics();
         var qaOnly = new QaOnlyFixture();
         var dependent = new DependsOnQaOnlyFixture();
         var transitive = new TransitivelyDependsOnQaOnlyFixture();
@@ -265,13 +272,13 @@ public class FixtureRunnerTests
         // Registered out of dependency order to also exercise ordering + transitive skip
         // together, the way a real container resolving fixtures would.
         await FixtureRunner.RunAsync(
-            [transitive, dependent, qaOnly], new FixtureContext(), "local", log, default);
+            [transitive, dependent, qaOnly], new FixtureContext(), "local", diagnostics, default);
 
         qaOnly.Ran.ShouldBeFalse();
         dependent.Ran.ShouldBeFalse();
         transitive.Ran.ShouldBeFalse(
             "transitive depends on dependent, which depends on qaOnly; qaOnly's skip must propagate two hops");
-        log.ToString().ShouldContain(nameof(TransitivelyDependsOnQaOnlyFixture));
+        diagnostics.Warnings.ShouldContain(w => w.Contains(nameof(TransitivelyDependsOnQaOnlyFixture)));
     }
 
     [TestMethod]
@@ -283,7 +290,7 @@ public class FixtureRunnerTests
         // Guards against an implementation that skips everything registered after the first
         // skip, rather than only fixtures that actually declare the dependency.
         await FixtureRunner.RunAsync(
-            [qaOnly, new AllProfilesFixture()], context, "local", TextWriter.Null, default);
+            [qaOnly, new AllProfilesFixture()], context, "local", new TestSupport.RecordingDiagnostics(), default);
 
         qaOnly.Ran.ShouldBeFalse();
         context.Get("ran").ShouldBe("yes", "a fixture with no DependsOn edge to the skipped one must still run");
@@ -301,7 +308,7 @@ public class FixtureRunnerTests
         // not call FixtureGraph.Order itself) would run SeedsInvoiceFixture first and fail this.
         await FixtureRunner.RunAsync(
             [new SeedsInvoiceFixture(order), new SeedsCustomerFixture(order)],
-            new FixtureContext(), "local", TextWriter.Null, default);
+            new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), default);
 
         order.ShouldBe([nameof(SeedsCustomerFixture), nameof(SeedsInvoiceFixture)]);
     }
@@ -314,7 +321,7 @@ public class FixtureRunnerTests
         var fixture = new ThrowingFixture();
 
         var ex = await Should.ThrowAsync<FixtureLifecycleException>(
-            () => FixtureRunner.RunAsync([fixture], new FixtureContext(), "local", TextWriter.Null, default));
+            () => FixtureRunner.RunAsync([fixture], new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), default));
 
         // §13: an unhandled exception in AssemblyInitialize otherwise fails every test with an
         // error that does not say "setup broke".
@@ -332,7 +339,7 @@ public class FixtureRunnerTests
         var context = new FixtureContext();
 
         await Should.ThrowAsync<FixtureLifecycleException>(() => FixtureRunner.RunAsync(
-            [new ThrowingFixture(), new SeedsCustomerFixture(order)], context, "local", TextWriter.Null, default));
+            [new ThrowingFixture(), new SeedsCustomerFixture(order)], context, "local", new TestSupport.RecordingDiagnostics(), default));
 
         order.ShouldBeEmpty("a fixture registered after one that failed may depend on it and must not run");
     }
@@ -344,7 +351,7 @@ public class FixtureRunnerTests
         var context = new FixtureContext();
 
         await Should.ThrowAsync<FixtureLifecycleException>(() => FixtureRunner.RunAsync(
-            [earlier, new ThrowingFixture()], context, "local", TextWriter.Null, default));
+            [earlier, new ThrowingFixture()], context, "local", new TestSupport.RecordingDiagnostics(), default));
 
         earlier.Drained.ShouldBeTrue(
             "cleanup registered by a fixture that already succeeded must not leak just because a later fixture failed");
@@ -362,7 +369,7 @@ public class FixtureRunnerTests
         // on the very context RunAsync already drained. A bool flag cannot tell "ran once" from
         // "ran twice" — this needs the counter.
         await Should.ThrowAsync<FixtureLifecycleException>(() => FixtureRunner.RunAsync(
-            [earlier, new ThrowingFixture()], context, "local", TextWriter.Null, default));
+            [earlier, new ThrowingFixture()], context, "local", new TestSupport.RecordingDiagnostics(), default));
 
         await FixtureRunner.DrainAsync(context);
 
@@ -376,7 +383,7 @@ public class FixtureRunnerTests
         var context = new FixtureContext();
 
         var ex = await Should.ThrowAsync<FixtureLifecycleException>(() => FixtureRunner.RunAsync(
-            [fixture], context, "local", TextWriter.Null, default));
+            [fixture], context, "local", new TestSupport.RecordingDiagnostics(), default));
 
         // The fixture created a row (published a key) before it threw; its own cleanup must
         // still run so that row does not leak.
@@ -390,7 +397,7 @@ public class FixtureRunnerTests
         var context = new FixtureContext();
 
         var ex = await Should.ThrowAsync<FixtureLifecycleException>(() => FixtureRunner.RunAsync(
-            [new RegistersFailingCleanupThenThrowsFixture()], context, "local", TextWriter.Null, default));
+            [new RegistersFailingCleanupThenThrowsFixture()], context, "local", new TestSupport.RecordingDiagnostics(), default));
 
         // The fixture's own failure is why the run failed; a drain failure on top of it must not
         // bury the original cause.
@@ -404,7 +411,7 @@ public class FixtureRunnerTests
     [TestMethod]
     public async Task AnEmptyFixtureListCompletesWithoutError()
     {
-        await FixtureRunner.RunAsync([], new FixtureContext(), "local", TextWriter.Null, default);
+        await FixtureRunner.RunAsync([], new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), default);
     }
 
     [TestMethod]
@@ -415,7 +422,7 @@ public class FixtureRunnerTests
         cts.Cancel();
 
         await Should.ThrowAsync<OperationCanceledException>(() => FixtureRunner.RunAsync(
-            [new SeedsCustomerFixture(order)], new FixtureContext(), "local", TextWriter.Null, cts.Token));
+            [new SeedsCustomerFixture(order)], new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), cts.Token));
 
         order.ShouldBeEmpty();
     }
@@ -427,7 +434,7 @@ public class FixtureRunnerTests
         var fixture = new CancelsDuringInitializeFixture(cts);
 
         var ex = await Should.ThrowAsync<FixtureLifecycleException>(() => FixtureRunner.RunAsync(
-            [fixture], new FixtureContext(), "local", TextWriter.Null, cts.Token));
+            [fixture], new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), cts.Token));
 
         // A cancellation landing mid-fixture is not a bug in that fixture's code; the message
         // must not send the reader after "the underlying error" when there is not one.
@@ -440,14 +447,14 @@ public class FixtureRunnerTests
     public async Task ANullFixtureListIsRejected()
     {
         await Should.ThrowAsync<ArgumentNullException>(
-            () => FixtureRunner.RunAsync(null!, new FixtureContext(), "local", TextWriter.Null, default));
+            () => FixtureRunner.RunAsync(null!, new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), default));
     }
 
     [TestMethod]
     public async Task ANullContextIsRejectedByRunAsync()
     {
         await Should.ThrowAsync<ArgumentNullException>(
-            () => FixtureRunner.RunAsync([], null!, "local", TextWriter.Null, default));
+            () => FixtureRunner.RunAsync([], null!, "local", new TestSupport.RecordingDiagnostics(), default));
     }
 
     [TestMethod]
@@ -461,7 +468,7 @@ public class FixtureRunnerTests
     public async Task ANullProfileIsRejected()
     {
         await Should.ThrowAsync<ArgumentException>(
-            () => FixtureRunner.RunAsync([], new FixtureContext(), null!, TextWriter.Null, default));
+            () => FixtureRunner.RunAsync([], new FixtureContext(), null!, new TestSupport.RecordingDiagnostics(), default));
     }
 
     // --- DrainAsync ---

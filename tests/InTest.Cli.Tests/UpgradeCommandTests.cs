@@ -19,29 +19,29 @@ public class UpgradeCommandTests
     // and GenerateCheckCommandTests.Spec — no fixture is needed, so the happy-path tests below are
     // not also exercising the fixture-drift path. The drift path gets its own spec, below.
     private const string Spec = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Orders", "version": "1.0" },
-      "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
-        "responses": { "200": { "description": "ok", "content": { "application/json": {
-          "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
-      "components": { "schemas": { "Order": { "type": "object" } } }
-    }
-    """;
+                                {
+                                  "openapi": "3.0.3",
+                                  "info": { "title": "Orders", "version": "1.0" },
+                                  "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+                                    "responses": { "200": { "description": "ok", "content": { "application/json": {
+                                      "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
+                                  "components": { "schemas": { "Order": { "type": "object" } } }
+                                }
+                                """;
 
     // A request body, so FixtureComposer.NeedsFixture is true and no fixture exists — the same
     // scenario GenerateCheckCommandTests.SpecNeedingAFixture pins, reused here to force generate's
     // regeneration step to fail with fixture drift rather than run to completion.
     private const string SpecNeedingAFixture = """
-    {
-      "openapi":"3.0.3","info":{"title":"T","version":"1"},
-      "paths":{"/api/products":{"post":{
-        "operationId":"createProduct",
-        "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-          "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
-        "responses":{"201":{"description":"ok"}}}}}
-    }
-    """;
+                                               {
+                                                 "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                                 "paths":{"/api/products":{"post":{
+                                                   "operationId":"createProduct",
+                                                   "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                                                     "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
+                                                   "responses":{"201":{"description":"ok"}}}}}
+                                               }
+                                               """;
 
     private string _root = null!;
 
@@ -75,14 +75,14 @@ public class UpgradeCommandTests
         var intestJsonPath = Path.Combine(_root, "intest.json");
         var text = File.ReadAllText(intestJsonPath);
         text.ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive,
-            customMessage: "init is expected to declare the running tool's own version");
+        customMessage: "init is expected to declare the running tool's own version");
         File.WriteAllText(intestJsonPath, text.Replace(
-            $"\"intestVersion\": \"{CliVersion.Current}\"", $"\"intestVersion\": \"{oldIntestVersion}\""));
+        $"\"intestVersion\": \"{CliVersion.Current}\"", $"\"intestVersion\": \"{oldIntestVersion}\""));
 
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
         var toolsText = File.ReadAllText(dotnetToolsPath);
         File.WriteAllText(dotnetToolsPath, toolsText.Replace(
-            $"\"version\": \"{CliVersion.Current}\"", $"\"version\": \"{oldIntestVersion}\""));
+        $"\"version\": \"{CliVersion.Current}\"", $"\"version\": \"{oldIntestVersion}\""));
     }
 
     private static Task<int> UpgradeAsync(string root) => UpgradeCommand.RunAsync(root, CancellationToken.None);
@@ -128,7 +128,7 @@ public class UpgradeCommandTests
         ReadIntestJson().ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive);
         ReadDotnetTools().ShouldContain($"\"version\": \"{CliVersion.Current}\"", Case.Sensitive);
         File.Exists(Path.Combine(_root, "Generated", "OrdersTests.g.cs")).ShouldBeTrue(
-            "upgrade must regenerate, not just bump the version fields");
+        "upgrade must regenerate, not just bump the version fields");
         report.ShouldContain(CliVersion.Current);
     }
 
@@ -185,20 +185,21 @@ public class UpgradeCommandTests
         File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
 
         var handWritten =
-            "{\"project\":{\"rootNamespace\":\"Orders.ApiTests\",\"testBaseClass\":\"Orders.ApiTests.OrdersTestBase\"}," +
+            "{\"project\":{\"rootNamespace\":\"Orders.ApiTests\",\"testBaseClass\":\"Orders.ApiTests.OrdersTestBase\"," +
+            "\"framework\":\"mstest\"}," +
             "\"intestVersion\":\"0.0.1\",\"schemaVersion\":1,\"spec\":{\"source\":\"orders.json\"}," +
             "\"somethingFromALaterRelease\":{\"nested\":true,\"intestVersion\":\"pinned-by-a-later-release\"}}";
         File.WriteAllText(Path.Combine(_root, "intest.json"), handWritten);
 
         var expectedAfter = handWritten.Replace(
-            "\"intestVersion\":\"0.0.1\"", $"\"intestVersion\":\"{CliVersion.Current}\"");
+        "\"intestVersion\":\"0.0.1\"", $"\"intestVersion\":\"{CliVersion.Current}\"");
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         ReadIntestJson().ShouldBe(expectedAfter,
-            customMessage: "every byte outside the top-level intestVersion value must be " +
-                            "untouched — key order, spacing, the unrecognised key, and the nested " +
-                            "same-named key inside it alike");
+        customMessage: "every byte outside the top-level intestVersion value must be " +
+                       "untouched — key order, spacing, the unrecognised key, and the nested " +
+                       "same-named key inside it alike");
     }
 
     /// <summary>
@@ -213,10 +214,10 @@ public class UpgradeCommandTests
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
         File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
         File.WriteAllText(Path.Combine(_root, "intest.json"), """
-        { "schemaVersion": 1,
-          "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                              { "schemaVersion": 1,
+                                                                "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase", "framework": "mstest" } }
+                                                              """);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
@@ -226,7 +227,7 @@ public class UpgradeCommandTests
         // line, it does not touch neighbouring content.
         after.ShouldContain("\"spec\": { \"source\": \"orders.json\" }", Case.Sensitive);
         after.ShouldContain(
-            "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", \"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\" }");
+        "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", \"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\", \"framework\": \"mstest\" }");
     }
 
     /// <summary>
@@ -245,19 +246,19 @@ public class UpgradeCommandTests
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
         File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
         File.WriteAllText(Path.Combine(_root, "intest.json"),
-            "{\r\n  \"schemaVersion\": 1,\r\n  \"spec\": { \"source\": \"orders.json\" },\r\n  " +
-            "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", " +
-            "\"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\" }\r\n}");
+        "{\r\n  \"schemaVersion\": 1,\r\n  \"spec\": { \"source\": \"orders.json\" },\r\n  " +
+        "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", " +
+        "\"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\", \"framework\": \"mstest\" }\r\n}");
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var after = ReadIntestJson();
         after.ShouldContain(
-            $"\"schemaVersion\": 1,\r\n  \"intestVersion\": \"{CliVersion.Current}\",\r\n  \"spec\"",
-            Case.Sensitive,
-            customMessage: "the inserted line must use this file's own CRLF, not a bare LF");
+        $"\"schemaVersion\": 1,\r\n  \"intestVersion\": \"{CliVersion.Current}\",\r\n  \"spec\"",
+        Case.Sensitive,
+        customMessage: "the inserted line must use this file's own CRLF, not a bare LF");
         after.ShouldNotContain("1,\n  \"intestVersion", Case.Sensitive,
-            customMessage: "a lone LF here would mean the insertion ignored the file's line ending");
+        customMessage: "a lone LF here would mean the insertion ignored the file's line ending");
     }
 
     /// <summary>
@@ -281,7 +282,7 @@ public class UpgradeCommandTests
 
         var afterBytes = await File.ReadAllBytesAsync(intestJsonPath);
         afterBytes.Take(3).ShouldBe(new byte[] { 0xEF, 0xBB, 0xBF },
-            customMessage: "the BOM sits outside intestVersion's matched span and must survive untouched");
+        customMessage: "the BOM sits outside intestVersion's matched span and must survive untouched");
         Encoding.UTF8.GetString(afterBytes).ShouldContain($"\"intestVersion\": \"{CliVersion.Current}\"", Case.Sensitive);
     }
 
@@ -322,7 +323,7 @@ public class UpgradeCommandTests
         var after = UpgradeCommand.SetIntestVersion(before, "1.2.3");
 
         Encoding.UTF8.GetString(after).ShouldBe(
-            "{\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\",\n  \"spec\": { \"source\": \"orders.json\" } }");
+        "{\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\",\n  \"spec\": { \"source\": \"orders.json\" } }");
     }
 
     /// <summary>
@@ -341,7 +342,7 @@ public class UpgradeCommandTests
         var after = UpgradeCommand.SetIntestVersion(before, "1.2.3");
 
         Encoding.UTF8.GetString(after).ShouldBe(
-            "{\n  \"spec\": { \"source\": \"orders.json\" },\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\"\n}");
+        "{\n  \"spec\": { \"source\": \"orders.json\" },\n  \"schemaVersion\": 1,\n  \"intestVersion\": \"1.2.3\"\n}");
     }
 
     [TestMethod]
@@ -367,17 +368,17 @@ public class UpgradeCommandTests
     public void DoesNotCorruptANestedKeyNamedIntestVersion()
     {
         var before = Utf8(
-            "{ \"schemaVersion\": 1, \"vendorNotes\": { \"intestVersion\": \"pinned-by-us\" }, " +
-            "\"intestVersion\": \"0.0.1\" }");
+        "{ \"schemaVersion\": 1, \"vendorNotes\": { \"intestVersion\": \"pinned-by-us\" }, " +
+        "\"intestVersion\": \"0.0.1\" }");
 
         var after = UpgradeCommand.SetIntestVersion(before, "9.9.9");
 
         var afterText = Encoding.UTF8.GetString(after);
         afterText.ShouldBe(
-            "{ \"schemaVersion\": 1, \"vendorNotes\": { \"intestVersion\": \"pinned-by-us\" }, " +
-            "\"intestVersion\": \"9.9.9\" }",
-            customMessage: "the nested vendorNotes.intestVersion must survive untouched and only " +
-                            "the root-level key may change");
+        "{ \"schemaVersion\": 1, \"vendorNotes\": { \"intestVersion\": \"pinned-by-us\" }, " +
+        "\"intestVersion\": \"9.9.9\" }",
+        customMessage: "the nested vendorNotes.intestVersion must survive untouched and only " +
+                       "the root-level key may change");
     }
 
     // ---- comments and trailing commas never reach upgrade's editing code ----------------------
@@ -396,15 +397,15 @@ public class UpgradeCommandTests
         var intestJsonPath = Path.Combine(_root, "intest.json");
         var before = File.ReadAllText(intestJsonPath);
         File.WriteAllText(intestJsonPath, before.Replace(
-            "\"schemaVersion\": 1,", "\"schemaVersion\": 1, // pinned"));
+        "\"schemaVersion\": 1,", "\"schemaVersion\": 1, // pinned"));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
         exitCode.ShouldBe(ExitCode.ToolError);
         report.ShouldNotContain(CliVersion.Current,
-            customMessage: "nothing about a successful upgrade should be reported");
+        customMessage: "nothing about a successful upgrade should be reported");
         ReadIntestJson().ShouldContain("// pinned", Case.Sensitive,
-            customMessage: "a config that never loaded must be left exactly as it was");
+        customMessage: "a config that never loaded must be left exactly as it was");
     }
 
     [TestMethod]
@@ -414,7 +415,7 @@ public class UpgradeCommandTests
         var intestJsonPath = Path.Combine(_root, "intest.json");
         var before = File.ReadAllText(intestJsonPath);
         File.WriteAllText(intestJsonPath, before.Replace(
-            "\"project\": {", "\"project\": { \"unused\": true,"));
+        "\"project\": {", "\"project\": { \"unused\": true,"));
         // Malform it further into a genuine trailing comma before the closing brace.
         var malformed = File.ReadAllText(intestJsonPath).TrimEnd();
         malformed = malformed[..^1] + ", }";
@@ -444,10 +445,10 @@ public class UpgradeCommandTests
         exitCode.ShouldBe(ExitCode.WorkOutstanding);
         report.ShouldContain("createProduct", Case.Sensitive);
         ReadIntestJson().ShouldBe(intestJsonBefore,
-            customMessage: "intestVersion must not be bumped when regeneration itself did not run");
+        customMessage: "intestVersion must not be bumped when regeneration itself did not run");
         ReadDotnetTools().ShouldBe(dotnetToolsBefore);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
-            "drift is detected before anything is written, in both generate and upgrade");
+        "drift is detected before anything is written, in both generate and upgrade");
     }
 
     /// <summary>
@@ -478,15 +479,15 @@ public class UpgradeCommandTests
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
         File.WriteAllText(dotnetToolsPath, $$"""
-        {
-          "version": 1,
-          "isRoot": true,
-          "tools": {
-            "some-other-tool": { "version": "3.4.5", "commands": ["other"] },
-            "intest.cli": { "version": "0.0.1", "commands": ["intest"] }
-          }
-        }
-        """);
+                                             {
+                                               "version": 1,
+                                               "isRoot": true,
+                                               "tools": {
+                                                 "some-other-tool": { "version": "3.4.5", "commands": ["other"] },
+                                                 "intest.cli": { "version": "0.0.1", "commands": ["intest"] }
+                                               }
+                                             }
+                                             """);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
@@ -501,11 +502,11 @@ public class UpgradeCommandTests
         // .gitattributes' *.cs entry and CONTRIBUTING.md for the general case this is an instance
         // of.
         after.ShouldContain("\"version\": 1,", Case.Sensitive,
-            customMessage: "the manifest format version (an unrelated integer under the same key name) must not change");
+        customMessage: "the manifest format version (an unrelated integer under the same key name) must not change");
         after.ShouldContain("\"isRoot\": true", Case.Sensitive,
-            customMessage: "isRoot must not change");
+        customMessage: "isRoot must not change");
         after.ShouldContain("\"some-other-tool\": { \"version\": \"3.4.5\"", Case.Sensitive,
-            customMessage: "a sibling tool's own pin must be untouched");
+        customMessage: "a sibling tool's own pin must be untouched");
         after.ShouldContain($"\"intest.cli\": {{ \"version\": \"{CliVersion.Current}\"", Case.Sensitive);
     }
 
@@ -524,25 +525,25 @@ public class UpgradeCommandTests
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
         File.WriteAllText(dotnetToolsPath, """
-        {
-          "version": 1,
-          "isRoot": true,
-          "tools": {
-            "intest.cli": {
-              "commands": ["intest"],
-              "metadata": { "notes": "pinned deliberately" },
-              "version": "0.0.1"
-            }
-          }
-        }
-        """);
+                                           {
+                                             "version": 1,
+                                             "isRoot": true,
+                                             "tools": {
+                                               "intest.cli": {
+                                                 "commands": ["intest"],
+                                                 "metadata": { "notes": "pinned deliberately" },
+                                                 "version": "0.0.1"
+                                               }
+                                             }
+                                           }
+                                           """);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var after = ReadDotnetTools();
         after.ShouldContain($"\"version\": \"{CliVersion.Current}\"", Case.Sensitive);
         after.ShouldContain("\"metadata\": { \"notes\": \"pinned deliberately\" }", Case.Sensitive,
-            customMessage: "the unrelated nested object must survive untouched");
+        customMessage: "the unrelated nested object must survive untouched");
     }
 
     /// <summary>
@@ -559,19 +560,19 @@ public class UpgradeCommandTests
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
         var before = """
-        {
-          "version": 1,
-          "isRoot": true,
-          "vendorNotes": { "intest.cli": { "version": "pinned-by-us" } },
-          "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } }
-        }
-        """;
+                     {
+                       "version": 1,
+                       "isRoot": true,
+                       "vendorNotes": { "intest.cli": { "version": "pinned-by-us" } },
+                       "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } }
+                     }
+                     """;
         File.WriteAllText(dotnetToolsPath, before);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
 
         ReadDotnetTools().ShouldBe(before,
-            customMessage: "a same-named key outside \"tools\" must never be touched");
+        customMessage: "a same-named key outside \"tools\" must never be touched");
     }
 
     /// <summary>
@@ -592,9 +593,9 @@ public class UpgradeCommandTests
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
 
         ReadIntestJson().ShouldBe(intestJsonBefore,
-            customMessage: "intest.json must not be rewritten when the tools pin cannot be bumped");
+        customMessage: "intest.json must not be rewritten when the tools pin cannot be bumped");
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
-            "CRITICAL 2: a missing manifest must be caught before regeneration ever runs");
+        "CRITICAL 2: a missing manifest must be caught before regeneration ever runs");
     }
 
     [TestMethod]
@@ -603,15 +604,15 @@ public class UpgradeCommandTests
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
         File.WriteAllText(dotnetToolsPath, """
-        { "version": 1, "isRoot": true, "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } } }
-        """);
+                                           { "version": 1, "isRoot": true, "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } } }
+                                           """);
         var intestJsonBefore = ReadIntestJson();
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
 
         ReadIntestJson().ShouldBe(intestJsonBefore);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
-            "CRITICAL 2: a manifest missing the intest.cli pin must be caught before regeneration ever runs");
+        "CRITICAL 2: a manifest missing the intest.cli pin must be caught before regeneration ever runs");
     }
 
     /// <summary>
@@ -625,21 +626,21 @@ public class UpgradeCommandTests
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
         File.WriteAllText(dotnetToolsPath, """
-        { "version": 1, "isRoot": true, "tools": { "intest.cli": { "commands": ["intest"] } } }
-        """);
+                                           { "version": 1, "isRoot": true, "tools": { "intest.cli": { "commands": ["intest"] } } }
+                                           """);
         var intestJsonBefore = ReadIntestJson();
 
         var (exitCode, error) = await UpgradeCapturingErrorAsync(_root);
 
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldContain("no \"version\" field", Case.Sensitive,
-            customMessage: "the refusal must diagnose the actual problem");
+        customMessage: "the refusal must diagnose the actual problem");
         error.ShouldContain("add one by hand", Case.Insensitive,
-            customMessage: "the refusal must prescribe a fix, matching its two siblings " +
-                            "(missing manifest, missing pin), not just diagnose");
+        customMessage: "the refusal must prescribe a fix, matching its two siblings " +
+                       "(missing manifest, missing pin), not just diagnose");
         ReadIntestJson().ShouldBe(intestJsonBefore);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
-            "CRITICAL 2: an intest.cli pin with no version field must be caught before regeneration ever runs");
+        "CRITICAL 2: an intest.cli pin with no version field must be caught before regeneration ever runs");
     }
 
     /// <summary>
@@ -662,8 +663,8 @@ public class UpgradeCommandTests
         }
 
         ReadDotnetTools().ShouldBe(dotnetToolsBefore,
-            customMessage: "CRITICAL 2: an unreadable intest.json must be caught before " +
-                            "regeneration — and before the tools pin is bumped — ever runs");
+        customMessage: "CRITICAL 2: an unreadable intest.json must be caught before " +
+                       "regeneration — and before the tools pin is bumped — ever runs");
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
     }
 
@@ -686,7 +687,7 @@ public class UpgradeCommandTests
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue();
         File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=crlf", Case.Sensitive);
         report.ShouldContain(".gitattributes", Case.Sensitive,
-            customMessage: "the report must say a team-owned file was created, not just the two configs");
+        customMessage: "the report must say a team-owned file was created, not just the two configs");
     }
 
     [TestMethod]
@@ -702,8 +703,8 @@ public class UpgradeCommandTests
         exitCode.ShouldBe(ExitCode.Ok);
         File.ReadAllText(gitattributesPath).ShouldBe(before);
         report.ShouldNotContain(".gitattributes",
-            customMessage: "an already-present .gitattributes was not created by this run, so the " +
-                            "report must not claim it was");
+        customMessage: "an already-present .gitattributes was not created by this run, so the " +
+                       "report must not claim it was");
     }
 
     // ---- fixtures/ and every other team-owned file: never touched, except the named exception --
@@ -745,10 +746,10 @@ public class UpgradeCommandTests
             File.ReadAllText(Path.Combine(_root, file)).ShouldBe(content, customMessage: $"{file} must be untouched by upgrade");
         }
         File.ReadAllText(Path.Combine(_root, "fixtures", "createProduct.json")).ShouldBe(fixtureBefore,
-            customMessage: "fixtures/ is never touched by upgrade, with no exception");
+        customMessage: "fixtures/ is never touched by upgrade, with no exception");
         // The one named, decided exception: .gitattributes goes from absent to present.
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue(
-            "the sole exception Task 4 Step 1b decides: upgrade scaffolds .gitattributes when absent");
+        "the sole exception Task 4 Step 1b decides: upgrade scaffolds .gitattributes when absent");
     }
 
     // ---- [prerelease-reference-migration]: detect and report, never rewrite -------------------
@@ -769,28 +770,28 @@ public class UpgradeCommandTests
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
         var csprojText = File.ReadAllText(csprojPath);
-        var scaffolded = $"Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\"";
+        var scaffolded = $"Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\"";
         csprojText.ShouldContain(scaffolded, Case.Sensitive,
-            customMessage: "init is expected to scaffold InTest.Runtime at the running tool's own version");
+        customMessage: "init is expected to scaffold InTest.Runtime.MSTest at the running tool's own version");
 
         var stalePrereleaseVersion = CliVersion.Current + "-preview.7";
         File.WriteAllText(csprojPath, csprojText.Replace(
-            scaffolded, $"Include=\"InTest.Runtime\" Version=\"{stalePrereleaseVersion}\""));
+        scaffolded, $"Include=\"InTest.Runtime.MSTest\" Version=\"{stalePrereleaseVersion}\""));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
         exitCode.ShouldBe(ExitCode.Ok);
         report.ShouldContain("Orders.ApiTests.csproj", Case.Sensitive,
-            customMessage: "the note must name the file");
+        customMessage: "the note must name the file");
         report.ShouldContain(
-            $"Version=\"{stalePrereleaseVersion}\" to Version=\"{CliVersion.Current}\"", Case.Sensitive,
-            customMessage: "the note must name the current value and the exact replacement");
+        $"Version=\"{stalePrereleaseVersion}\" to Version=\"{CliVersion.Current}\"", Case.Sensitive,
+        customMessage: "the note must name the current value and the exact replacement");
 
         // Read only: upgrade must not rewrite the .csproj, even though it just told the adopter
         // exactly what to change there by hand.
         File.ReadAllText(csprojPath).ShouldContain(
-            $"Include=\"InTest.Runtime\" Version=\"{stalePrereleaseVersion}\"", Case.Sensitive,
-            customMessage: "upgrade must never rewrite the .csproj — see [prerelease-reference-migration]");
+        $"Include=\"InTest.Runtime.MSTest\" Version=\"{stalePrereleaseVersion}\"", Case.Sensitive,
+        customMessage: "upgrade must never rewrite the .csproj — see [prerelease-reference-migration]");
     }
 
     /// <summary>
@@ -806,18 +807,132 @@ public class UpgradeCommandTests
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
         var csprojText = File.ReadAllText(csprojPath);
-        var scaffolded = $"<PackageReference Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\" />";
+        var scaffolded = $"<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\" />";
         csprojText.ShouldContain(scaffolded, Case.Sensitive);
         File.WriteAllText(csprojPath, csprojText.Replace(
-            scaffolded, "<PackageReference Include=\"InTest.Runtime\" />"));
+        scaffolded, "<PackageReference Include=\"InTest.Runtime.MSTest\" />"));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
         exitCode.ShouldBe(ExitCode.Ok);
         report.ShouldNotContain("NOTE:",
-            customMessage: "a .csproj shape DetectRuntimeReferenceMismatch does not recognise must " +
-                            "produce silence, not a guess");
+        customMessage: "a .csproj shape DetectRuntimeReferenceMismatch does not recognise must " +
+                       "produce silence, not a guess");
     }
+
+    // ---- [runtime-adapter-split]: migrate the bare InTest.Runtime id, only when the adapter is
+    // absent -------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A project scaffolded before the MSTest adapter existed still pins the bare
+    /// <c>InTest.Runtime</c> id — <c>UpgradeCommand.DetectRuntimeReferenceMismatch</c>'s adapter
+    /// pattern then finds zero matches, and falls through to
+    /// <c>DetectLegacyRuntimeReferenceMigration</c>, which must report a one-line migration note
+    /// naming the id change and stating explicitly that no source change is needed, since both
+    /// packages share <c>namespace InTest.Runtime</c>.
+    /// </summary>
+    [TestMethod]
+    public async Task ReportsAMigrationNoteWhenOnlyTheLegacyBareRuntimeIdIsPinned()
+    {
+        InitProject(Spec);
+
+        var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
+        var csprojText = File.ReadAllText(csprojPath);
+        var scaffolded = $"<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\" />";
+        csprojText.ShouldContain(scaffolded, Case.Sensitive);
+        File.WriteAllText(csprojPath, csprojText.Replace(
+        scaffolded, $"<PackageReference Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\" />"));
+
+        var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.Ok);
+        report.ShouldContain("Orders.ApiTests.csproj", Case.Sensitive,
+        customMessage: "the migration note must name the file");
+        report.ShouldContain("InTest.Runtime.MSTest", Case.Sensitive,
+        customMessage: "the migration note must name the id to change to");
+        report.ShouldContain("No source change is needed", Case.Sensitive,
+        customMessage: "the migration note must say the namespace is unchanged, or an adopter " +
+                       "may go looking for a source-level migration that does not exist");
+
+        // Read only, matching [prerelease-reference-migration]'s existing contract.
+        File.ReadAllText(csprojPath).ShouldContain(
+        "Include=\"InTest.Runtime\" Version=", Case.Sensitive,
+        customMessage: "upgrade must never rewrite the .csproj, even for the id migration");
+    }
+
+    /// <summary>
+    /// The narrow, deliberate exception: a project that legitimately pins both
+    /// <c>InTest.Runtime.MSTest</c> and the bare <c>InTest.Runtime</c> already took the adapter
+    /// branch (<c>matches.Count == 1</c> in <c>DetectRuntimeReferenceMismatch</c>) and must never
+    /// reach the legacy-migration fallback — it already has the adapter reference, so telling it
+    /// to add one would be wrong advice.
+    /// </summary>
+    [TestMethod]
+    public async Task DoesNotSuggestMigratingWhenBothTheAdapterAndTheLegacyIdArePinned()
+    {
+        InitProject(Spec);
+
+        var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
+        var csprojText = File.ReadAllText(csprojPath);
+        var scaffolded = $"<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\" />";
+        csprojText.ShouldContain(scaffolded, Case.Sensitive);
+        File.WriteAllText(csprojPath, csprojText.Replace(
+        scaffolded,
+        scaffolded + Environment.NewLine +
+        $"    <PackageReference Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\" />"));
+
+        var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
+
+        exitCode.ShouldBe(ExitCode.Ok);
+        report.ShouldNotContain("migrat", Case.Insensitive,
+        customMessage: "a project that already pins the adapter must never be told to migrate " +
+                       "to it — it already has it");
+    }
+
+    /// <summary>
+    /// Pins the disjointness <c>UpgradeCommand</c>'s own comment claims for its two runtime-
+    /// reference regexes: the adapter pattern's closing quote sits immediately after
+    /// <c>MSTest</c>, so it cannot match the bare <c>Include="InTest.Runtime"</c> text the legacy
+    /// pattern targets; the legacy pattern's own closing quote sits immediately after
+    /// <c>Runtime</c>, so it cannot match the adapter's longer id either. If someone ever relaxed
+    /// the legacy pattern to <c>Include="InTest\.Runtime</c> with no closing quote — the exact
+    /// regression this test exists to catch — it would start matching the adapter id's own text
+    /// too, and a project that had already migrated would be told to migrate again forever.
+    /// </summary>
+    [TestMethod]
+    public void AdapterAndLegacyRuntimeReferencePatternsAreDisjoint()
+    {
+        const string adapterLine = "<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"1.2.3\" />";
+        const string legacyLine = "<PackageReference Include=\"InTest.Runtime\" Version=\"1.2.3\" />";
+
+        AdapterPattern.IsMatch(adapterLine).ShouldBeTrue(
+        "the adapter pattern must match the adapter's own scaffolded line");
+        AdapterPattern.IsMatch(legacyLine).ShouldBeFalse(
+        "the adapter pattern must not match the bare legacy id — otherwise a legacy project " +
+        "would wrongly be treated as already migrated");
+
+        LegacyPattern.IsMatch(legacyLine).ShouldBeTrue(
+        "the legacy pattern must match the bare pre-split id");
+        LegacyPattern.IsMatch(adapterLine).ShouldBeFalse(
+        "the legacy pattern must not match the adapter's own longer id — otherwise an already-" +
+        "migrated project would be told to migrate again forever");
+    }
+
+    // Read via reflection rather than made internal-and-InternalsVisibleTo: these two Regex fields
+    // are UpgradeCommand's own private implementation detail, and AdapterAndLegacyRuntimeReference
+    // PatternsAreDisjoint above exists purely to pin a property of those two fields staying in
+    // sync with each other — it is not testing observable command behaviour the way every other
+    // test in this class is, so it reaches in rather than asking for a wider public surface just
+    // for this one guard.
+    private static System.Text.RegularExpressions.Regex AdapterPattern =>
+        (System.Text.RegularExpressions.Regex)typeof(UpgradeCommand)
+            .GetField("RuntimePackageReferencePattern", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .GetValue(null)!;
+
+    private static System.Text.RegularExpressions.Regex LegacyPattern =>
+        (System.Text.RegularExpressions.Regex)typeof(UpgradeCommand)
+            .GetField("LegacyRuntimePackageReferencePattern", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+            .GetValue(null)!;
 
     // ---- no version metadata: refuses rather than laundering "0.0.0" into intestVersion --------
 

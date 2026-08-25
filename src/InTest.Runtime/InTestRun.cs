@@ -1,32 +1,43 @@
-using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace InTest.Runtime;
 
 /// <summary>
-/// Assembly-scope composition root. MSTest-specific by design: it is the adapter, not the
-/// neutral layer. Generated projects delegate their [AssemblyInitialize] here.
+/// Neutral, framework-agnostic composition root for one InTest run: the process-wide state
+/// assembled once by <see cref="InitializeAsync"/> and read by every generated test case's
+/// fixture, HTTP client and identity resolution. Named to match the existing neutral
+/// static/ambient family (<see cref="InTestAmbient"/>, <see cref="InTestId"/>,
+/// <see cref="InTestClients"/>, <see cref="InTestUrl"/>, <see cref="InTestIdentities"/>) rather
+/// than after "TestHost" — that MSTest-shaped name now belongs to <see cref="TestHost"/>, the thin
+/// adapter facade that forwards here so a generated project's scaffolded TestStartup.cs keeps
+/// compiling unchanged (see <see cref="TestHost"/>'s own doc for why <c>[TypeForwardedTo]</c>
+/// cannot bridge the two instead).
 /// </summary>
-public static class TestHost
+public static class InTestRun
 {
     public static IConfiguration Configuration { get; private set; } = null!;
+
     public static IServiceProvider Root { get; private set; } = null!;
+
     public static SchemaBundle Schemas { get; private set; } = null!;
+
     public static string RunIdValue { get; private set; } = null!;
+
     public static string Profile { get; private set; } = null!;
+
     public static FixtureStore Fixtures { get; private set; } = null!;
 
     /// <summary>
     /// One aggregated fixture-validation report, built once at <see cref="InitializeAsync"/> and
-    /// consulted by every <c>ApiTestBase.RequireFixture</c> call — never rebuilt per test, and
+    /// consulted by every <c>ApiTestCore.RequireFixture</c> call — never rebuilt per test, and
     /// never bypassed by going straight to <see cref="Fixtures"/> (decision 2 / Task 7).
     /// </summary>
     public static FixtureValidation.Report FixtureValidationReport { get; private set; } = null!;
 
     /// <summary>
     /// The token resolver built once here and reused by every generated request via
-    /// <c>ApiTestBase</c>'s fixture helpers — the same instance <see cref="FixtureValidationReport"/>
+    /// <c>ApiTestCore</c>'s fixture helpers — the same instance <see cref="FixtureValidationReport"/>
     /// was built from, so <c>{{config:}}</c>/<c>{{secret:}}</c> are read once per run (Task 6's
     /// resolution-timing table) while <c>{{utcNow}}</c> still varies per call, because
     /// <c>TokenResolver</c> invokes the clock itself on every <c>Resolve</c> rather than caching it.
@@ -40,10 +51,10 @@ public static class TestHost
     /// <summary>
     /// The <see cref="ITestTokenProvider"/> the generated project's <c>ConfigureServices</c>
     /// registered, resolved once from <see cref="Root"/> right after it is built and exposed here
-    /// so <c>ApiTestBase.RequireMultipleIdentities</c> and <c>ApiTestBase.UseIdentity</c> (v1-c
+    /// so <c>ApiTestCore.MultipleIdentitiesSkipReason</c> and <c>ApiTestCore.UseIdentity</c> (v1-c
     /// Task 5) have something to consult without needing a live scope of their own — unlike
     /// <see cref="AuthHandler"/>, neither runs inside one. Null for every spec that declares no
-    /// <c>security</c>, exactly as <c>ApiTestBase.ResolveDefaultIdentity(null)</c> already treats
+    /// <c>security</c>, exactly as <c>ApiTestCore.ResolveDefaultIdentity(null)</c> already treats
     /// as ordinary rather than an error.
     /// <para>
     /// This is the *same instance* <see cref="AuthHandler"/> uses, but not because
@@ -61,9 +72,9 @@ public static class TestHost
     /// <para>
     /// Internal, settable, hand-rolled the same way <see cref="RetainedFixtureContext"/> is: only
     /// <see cref="InitializeAsync"/> writes it in production, and
-    /// <c>InTest.Runtime.Tests</c> sets it directly to drive <c>ApiTestBase</c>'s guard and
+    /// <c>InTest.Runtime.Tests</c> sets it directly to drive <c>ApiTestCore</c>'s guard and
     /// override without needing a real <see cref="InitializeAsync"/> run — the same reason that
-    /// method gets no in-process harness (see <see cref="ContextTextWriter"/>'s doc).
+    /// method gets no in-process harness (see <see cref="TestHost.TestContextDiagnostics"/>'s doc).
     /// </para>
     /// </summary>
     internal static ITestTokenProvider? TokenProvider { get; set; }
@@ -89,9 +100,23 @@ public static class TestHost
     /// </summary>
     internal static FixtureContext? RetainedFixtureContext { get; set; }
 
-    public static async Task InitializeAsync(TestContext context, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Builds process-wide state for one InTest run: configuration, DI container, schema bundle,
+    /// run id, profile, fixtures and their validation report. <see cref="TestHost.InitializeAsync"/>
+    /// is the MSTest entry point a generated project's scaffolded TestStartup.cs actually calls;
+    /// <paramref name="profileFromRunSettings"/> and <paramref name="diagnostics"/> are that
+    /// adapter's two narrow contributions to this otherwise framework-neutral method — a plain
+    /// string for the run-settings "profile" property (see <see cref="ResolveProfile"/> for why
+    /// this stays a string rather than an interface) and an <see cref="IRunDiagnostics"/> sink for
+    /// progress and warnings. Everything below is unchanged from when this method lived directly
+    /// on <see cref="TestHost"/>.
+    /// </summary>
+    public static async Task InitializeAsync(
+        string? profileFromRunSettings,
+        IRunDiagnostics diagnostics,
+        CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(diagnostics);
 
         // Reset rather than relying on the field's default: MSTest runs [AssemblyInitialize]
         // once per process in practice, but the doc on RetainedFixtureContext promises null
@@ -106,10 +131,10 @@ public static class TestHost
         // below must not leave whatever the previous call registered for the next one to see.
         TokenProvider = null;
 
-        Profile = ResolveProfile(context);
+        Profile = ResolveProfile(profileFromRunSettings);
         Configuration = BuildConfiguration(Profile);
         RunIdValue = RunId.Create(Configuration["InTest:RunId:Prefix"]);
-        context.WriteLine($"InTest run id: {RunIdValue} (profile '{Profile}')");
+        diagnostics.Note($"InTest run id: {RunIdValue} (profile '{Profile}')");
 
         Fixtures = FixtureStore.Load(AppContext.BaseDirectory, Profile);
 
@@ -130,9 +155,9 @@ public static class TestHost
         // a side effect of sharing baseUrl between both clients — deliberate, but unpinned by any
         // test.
         var baseUrl = InTestUrl.NormalizeBase(
-            Configuration["Api:BaseUrl"]
-            ?? throw new InvalidOperationException(
-                $"Api:BaseUrl is not configured for profile '{Profile}'."));
+        Configuration["Api:BaseUrl"]
+        ?? throw new InvalidOperationException(
+        $"Api:BaseUrl is not configured for profile '{Profile}'."));
 
         // Task 2 question (c): ResolveAudience below. sp.GetService (not GetRequiredService) is
         // question (b): Catalog and Inventory declare no `security` and register no provider, so
@@ -218,13 +243,13 @@ public static class TestHost
         catch (Exception ex)
         {
             throw new FixtureLifecycleException(
-                $"Failed to construct one or more registered IAssemblyFixture instances: {ex.Message} " +
-                "Check that every constructor dependency an IAssemblyFixture takes is itself " +
-                "registered in TestStartup's Register method.",
-                ex);
+            $"Failed to construct one or more registered IAssemblyFixture instances: {ex.Message} " +
+            "Check that every constructor dependency an IAssemblyFixture takes is itself " +
+            "registered in TestStartup's Register method.",
+            ex);
         }
 
-        await FixtureRunner.RunAsync(fixtures, fixtureContext, Profile, new ContextTextWriter(context), cancellationToken)
+        await FixtureRunner.RunAsync(fixtures, fixtureContext, Profile, diagnostics, cancellationToken)
             .ConfigureAwait(false);
 
         // Built only now, with the published keys FixtureRunner just seeded — TokenResolver's own
@@ -232,14 +257,20 @@ public static class TestHost
         FixtureTokens = new TokenResolver(Configuration, RunIdValue, publishedFixtureValues: fixtureContext.PublishedValues);
         FixtureValidationReport = FixtureValidation.Build(Fixtures, FixtureTokens);
 
-        // DisplayMessage, not WriteLine: see ContextTextWriter's doc for the full, confirmed
-        // story, but the short version is that WriteLine alone is invisible in exactly the case
-        // decision 2 exists for — a passing run with a non-blocking fixture problem. Warning
-        // reaches real stdout and the trx without failing a run nothing here is blocking;
-        // Informational still lands in the trx but skips stdout, so a clean run stays quiet.
-        context.DisplayMessage(
-            FixtureValidationReport.HasProblems ? MessageLevel.Warning : MessageLevel.Informational,
-            FixtureValidationReport.Message);
+        // Warn, not Note: see TestContextDiagnostics's doc for the full, confirmed story, but the
+        // short version is that Note alone is invisible in exactly the case decision 2 exists for
+        // — a passing run with a non-blocking fixture problem. Warn reaches real stdout and the
+        // trx without failing a run nothing here is blocking; Note still lands in the trx but
+        // skips stdout, so a clean run stays quiet. This is exactly today's Warning/Informational
+        // mapping, carried over unchanged onto the two-level seam.
+        if (FixtureValidationReport.HasProblems)
+        {
+            diagnostics.Warn(FixtureValidationReport.Message);
+        }
+        else
+        {
+            diagnostics.Note(FixtureValidationReport.Message);
+        }
     }
 
     /// <summary>
@@ -250,7 +281,7 @@ public static class TestHost
     /// <see cref="InitializeAsync"/> as an internal, dependency-free seam — the same reason
     /// <see cref="RegisterInTestClients"/> is one — so this resolution has its own test
     /// independent of <see cref="InitializeAsync"/>'s full weight (no <c>AppContext.BaseDirectory</c>,
-    /// no real <see cref="TestContext"/>, no live HTTP).
+    /// no real <c>TestContext</c>, no live HTTP).
     /// </summary>
     internal static string ResolveAudience(IConfiguration configuration, Uri baseUrl) =>
         configuration["Api:Audience"] ?? baseUrl.Authority;
@@ -266,16 +297,16 @@ public static class TestHost
     /// adopter's <see cref="ConfigureServices"/> attaches to <see cref="InTestClients.Api"/> off
     /// <see cref="InTestClients.Readiness"/> (F10, decision 1). <see cref="InitializeAsync"/> as a
     /// whole is still not given an in-process harness — see <c>TestHostTests</c>'s note on
-    /// <c>ContextTextWriter</c> for why — but this narrower seam needs none of what makes that
-    /// true: no <c>AppContext.BaseDirectory</c>, no real <see cref="TestContext"/>, no live HTTP.
+    /// <c>TestContextDiagnostics</c> for why — but this narrower seam needs none of what makes
+    /// that true: no <c>AppContext.BaseDirectory</c>, no real <c>TestContext</c>, no live HTTP.
     /// Requires <see cref="RunIdHandler"/> and <see cref="AuthHandler"/> already registered in
     /// <paramref name="services"/>; this method only wires the two named clients to them.
     /// </summary>
     internal static void RegisterInTestClients(IServiceCollection services, Uri baseUrl)
     {
         services.AddHttpClient(InTestClients.Api, client => client.BaseAddress = baseUrl)
-                .AddHttpMessageHandler<RunIdHandler>()
-                .AddHttpMessageHandler<AuthHandler>();
+            .AddHttpMessageHandler<RunIdHandler>()
+            .AddHttpMessageHandler<AuthHandler>();
 
         // Separate from Api so that the one attachment point the scaffold documents and adopters
         // actually use — InTestClients.Api, via ConfigureServices — cannot carry an auth handler
@@ -288,40 +319,7 @@ public static class TestHost
         // still carry X-Test-Run-Id and remain traceable, and it never throws regardless of
         // identity-provider health, unlike AuthHandler would if it were attached here too.
         services.AddHttpClient(InTestClients.Readiness, client => client.BaseAddress = baseUrl)
-                .AddHttpMessageHandler<RunIdHandler>();
-    }
-
-    /// <summary>
-    /// Forwards <see cref="FixtureRunner.RunAsync"/>'s skip lines to
-    /// <see cref="TestContext.DisplayMessage(MessageLevel, string)"/> at <see cref="MessageLevel.Warning"/>
-    /// — confirmed to be the one call that survives a <em>passing</em> [AssemblyInitialize] under
-    /// this project's actual runner: VSTest via MSTest.TestAdapter 4.3.3, <em>not</em>
-    /// Microsoft.Testing.Platform (no <c>EnableMSTestRunner</c> anywhere here; forcing MTP fails
-    /// outright on the .NET 10 SDK, and its native host prints nothing on a pass either). VSTest
-    /// buffers an [AssemblyInitialize]'s <see cref="TestContext.WriteLine(string)"/>,
-    /// <see cref="Console.Out"/> and <see cref="Console.Error"/> into the
-    /// <c>UnitTestResult</c> it would attach them to, and only flushes that buffer when a
-    /// failure synthesises a result to carry it — so all three reach nowhere on a passing run,
-    /// confirmed by direct probe, not assumed. <see cref="MessageLevel.Warning"/> escapes anyway:
-    /// real process stdout plus the trx's run-level output, and the run still exits 0 — unlike
-    /// <see cref="MessageLevel.Error"/>, which would fail it, wrong for a mere skip.
-    /// <para>
-    /// Only <see cref="WriteLine(string?)"/> is overridden — <see cref="FixtureRunner"/> never
-    /// calls anything else on this <see cref="TextWriter"/> today — so every other member
-    /// (<c>Write(char)</c>, <c>Write(string)</c>, the parameterless <c>WriteLine()</c>,
-    /// <c>WriteLine(int)</c>) silently no-ops via <see cref="TextWriter"/>'s own empty-bodied
-    /// <c>Write(char)</c>. That is a real trap for a future caller, since this class is handed
-    /// out typed as <see cref="TextWriter"/>; pinned rather than fixed by
-    /// <c>TestHostTests.ContextTextWriterSwallowsEveryWriteExceptWriteLineOfString</c>. Internal
-    /// so <c>InTest.Runtime.Tests</c> can exercise this class's own forwarding directly.
-    /// </para>
-    /// </summary>
-    internal sealed class ContextTextWriter(TestContext context) : TextWriter
-    {
-        public override Encoding Encoding => Encoding.UTF8;
-
-        public override void WriteLine(string? value) =>
-            context.DisplayMessage(MessageLevel.Warning, value ?? string.Empty);
+            .AddHttpMessageHandler<RunIdHandler>();
     }
 
     /// <summary>
@@ -330,8 +328,8 @@ public static class TestHost
     /// reachable at all, since <see cref="TestHost"/> is a plain static class and cannot carry
     /// the attribute itself.
     /// <para>
-    /// Called unconditionally by the scaffolded <c>TestStartup.cs</c>, regardless of whether
-    /// <see cref="InitializeAsync"/> succeeded. That is exactly the composition
+    /// Called unconditionally by the scaffolded <c>TestStartup.cs</c> (via <see cref="TestHost.CleanupAsync"/>),
+    /// regardless of whether <see cref="InitializeAsync"/> succeeded. That is exactly the composition
     /// <see cref="FixtureRunner.DrainAsync"/>'s idempotency exists for: a fixture failure during
     /// <see cref="InitializeAsync"/> already triggers one drain inside
     /// <see cref="FixtureRunner.RunAsync"/>, so this second, unconditional drain finds nothing
@@ -351,12 +349,13 @@ public static class TestHost
     /// propagate rather than be swallowed alongside a legitimate teardown failure.
     /// </para>
     /// <para>
-    /// Written to both <paramref name="context"/> and <see cref="Console.Error"/>, because
-    /// neither sink alone reaches every CI shape: <see cref="TestContext.WriteLine(string)"/>
-    /// lands in the .trx but is invisible at <c>dotnet test</c>'s default console verbosity, and
-    /// a CI setup that captures console output plus exit code without publishing the .trx would
-    /// otherwise never see this failure at all — even though, by design, it does not fail the
-    /// run or its exit code.
+    /// Written to both <paramref name="diagnostics"/> and <see cref="Console.Error"/>, because
+    /// neither sink alone reaches every CI shape: under the MSTest adapter,
+    /// <c>TestContext.WriteLine(string)</c> (what <see cref="TestHost.TestContextDiagnostics"/>'s
+    /// <see cref="IRunDiagnostics.Note"/> forwards to) lands in the .trx but is invisible at
+    /// <c>dotnet test</c>'s default console verbosity, and a CI setup that captures console output
+    /// plus exit code without publishing the .trx would otherwise never see this failure at all —
+    /// even though, by design, it does not fail the run or its exit code.
     /// </para>
     /// <para>
     /// The message names the run id (<see cref="RunIdValue"/>) — the handle an operator has for
@@ -371,13 +370,13 @@ public static class TestHost
     /// <para>
     /// <see cref="RetainedFixtureContext"/> is null whenever <see cref="InitializeAsync"/> threw
     /// before creating it — a readiness failure, say — in which case there is nothing to drain
-    /// and this method returns without touching <paramref name="context"/>, rather than throwing
+    /// and this method returns without touching <paramref name="diagnostics"/>, rather than throwing
     /// a <see cref="NullReferenceException"/> out of [AssemblyCleanup] that would itself become a
     /// second, unrelated failure stacked on top of whatever <see cref="InitializeAsync"/> already
     /// reported.
     /// </para>
     /// <para>
-    /// A successful drain also writes one line to <paramref name="context"/> naming how many
+    /// A successful drain also writes one line to <paramref name="diagnostics"/> naming how many
     /// actions ran, but only when there was at least one: today, a drain that ran zero actions
     /// and a context nobody ever registered a fixture against (<see cref="RetainedFixtureContext"/>
     /// is null for every scaffolded suite until a team writes its first fixture) both write
@@ -396,9 +395,9 @@ public static class TestHost
     /// design; nothing in this type ever disposes it.
     /// </para>
     /// </summary>
-    public static async Task CleanupAsync(TestContext context)
+    public static async Task CleanupAsync(IRunDiagnostics diagnostics)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(diagnostics);
 
         if (RetainedFixtureContext is null)
         {
@@ -413,7 +412,7 @@ public static class TestHost
 
             if (pendingActions > 0)
             {
-                context.WriteLine($"InTest fixture cleanup: drained {pendingActions} action(s).");
+                diagnostics.Note($"InTest fixture cleanup: drained {pendingActions} action(s).");
             }
         }
         catch (FixtureLifecycleException ex)
@@ -430,7 +429,7 @@ public static class TestHost
                 $"InTest fixture cleanup failed during AssemblyCleanup for run '{runId}': {ex.Message} " +
                 "State this run created may still be present and can break a later run.";
 
-            context.WriteLine(message);
+            diagnostics.Note(message);
             Console.Error.WriteLine(message);
         }
     }
@@ -449,17 +448,36 @@ public static class TestHost
             : null;
     }
 
-    private static string ResolveProfile(TestContext context)
-    {
-        if (context.Properties.TryGetValue("profile", out var fromRunSettings) && fromRunSettings is string s && s.Length > 0)
-        {
-            return s;
-        }
-
-        return Environment.GetEnvironmentVariable("INTEST_PROFILE")
-               ?? BuildConfiguration(profile: null)["InTest:DefaultProfile"]
-               ?? "local";
-    }
+    /// <summary>
+    /// The profile precedence chain, run-settings value first: <paramref name="fromRunSettings"/>
+    /// → the <c>INTEST_PROFILE</c> environment variable → <c>InTest:DefaultProfile</c> read from
+    /// <see cref="BuildConfiguration"/> with no profile applied yet (the profile is exactly what
+    /// has not been resolved at this point, so its own appsettings.&lt;profile&gt;.json cannot be
+    /// layered in) → the literal fallback <c>"local"</c>.
+    /// <para>
+    /// Deliberately a plain <c>string?</c> parameter rather than an <c>IRunSettings</c>
+    /// abstraction over "read the profile property from wherever the runner keeps run-settings".
+    /// An interface here would have exactly one string-returning member, exactly one
+    /// implementation (<see cref="TestHost"/>'s <c>ProfileFromRunSettings</c>), and exactly one
+    /// call site — the single-implementation abstraction this codebase's conventions rule out.
+    /// The behaviour that actually matters is the four-level precedence chain below, and it stays
+    /// neutral and stays tested regardless of how many runners this project ever grows; the
+    /// MSTest adapter's whole job is contributing one string.
+    /// </para>
+    /// <para>
+    /// The adapter must map an empty run-settings string to <c>null</c> before calling this
+    /// method — see <see cref="TestHost"/>'s <c>ProfileFromRunSettings</c> for why — so that
+    /// <paramref name="fromRunSettings"/> being <c>null</c> here always means "no run-settings
+    /// value was supplied," never "an empty one was," and the chain below falls through
+    /// identically for both an absent property and one MSTest's runsettings XML declared with no
+    /// text content.
+    /// </para>
+    /// </summary>
+    internal static string ResolveProfile(string? fromRunSettings) =>
+        fromRunSettings
+        ?? Environment.GetEnvironmentVariable("INTEST_PROFILE")
+        ?? BuildConfiguration(profile: null)["InTest:DefaultProfile"]
+        ?? "local";
 
     private static IConfiguration BuildConfiguration(string? profile)
     {
@@ -473,7 +491,7 @@ public static class TestHost
         }
 
         return builder.AddJsonFile("appsettings.local.json", optional: true)
-                      .AddEnvironmentVariables("INTEST_")
-                      .Build();
+            .AddEnvironmentVariables("INTEST_")
+            .Build();
     }
 }

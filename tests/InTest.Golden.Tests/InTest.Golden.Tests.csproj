@@ -11,7 +11,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/InTest.Cli/InTest.Cli.csproj" />
-    <ProjectReference Include="../../src/InTest.Runtime/InTest.Runtime.csproj" />
+    <!-- The MSTest adapter, not the neutral package directly: Golden scaffolds and builds real
+         projects that use TestHost/ApiTestBase, both of which now live in
+         InTest.Runtime.MSTest. InTest.Runtime arrives transitively. -->
   </ItemGroup>
   <ItemGroup>
     <None Update="Specs/**;Expected/**" CopyToOutputDirectory="PreserveNewest" />

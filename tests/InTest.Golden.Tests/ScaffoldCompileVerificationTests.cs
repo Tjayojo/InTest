@@ -10,7 +10,7 @@ namespace InTest.Golden.Tests;
 /// contained no out-of-process build at all; every one lived in <c>InTest.Golden.Tests</c>. Under
 /// a solution-level <c>dotnet test</c> the assemblies run concurrently (Cli finishes in ~6s while
 /// Golden runs ~1m40s, fully overlapping), so two independent MSBuild invocations could build
-/// scaffolded projects that both <c>ProjectReference</c> the same <c>InTest.Runtime.csproj</c>
+/// scaffolded projects that both <c>ProjectReference</c> the same <c>InTest.Runtime.MSTest.csproj</c>
 /// simultaneously — a known source of intermittent <c>obj/</c> file-lock failures. A separate
 /// class, not a method on <see cref="CompileVerificationTests"/>: that class's own
 /// <c>[TestInitialize]</c> hand-writes an <c>intest.json</c> and csproj into <c>_root</c> before
@@ -51,7 +51,7 @@ public class ScaffoldCompileVerificationTests
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(0);
 
         var runtimeProject = Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime", "InTest.Runtime.csproj"));
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
         var csprojText = File.ReadAllText(csprojPath);
 
@@ -68,11 +68,11 @@ public class ScaffoldCompileVerificationTests
         // tried to restore from nuget.org, where nothing is published. Asserted below (not just
         // interpolated) so a future scaffold-format change fails loudly here rather than silently
         // reintroducing the same NU1101 several steps downstream, pointing at the wrong cause.
-        var needle = $"""<PackageReference Include="InTest.Runtime" Version="{CliVersion.Current}" />""";
+        var needle = $"""<PackageReference Include="InTest.Runtime.MSTest" Version="{CliVersion.Current}" />""";
         csprojText.ShouldContain(needle, Case.Sensitive,
-        "InitCommand's scaffold no longer writes InTest.Runtime's PackageReference in the " +
-        "expected shape (Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\") — update " +
-        "this test's needle alongside whatever changed, or the ProjectReference swap below " +
+        "InitCommand's scaffold no longer writes InTest.Runtime.MSTest's PackageReference in the " +
+        "expected shape (Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\") — " +
+        "update this test's needle alongside whatever changed, or the ProjectReference swap below " +
         "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
 
         File.WriteAllText(csprojPath, csprojText.Replace(

@@ -52,8 +52,16 @@ namespace InTest.Architecture.Tests;
 [TestClass]
 public class ExampleProjectVersionMarkerTests
 {
+    // Deliberately matches either id: examples/ stays pinned to the bare InTest.Runtime at
+    // 0.1.0-preview.1 (see each example's own .csproj comment) because that is the *published*
+    // version examples actually restore from nuget.org, and InTest.Runtime.MSTest 0.1.0-preview.1
+    // does not exist yet — it ships with the next release, alongside the runtime split
+    // (src/InTest.Runtime.MSTest/). Repointing examples/ to the adapter id today would break
+    // `dotnet restore` for anyone running them. Once the adapter is published, migrating each
+    // example is a one-line PackageReference id edit rather than a surprise red test here — do NOT
+    // "fix" that migration by touching examples/ preemptively (see CLAUDE.md's Task 8 notes).
     private static readonly Regex RuntimePackageReferencePattern =
-        new(@"<PackageReference\s+Include=""InTest\.Runtime""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
+        new(@"<PackageReference\s+Include=""InTest\.Runtime(?:\.MSTest)?""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
 
     private static string RepoRoot()
     {
@@ -91,10 +99,10 @@ public class ExampleProjectVersionMarkerTests
         // a guard that silently checks zero examples is passing for the wrong reason, not because
         // nothing is wrong.
         exampleDirs.Length.ShouldBeGreaterThan(0,
-            "no example project directories were found under examples/ (a directory containing " +
-            "its own intest.json). Either examples/ was reorganised and this guard's discovery " +
-            "no longer matches its shape, or every committed example was removed — either way " +
-            "this must not pass silently.");
+        "no example project directories were found under examples/ (a directory containing " +
+        "its own intest.json). Either examples/ was reorganised and this guard's discovery " +
+        "no longer matches its shape, or every committed example was removed — either way " +
+        "this must not pass silently.");
 
         var offenders = new List<string>();
 
@@ -119,8 +127,8 @@ public class ExampleProjectVersionMarkerTests
                 !intestCli.TryGetProperty("version", out var cliVersionElement))
             {
                 offenders.Add(
-                    $"{exampleName}: .config/dotnet-tools.json does not pin \"intest.cli\" under " +
-                    "\"tools\" with a \"version\" field.");
+                $"{exampleName}: .config/dotnet-tools.json does not pin \"intest.cli\" under " +
+                "\"tools\" with a \"version\" field.");
                 continue;
             }
             var cliVersion = cliVersionElement.GetString();
@@ -129,7 +137,7 @@ public class ExampleProjectVersionMarkerTests
             if (csprojFiles.Length != 1)
             {
                 offenders.Add(
-                    $"{exampleName}: expected exactly one .csproj, found {csprojFiles.Length}.");
+                $"{exampleName}: expected exactly one .csproj, found {csprojFiles.Length}.");
                 continue;
             }
 
@@ -138,9 +146,10 @@ public class ExampleProjectVersionMarkerTests
             if (!match.Success)
             {
                 offenders.Add(
-                    $"{exampleName}: no <PackageReference Include=\"InTest.Runtime\" " +
-                    $"Version=\"...\" /> found in {Path.GetFileName(csprojFiles[0])} — either the " +
-                    "scaffold shape changed or this example lost its runtime reference.");
+                $"{exampleName}: no <PackageReference Include=\"InTest.Runtime\" (or " +
+                "\"InTest.Runtime.MSTest\") Version=\"...\" /> found in " +
+                $"{Path.GetFileName(csprojFiles[0])} — either the scaffold shape changed or this " +
+                "example lost its runtime reference.");
                 continue;
             }
             var runtimeVersion = match.Groups[1].Value;
@@ -148,28 +157,28 @@ public class ExampleProjectVersionMarkerTests
             if (intestVersion != cliVersion)
             {
                 offenders.Add(
-                    $"{exampleName}: intest.json's intestVersion (\"{intestVersion}\") disagrees " +
-                    $"with .config/dotnet-tools.json's intest.cli pin (\"{cliVersion}\"). Run " +
-                    $"`intest upgrade --project examples/{exampleName}` to move both together — " +
-                    "never hand-edit either marker (see UpgradeCommand's own doc comment for why).");
+                $"{exampleName}: intest.json's intestVersion (\"{intestVersion}\") disagrees " +
+                $"with .config/dotnet-tools.json's intest.cli pin (\"{cliVersion}\"). Run " +
+                $"`intest upgrade --project examples/{exampleName}` to move both together — " +
+                "never hand-edit either marker (see UpgradeCommand's own doc comment for why).");
             }
 
             if (intestVersion != runtimeVersion)
             {
                 offenders.Add(
-                    $"{exampleName}: intest.json's intestVersion (\"{intestVersion}\") disagrees " +
-                    $"with the InTest.Runtime PackageReference pinned in the .csproj " +
-                    $"(\"{runtimeVersion}\"). `intest upgrade` bumps intestVersion and the " +
-                    "dotnet-tools.json pin together but deliberately never rewrites the .csproj " +
-                    "([prerelease-reference-migration], UpgradeCommand.DetectRuntimeReferenceMismatch) " +
-                    $"— change Version=\"{runtimeVersion}\" to \"{intestVersion}\" by hand once " +
-                    "you have confirmed that version is actually published.");
+                $"{exampleName}: intest.json's intestVersion (\"{intestVersion}\") disagrees " +
+                $"with the InTest.Runtime PackageReference pinned in the .csproj " +
+                $"(\"{runtimeVersion}\"). `intest upgrade` bumps intestVersion and the " +
+                "dotnet-tools.json pin together but deliberately never rewrites the .csproj " +
+                "([prerelease-reference-migration], UpgradeCommand.DetectRuntimeReferenceMismatch) " +
+                $"— change Version=\"{runtimeVersion}\" to \"{intestVersion}\" by hand once " +
+                "you have confirmed that version is actually published.");
             }
         }
 
         offenders.ShouldBeEmpty(
-            "Committed example projects' version markers must all agree — see this class's own " +
-            "doc comment for the incident this guards against:" + Environment.NewLine +
-            string.Join(Environment.NewLine, offenders));
+        "Committed example projects' version markers must all agree — see this class's own " +
+        "doc comment for the incident this guards against:" + Environment.NewLine +
+        string.Join(Environment.NewLine, offenders));
     }
 }

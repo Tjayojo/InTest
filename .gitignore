@@ -75,3 +75,7 @@ samples/**/*.db-wal
 
 # Identity.Server generates a dev signing key on first run; it is per-machine, not shared.
 samples/Identity.Server/tempkey.jwk
+
+# logs
+logs/
+*.log

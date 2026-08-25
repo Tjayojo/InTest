@@ -150,7 +150,7 @@ intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.jso
 | File | Owner | Purpose |
 |---|---|---|
 | `intest.json` | yours | Configuration |
-| `Orders.ApiTests.csproj` | yours | Pins packages, copies the spec to output, sets `RunSettingsFilePath`, adds the `INTEST0001` guard |
+| `Orders.ApiTests.csproj` | yours | Pins packages — including `InTest.Runtime.MSTest`, which brings in `InTest.Runtime` transitively at the same version — copies the spec to output, sets `RunSettingsFilePath`, adds the `INTEST0001` guard |
 | `AssemblyInfo.cs` | yours | `[assembly: DoNotParallelize]` — the **only** place parallelization is declared |
 | `TestStartup.cs` | yours | DI registrations, named `HttpClient`, handlers |
 | `OrdersTestBase.cs` | yours | Your shared helpers; derives from `ApiTestBase` |
@@ -283,8 +283,9 @@ dotnet intest generate
 
 Writes `Generated/` — one `.g.cs` class per tag (`OrdersTests.g.cs` here), `spec-paths.json` and
 `spec-schemas.json` — plus `coverage-report.json` at the project root. All regenerated wholesale;
-never hand-edit them. `TestHost` itself is not generated — it ships in `InTest.Runtime` and
-`TestStartup.cs` delegates `[AssemblyInitialize]` to it (Phase 2).
+never hand-edit them. `TestHost` itself is not generated — it ships in `InTest.Runtime.MSTest`
+(a thin facade over `InTest.Runtime`'s neutral `InTestRun`) and `TestStartup.cs` delegates
+`[AssemblyInitialize]` to it (Phase 2).
 
 Read `coverage-report.json` now. It tells you what was skipped and why, which operations run on
 synthesized IDs, which produce status-only tests, and which auth tests are gated on a second
@@ -652,17 +653,19 @@ result — so seeing neither means cleanup did not run, not that it succeeded qu
 testing an *unpublished* change: `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published
 to nuget.org now, so an ordinary Phase 2 restore against a released version no
 longer needs a local feed at all. Iterating on a change ahead of the last published tag still
-does — a scaffolded project resolving `InTest.Runtime` from wherever you point NuGet, typically
-a local feed you `dotnet pack` yourself. NuGet does not overwrite an
-already-cached version: an older `InTest.Runtime 0.1.0` left in `~/.nuget/packages/intest.runtime`
-by an earlier local build resolves ahead of a freshly packed one carrying the identical version
-number, and the scaffolded project fails to compile against members that plainly exist in the
-source you just built (`RequireFixture`, `FixtureBody` and similar — confirmed by direct
-experiment: deleting that cache entry and rebuilding is what fixes it, not any change to the
-generated code). Clear the specific entry (`dotnet nuget locals global-packages --clear` is
-blunt but works; deleting just the `intest.runtime` folder under the packages directory is
-narrower) before rebuilding, or bump the local package's version so it cannot collide with what
-is cached.
+does — a scaffolded project resolves `InTest.Runtime.MSTest` (which brings in `InTest.Runtime`
+transitively, at the exact same version) from wherever you point NuGet, typically a local feed you
+`dotnet pack` yourself. NuGet does not overwrite an already-cached version: an older
+`InTest.Runtime.MSTest 0.1.0` — or, for the neutral package it depends on, an older
+`InTest.Runtime 0.1.0` — left in `~/.nuget/packages/intest.runtime.mstest` /
+`~/.nuget/packages/intest.runtime` by an earlier local build resolves ahead of a freshly packed
+one carrying the identical version number, and the scaffolded project fails to compile against
+members that plainly exist in the source you just built (`RequireFixture`, `FixtureBody` and
+similar — confirmed by direct experiment: deleting that cache entry and rebuilding is what fixes
+it, not any change to the generated code). Clear the specific entries
+(`dotnet nuget locals global-packages --clear` is blunt but works; deleting just the
+`intest.runtime.mstest` and `intest.runtime` folders under the packages directory is narrower)
+before rebuilding, or bump the local packages' version so neither can collide with what is cached.
 
 **The honest way to avoid this, rather than recover from it after the fact**: don't improvise
 Phase 8 by hand at all. Run `scripts/local-e2e-test.ps1` (see `CONTRIBUTING.md`'s "Testing

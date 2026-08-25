@@ -37,35 +37,36 @@ public class CompileVerificationTests
         File.Copy(Path.Combine(AppContext.BaseDirectory, "Specs", specFileName), Path.Combine(_root, specFileName));
 
         File.WriteAllText(Path.Combine(_root, "intest.json"), $$"""
-        { "schemaVersion": 1, "spec": { "source": "{{specFileName}}" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase" } }
-        """);
+                                                                { "schemaVersion": 1, "spec": { "source": "{{specFileName}}" },
+                                                                  "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                               "framework": "mstest" } }
+                                                                """);
 
         var runtimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src", "InTest.Runtime", "InTest.Runtime.csproj"));
+        "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
 
         File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
-        <Project Sdk="Microsoft.NET.Sdk">
-          <PropertyGroup>
-            <TargetFramework>net10.0</TargetFramework>
-            <Nullable>enable</Nullable>
-            <ImplicitUsings>enable</ImplicitUsings>
-            <IsPackable>false</IsPackable>
-          </PropertyGroup>
-          <ItemGroup>
-            <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
-            <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
-            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-            <ProjectReference Include="{runtimeProject}" />
-          </ItemGroup>
-        </Project>
-        """);
+                                                                          <Project Sdk="Microsoft.NET.Sdk">
+                                                                            <PropertyGroup>
+                                                                              <TargetFramework>net10.0</TargetFramework>
+                                                                              <Nullable>enable</Nullable>
+                                                                              <ImplicitUsings>enable</ImplicitUsings>
+                                                                              <IsPackable>false</IsPackable>
+                                                                            </PropertyGroup>
+                                                                            <ItemGroup>
+                                                                              <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
+                                                                              <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
+                                                                              <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                                                                              <ProjectReference Include="{runtimeProject}" />
+                                                                            </ItemGroup>
+                                                                          </Project>
+                                                                          """);
 
         File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
-        using Microsoft.VisualStudio.TestTools.UnitTesting;
+                                                                  using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-        [assembly: DoNotParallelize]
-        """);
+                                                                  [assembly: DoNotParallelize]
+                                                                  """);
 
         return _root;
     }
@@ -103,9 +104,9 @@ public class CompileVerificationTests
         // GETs can never produce either.
         var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
         generated.ShouldContain("FixtureParameter(\"getOrderById\", \"id\")",
-            customMessage: "orders.json's required path parameter is missing from the generated source — did CreateProject run against the wrong spec?");
+        customMessage: "orders.json's required path parameter is missing from the generated source — did CreateProject run against the wrong spec?");
         generated.ShouldContain("RequireMultipleIdentities();",
-            customMessage: "orders.json's auth-guard case is missing from the generated source — did CreateProject run against the wrong spec?");
+        customMessage: "orders.json's auth-guard case is missing from the generated source — did CreateProject run against the wrong spec?");
 
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
 
@@ -179,13 +180,13 @@ public class CompileVerificationTests
         // A vacuous pass (operations skipped, class empty) fails every one of these before the
         // build assertion below is even reached.
         generated.ShouldContain("""RequireFixture("list\"Widgets\\Escaped");""",
-            customMessage: "the quote+backslash operationId case did not reach the renderer escaped");
+        customMessage: "the quote+backslash operationId case did not reach the renderer escaped");
         generated.ShouldContain("""InTestUrl.Build("/widgets/say\"hi\\there")""",
-            customMessage: "the hostile path template case did not reach the renderer escaped");
+        customMessage: "the hostile path template case did not reach the renderer escaped");
         generated.ShouldContain("""FixtureQueryParameters("searchWidgets", "so\"rt\\key")""",
-            customMessage: "the hostile query parameter name case did not reach the renderer escaped");
+        customMessage: "the hostile query parameter name case did not reach the renderer escaped");
         generated.ShouldContain("""RequireFixture("list\nThings\rMore");""",
-            customMessage: "the embedded LF/CR operationId case did not reach the renderer escaped");
+        customMessage: "the embedded LF/CR operationId case did not reach the renderer escaped");
 
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
 
@@ -206,9 +207,9 @@ public class CompileVerificationTests
         var root = CreateProject("orders.json");
 
         File.WriteAllText(Path.Combine(root, "intest.json"), """
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests; public class Injected { static Injected() { System.Console.WriteLine(\"x\"); } } //", "testBaseClass": "InTest.Runtime.ApiTestBase" } }
-        """);
+                                                             { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                               "project": { "rootNamespace": "Orders.ApiTests; public class Injected { static Injected() { System.Console.WriteLine(\"x\"); } } //", "testBaseClass": "InTest.Runtime.ApiTestBase" } }
+                                                             """);
 
         (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(2);
         Directory.Exists(Path.Combine(root, "Generated")).ShouldBeFalse();

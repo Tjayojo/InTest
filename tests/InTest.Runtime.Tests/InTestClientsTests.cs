@@ -5,7 +5,7 @@ using Shouldly;
 namespace InTest.Runtime.Tests;
 
 /// <summary>
-/// F10: <c>TestHost.InitializeAsync</c> registered exactly one named client
+/// F10: <c>InTestRun.InitializeAsync</c> registered exactly one named client
 /// (<see cref="InTestClients.Api"/>) and handed that same client to
 /// <see cref="Readiness.WaitAsync"/>. An adopter following the getting-started guide attaches a
 /// bearer handler to <see cref="InTestClients.Api"/> via <c>ConfigureServices</c>; when the
@@ -13,14 +13,14 @@ namespace InTest.Runtime.Tests;
 /// including the anonymous <c>/health/ready</c> probe, which needed no token at all. The result
 /// was a dead identity server reported as a dead API, after a 120-second wait.
 /// <para>
-/// This exercises <see cref="TestHost.RegisterInTestClients"/> directly rather than
-/// hand-duplicating its registrations — the seam <c>TestHost.InitializeAsync</c> itself calls —
-/// so this proves something about <c>TestHost</c>'s own code, not merely about
+/// This exercises <see cref="InTestRun.RegisterInTestClients"/> directly rather than
+/// hand-duplicating its registrations — the seam <c>InTestRun.InitializeAsync</c> itself calls —
+/// so this proves something about <c>InTestRun</c>'s own code, not merely about
 /// <c>Microsoft.Extensions.Http</c>'s named-client isolation (a review of the first version of
 /// this test found exactly that gap and it was deleted rather than fixed; this replaces it).
 /// <c>InitializeAsync</c> as a whole still gets no in-process harness — see
-/// <c>TestHostTests</c>'s note on <c>ContextTextWriter</c> for why — but
-/// <see cref="TestHost.RegisterInTestClients"/> needs none of what makes that true: no
+/// <c>TestHostTests</c>'s note on <c>TestContextDiagnostics</c> for why — but
+/// <see cref="InTestRun.RegisterInTestClients"/> needs none of what makes that true: no
 /// <c>AppContext.BaseDirectory</c>, no real <c>TestContext</c>, no live HTTP.
 /// </para>
 /// </summary>
@@ -57,9 +57,9 @@ public class InTestClientsTests
         var services = new ServiceCollection();
         services.AddTransient(_ => new RunIdHandler(() => "run-1"));
 
-        // The exact registration TestHost.InitializeAsync performs, via the seam it calls — not
+        // The exact registration InTestRun.InitializeAsync performs, via the seam it calls — not
         // a hand-duplicated copy of it.
-        TestHost.RegisterInTestClients(services, new Uri("https://h.invalid/api/"));
+        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"));
 
         // Stand in for the live probe so this test sends no real network traffic. Additive to
         // whatever RegisterInTestClients already configured for this name (named-HttpClient
@@ -83,7 +83,7 @@ public class InTestClientsTests
 
     /// <summary>
     /// Task 2's own wiring, proven the same way F10's fix above is: through
-    /// <see cref="TestHost.RegisterInTestClients"/> itself, not a hand-duplicated copy of its
+    /// <see cref="InTestRun.RegisterInTestClients"/> itself, not a hand-duplicated copy of its
     /// registrations. A provider is registered and reachable here, so a wiring mistake that put
     /// <see cref="AuthHandler"/> on the wrong client — or on neither — would show up as a
     /// missing or misplaced header, not as an exception.
@@ -99,8 +99,8 @@ public class InTestClientsTests
         services.AddSingleton<ITestTokenProvider>(new StaticTokenProvider("tok-abc"));
         services.AddTransient(sp => new AuthHandler(sp.GetService<ITestTokenProvider>(), "api://orders"));
 
-        // The exact registration TestHost.InitializeAsync performs, via the seam it calls.
-        TestHost.RegisterInTestClients(services, new Uri("https://h.invalid/api/"));
+        // The exact registration InTestRun.InitializeAsync performs, via the seam it calls.
+        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"));
 
         services.AddHttpClient(InTestClients.Api).ConfigurePrimaryHttpMessageHandler(() => apiInner);
         services.AddHttpClient(InTestClients.Readiness).ConfigurePrimaryHttpMessageHandler(() => readinessInner);
@@ -121,8 +121,8 @@ public class InTestClientsTests
         }
 
         apiInner.SeenRequest!.Headers.Authorization.ShouldNotBeNull(
-            "AuthHandler must be attached to InTestClients.Api — this is F8's whole point");
+        "AuthHandler must be attached to InTestClients.Api — this is F8's whole point");
         readinessInner.SeenRequest!.Headers.Authorization.ShouldBeNull(
-            "AuthHandler must never reach the anonymous readiness probe (F10, decision 1)");
+        "AuthHandler must never reach the anonymous readiness probe (F10, decision 1)");
     }
 }

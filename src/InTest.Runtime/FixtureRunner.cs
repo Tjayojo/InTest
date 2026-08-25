@@ -17,9 +17,12 @@ public static class FixtureRunner
     /// Runs <paramref name="fixtures"/> in <see cref="FixtureGraph"/> order against
     /// <paramref name="profile"/>. A fixture whose <see cref="IAssemblyFixture.AppliesTo"/> is
     /// non-empty and does not contain <paramref name="profile"/> is skipped, with a line naming
-    /// the fixture and the profile written to <paramref name="log"/> — a fixture silently not
-    /// running is otherwise indistinguishable, from the outside, from one that ran and did
-    /// nothing. Skipping propagates: a fixture that <c>DependsOn</c> a skipped fixture is skipped
+    /// the fixture and the profile reported via <paramref name="diagnostics"/>'s
+    /// <see cref="IRunDiagnostics.Warn"/> — a fixture silently not running is otherwise
+    /// indistinguishable, from the outside, from one that ran and did nothing, and that is
+    /// precisely the "must reach the operator even on a passing run" intent
+    /// <see cref="IRunDiagnostics.Warn"/> exists for (see <see cref="IRunDiagnostics"/>'s own
+    /// doc). Skipping propagates: a fixture that <c>DependsOn</c> a skipped fixture is skipped
     /// too, transitively through any depth of chain, with its log line naming the dependency that
     /// caused it rather than restating the profile check. Running it anyway would be exactly the
     /// silent-wrong-state failure <c>AppliesTo</c> exists to prevent — it would seed against state
@@ -44,12 +47,12 @@ public static class FixtureRunner
         IEnumerable<IAssemblyFixture> fixtures,
         FixtureContext context,
         string profile,
-        TextWriter log,
+        IRunDiagnostics diagnostics,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(fixtures);
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(diagnostics);
         ArgumentException.ThrowIfNullOrWhiteSpace(profile);
 
         var ordered = FixtureGraph.Order(fixtures as IReadOnlyList<IAssemblyFixture> ?? fixtures.ToList());
@@ -80,7 +83,7 @@ public static class FixtureRunner
             // profiles it names.
             if (fixture.AppliesTo is { Length: > 0 } appliesTo && !appliesTo.Contains(profile, StringComparer.Ordinal))
             {
-                log.WriteLine(
+                diagnostics.Warn(
                     $"Skipping fixture '{TypeName(type)}': its AppliesTo does not include profile '{profile}'.");
                 skippedTypes.Add(type);
                 continue;
@@ -93,7 +96,7 @@ public static class FixtureRunner
             var skippedDependency = fixture.DependsOn.FirstOrDefault(skippedTypes.Contains);
             if (skippedDependency is not null)
             {
-                log.WriteLine(
+                diagnostics.Warn(
                     $"Skipping fixture '{TypeName(type)}': its dependency '{TypeName(skippedDependency)}' " +
                     $"does not apply to profile '{profile}'.");
                 skippedTypes.Add(type);

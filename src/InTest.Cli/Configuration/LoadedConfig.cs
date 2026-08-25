@@ -13,6 +13,22 @@ namespace InTest.Cli.Configuration;
 /// <i>means</i> (comparing it against the running CLI) is <c>generate --check</c>'s job, not
 /// <see cref="ConfigLoader"/>'s.
 /// </param>
+/// <param name="Framework">
+/// The test framework declared at <c>project.framework</c> — today always <c>"mstest"</c>, since
+/// <see cref="ConfigLoader.Load"/> refuses any other value (see its own doc comment for why the
+/// setting is required rather than defaulted). §3 designs InTest for three frameworks and ships
+/// one; this is the plug-in point a second template would select on, once a second template
+/// exists. It does not yet: <see cref="Rendering.TemplateRenderer"/> hardcodes
+/// <c>mstest-class.scriban</c> regardless of this value, so today <see cref="Framework"/> is
+/// carried on <see cref="LoadedConfig"/> and read by nothing downstream.
+/// <para>
+/// <b>Carried, not re-derived.</b> Matching <see cref="SpecSourceIsUrl"/> below:
+/// <c>CLAUDE.md</c> names re-deriving a verdict downstream as the recurring defect in this
+/// codebase. <see cref="ConfigLoader.Load"/> is where the value is validated against the
+/// supported set; a future template-selection call site reads this field rather than
+/// re-inspecting <c>intest.json</c> or re-running that validation itself.
+/// </para>
+/// </param>
 /// <param name="SpecSourceIsUrl">
 /// Whether <paramref name="SpecSource"/> names an <c>http(s)://</c> URL rather than a path — the
 /// verdict that decides, at three call sites, whether "the spec" means a file the adopter
@@ -31,5 +47,6 @@ public sealed record LoadedConfig(
     string SpecSource,
     string RootNamespace,
     string TestBaseClass,
+    string Framework,
     string? IntestVersion,
     bool SpecSourceIsUrl);

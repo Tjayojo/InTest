@@ -52,9 +52,10 @@ public class ConfigLoaderTests
     }
 
     private const string Valid = """
-    { "schemaVersion": 1, "spec": { "source": "orders.json" },
-      "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-    """;
+                                 { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                   "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                                "framework": "mstest" } }
+                                 """;
 
     [TestMethod]
     public void LoadsAValidConfig()
@@ -66,6 +67,7 @@ public class ConfigLoaderTests
         config.SpecSource.ShouldBe("orders.json");
         config.RootNamespace.ShouldBe("Orders.ApiTests");
         config.TestBaseClass.ShouldBe("Orders.ApiTests.OrdersTestBase");
+        config.Framework.ShouldBe("mstest");
     }
 
     /// <summary>
@@ -79,12 +81,12 @@ public class ConfigLoaderTests
     public void IgnoresSettingsItDoesNotRead()
     {
         WriteConfig("""
-        { "schemaVersion": 1, "intestVersion": "9.9.9",
-          "spec": { "source": "orders.json", "producer": "swashbuckle" },
-          "project": { "name": "Orders.ApiTests", "framework": "mstest", "assertions": ["shouldly"],
-                       "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" },
-          "somethingFromALaterRelease": { "nested": true } }
-        """);
+                    { "schemaVersion": 1, "intestVersion": "9.9.9",
+                      "spec": { "source": "orders.json", "producer": "swashbuckle" },
+                      "project": { "name": "Orders.ApiTests", "framework": "mstest", "assertions": ["shouldly"],
+                                   "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" },
+                      "somethingFromALaterRelease": { "nested": true } }
+                    """);
 
         ConfigLoader.Load(_root).SpecSource.ShouldBe("orders.json");
     }
@@ -124,9 +126,9 @@ public class ConfigLoaderTests
     public void ExplainsAMissingSpecSection()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1,
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1,
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("spec", Case.Sensitive);
         reason.ShouldContain("source", Case.Sensitive);
@@ -136,9 +138,9 @@ public class ConfigLoaderTests
     public void ExplainsASpecSectionThatIsNotAnObject()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": "orders.json",
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": "orders.json",
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("spec", Case.Sensitive);
         reason.ShouldContain("object");
@@ -148,9 +150,9 @@ public class ConfigLoaderTests
     public void ExplainsAMissingSpecSource()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "producer": "auto" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "producer": "auto" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("spec.source", Case.Sensitive);
     }
@@ -164,9 +166,9 @@ public class ConfigLoaderTests
     public void ExplainsASpecSourceThatIsNotAStringAndQuotesWhatWasWritten()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": 42 },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": 42 },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain("42");
@@ -183,9 +185,9 @@ public class ConfigLoaderTests
     public void ExplainsASpecSourceThatIsJsonNull()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": null },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": null },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain("null");
@@ -201,9 +203,9 @@ public class ConfigLoaderTests
     public void ExplainsAnEmptySpecSourceRatherThanReportingTheProjectDirectoryAsAMissingSpec()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "   " },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "   " },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain("empty");
@@ -238,15 +240,16 @@ public class ConfigLoaderTests
     public void LoadsAUrlSpecSourceAndMarksItAsOne(string source)
     {
         WriteConfig($$"""
-        { "schemaVersion": 1, "spec": { "source": "{{source}}" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                      { "schemaVersion": 1, "spec": { "source": "{{source}}" },
+                        "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                     "framework": "mstest" } }
+                      """);
 
         var config = ConfigLoader.Load(_root);
 
         config.SpecSource.ShouldBe(source, "the URL reaches the loader exactly as it was written");
         config.SpecSourceIsUrl.ShouldBeTrue(
-            "this flag is what routes generate to SpecFetcher and repair to the snapshot");
+        "this flag is what routes generate to SpecFetcher and repair to the snapshot");
     }
 
     /// <summary>
@@ -262,16 +265,16 @@ public class ConfigLoaderTests
     public void RefusesAMalformedUrlSpecSource(string source)
     {
         var reason = ReasonFor($$"""
-        { "schemaVersion": 1, "spec": { "source": "{{source}}" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                 { "schemaVersion": 1, "spec": { "source": "{{source}}" },
+                                   "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                 """);
 
         reason.ShouldContain("spec.source", Case.Sensitive);
         reason.ShouldContain(source, Case.Sensitive,
-            customMessage: "a refusal quotes what the adopter actually wrote");
+        customMessage: "a refusal quotes what the adopter actually wrote");
         reason.ShouldNotContain("Spec file not found",
-            customMessage: "the defect this guard inherited was an accurate sentence about the " +
-                           "wrong thing — a malformed URL is not a file that is missing");
+        customMessage: "the defect this guard inherited was an accurate sentence about the " +
+                       "wrong thing — a malformed URL is not a file that is missing");
     }
 
     /// <summary>
@@ -289,9 +292,10 @@ public class ConfigLoaderTests
     public void LoadsASpecSourceThatIsNotAUrl(string source)
     {
         WriteConfig($$"""
-        { "schemaVersion": 1, "spec": { "source": "{{source}}" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                      { "schemaVersion": 1, "spec": { "source": "{{source}}" },
+                        "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                     "framework": "mstest" } }
+                      """);
 
         var config = ConfigLoader.Load(_root);
 
@@ -302,7 +306,7 @@ public class ConfigLoaderTests
         // tries to fetch "C:/specs/orders.json" over HTTP and a `fixtures repair` that reads
         // spec.json instead of the adopter's actual spec. Same predicate, far worse failure.
         config.SpecSourceIsUrl.ShouldBeFalse(
-            "a path must never be routed down the fetch-and-snapshot path");
+        "a path must never be routed down the fetch-and-snapshot path");
     }
 
     // ---- project -------------------------------------------------------------------------
@@ -322,8 +326,8 @@ public class ConfigLoaderTests
     public void ExplainsAProjectSectionThatIsNotAnObject()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" }, "project": ["Orders.ApiTests"] }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" }, "project": ["Orders.ApiTests"] }
+                               """);
 
         reason.ShouldContain("project", Case.Sensitive);
         reason.ShouldContain("object");
@@ -333,9 +337,9 @@ public class ConfigLoaderTests
     public void ExplainsAMissingRootNamespace()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("project.rootNamespace", Case.Sensitive);
     }
@@ -344,9 +348,9 @@ public class ConfigLoaderTests
     public void ExplainsAMissingTestBaseClass()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests" } }
+                               """);
 
         reason.ShouldContain("project.testBaseClass", Case.Sensitive);
     }
@@ -360,9 +364,9 @@ public class ConfigLoaderTests
     public void ExplainsARootNamespaceThatIsNotAString()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": 7, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": 7, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("project.rootNamespace", Case.Sensitive);
         reason.ShouldContain("7");
@@ -373,9 +377,9 @@ public class ConfigLoaderTests
     public void ExplainsATestBaseClassThatIsNotAString()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": true } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": true } }
+                               """);
 
         reason.ShouldContain("project.testBaseClass", Case.Sensitive);
         reason.ShouldContain("string");
@@ -392,10 +396,10 @@ public class ConfigLoaderTests
     public void StillRefusesARootNamespaceThatIsNotAValidCSharpName()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests; public class Injected { } //",
-                       "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests; public class Injected { } //",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("project.rootNamespace", Case.Sensitive);
         reason.ShouldContain("Change project.rootNamespace in intest.json", Case.Sensitive);
@@ -406,9 +410,9 @@ public class ConfigLoaderTests
     public void StillRefusesATestBaseClassThatIsNotAValidCSharpName()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
-        """);
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
+                               """);
 
         reason.ShouldContain("project.testBaseClass", Case.Sensitive);
         reason.ShouldContain("Change project.testBaseClass in intest.json", Case.Sensitive);
@@ -418,9 +422,129 @@ public class ConfigLoaderTests
     public void StillRefusesARootNamespaceThatIsJsonNull()
     {
         ReasonFor("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """).ShouldContain("project.rootNamespace", Case.Sensitive);
+                  { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                    "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                  """).ShouldContain("project.rootNamespace", Case.Sensitive);
+    }
+
+    // ---- project.framework -------------------------------------------------------------------
+    // Task 9: `project.framework` was always written by `intest init` but never read — decorative
+    // JSON. These pin the point where it stops being decorative: required (see
+    // ConfigLoader.RequireSupportedFramework's own doc comment for why, unlike intestVersion, it
+    // does not get to be optional), and refused with a "not supported yet" message — naming the
+    // roadmap (§3), not just rejecting the value — for anything other than the one framework this
+    // build actually ships.
+
+    [TestMethod]
+    public void ExplainsAMissingFramework()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
+
+        reason.ShouldContain("project.framework", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// project.framework's twin of <see cref="ExplainsARootNamespaceThatIsNotAString"/>: the same
+    /// <c>RequireString</c> type-check message, reused rather than re-derived, on a setting that
+    /// used to be read by nothing at all.
+    /// </summary>
+    [TestMethod]
+    public void ExplainsAFrameworkThatIsNotAString()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": 7 } }
+                               """);
+
+        reason.ShouldContain("project.framework", Case.Sensitive);
+        reason.ShouldContain("7");
+        reason.ShouldContain("string");
+    }
+
+    [TestMethod]
+    public void ExplainsAFrameworkThatIsJsonNull()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": null } }
+                               """);
+
+        reason.ShouldContain("project.framework", Case.Sensitive);
+        reason.ShouldContain("null");
+    }
+
+    /// <summary>
+    /// The message a team hand-editing intest.json toward a real, roadmapped framework should
+    /// see: it names what they wrote, names what is actually supported, and reads as "not
+    /// supported yet" rather than "invalid" — §3 designs InTest for three frameworks and ships
+    /// one, and this is the one place that fact has to reach the adopter directly.
+    /// </summary>
+    [TestMethod]
+    public void ExplainsAnUnsupportedFrameworkAsNotYetSupportedRatherThanInvalid()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "xunit" } }
+                               """);
+
+        reason.ShouldContain("xunit", Case.Sensitive);
+        reason.ShouldContain("mstest", Case.Sensitive);
+        reason.ShouldContain("not", Case.Sensitive);
+        reason.ShouldContain("yet", Case.Sensitive,
+        customMessage: "xunit is a real, roadmapped framework (§3) — the message must read as " +
+                       "\"not supported yet\", not as a bare validation failure");
+    }
+
+    /// <summary>
+    /// The same refusal path for a value that names nothing InTest has ever planned to support —
+    /// pinned separately from <see cref="ExplainsAnUnsupportedFrameworkAsNotYetSupportedRatherThanInvalid"/>
+    /// so that test's "yet" assertion can never be satisfied by accident through a message that
+    /// only special-cases the two real framework names.
+    /// </summary>
+    [TestMethod]
+    public void ExplainsAnUnknownFrameworkValue()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "banana" } }
+                               """);
+
+        reason.ShouldContain("banana", Case.Sensitive);
+        reason.ShouldContain("mstest", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Case sensitivity, decided and pinned rather than left implicit: only the exact lowercase
+    /// spelling <c>intest init</c> writes is accepted. <c>project.framework</c> is adopter-facing
+    /// JSON, not a C# identifier with case-insensitive lookup — <c>rootNamespace</c> and
+    /// <c>testBaseClass</c> are both compared exactly as written, and treating "MSTest" as
+    /// equivalent to "mstest" would make this the one setting on this surface that tolerates a
+    /// spelling <c>init</c> itself never produces.
+    /// </summary>
+    [TestMethod]
+    public void RefusesAnUppercaseSpellingOfTheSupportedFramework()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "MSTest" } }
+                               """);
+
+        reason.ShouldContain("MSTest", Case.Sensitive);
+        reason.ShouldContain("mstest", Case.Sensitive);
     }
 
     // ---- schemaVersion ---------------------------------------------------------------------
@@ -449,9 +573,9 @@ public class ConfigLoaderTests
     public void RefusesASchemaVersionThisCliDoesNotImplement()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 2, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 2, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldContain("2");
@@ -469,9 +593,9 @@ public class ConfigLoaderTests
     public void ExplainsAMissingSchemaVersion()
     {
         var reason = ReasonFor("""
-        { "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldNotContain("upgrade");
@@ -481,9 +605,9 @@ public class ConfigLoaderTests
     public void ExplainsASchemaVersionThatIsNotAnInteger()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": "1", "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": "1", "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldContain("string");
@@ -497,9 +621,9 @@ public class ConfigLoaderTests
     public void ExplainsASchemaVersionThatIsNotAWholeNumber()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1.5, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1.5, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldContain("1.5");
@@ -515,9 +639,9 @@ public class ConfigLoaderTests
     public void ChecksSchemaVersionBeforeTheSettingsItGoverns()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 2, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "not a valid name", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 2, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "not a valid name", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("schemaVersion", Case.Sensitive);
         reason.ShouldNotContain("rootNamespace");
@@ -534,9 +658,10 @@ public class ConfigLoaderTests
     public void SurfacesAPresentAndWellFormedIntestVersion()
     {
         WriteConfig("""
-        { "schemaVersion": 1, "intestVersion": "0.1.0", "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                    { "schemaVersion": 1, "intestVersion": "0.1.0", "spec": { "source": "orders.json" },
+                      "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                   "framework": "mstest" } }
+                    """);
 
         ConfigLoader.Load(_root).IntestVersion.ShouldBe("0.1.0");
     }
@@ -567,9 +692,10 @@ public class ConfigLoaderTests
     public void SurfacesAPrereleaseIntestVersion()
     {
         WriteConfig("""
-        { "schemaVersion": 1, "intestVersion": "1.0.0-rc.1", "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                    { "schemaVersion": 1, "intestVersion": "1.0.0-rc.1", "spec": { "source": "orders.json" },
+                      "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                   "framework": "mstest" } }
+                    """);
 
         ConfigLoader.Load(_root).IntestVersion.ShouldBe("1.0.0-rc.1");
     }
@@ -587,9 +713,10 @@ public class ConfigLoaderTests
     public void SurfacesAnyNonEmptyIntestVersionRegardlessOfShape()
     {
         WriteConfig("""
-        { "schemaVersion": 1, "intestVersion": "banana", "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                    { "schemaVersion": 1, "intestVersion": "banana", "spec": { "source": "orders.json" },
+                      "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                   "framework": "mstest" } }
+                    """);
 
         ConfigLoader.Load(_root).IntestVersion.ShouldBe("banana");
     }
@@ -606,9 +733,9 @@ public class ConfigLoaderTests
     public void ExplainsAnIntestVersionThatIsNotAStringAndQuotesWhatWasWritten()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "intestVersion": 42, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "intestVersion": 42, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("intestVersion", Case.Sensitive);
         reason.ShouldContain("42");
@@ -627,9 +754,9 @@ public class ConfigLoaderTests
     public void ExplainsAnIntestVersionThatIsJsonNull()
     {
         var reason = ReasonFor("""
-        { "schemaVersion": 1, "intestVersion": null, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                               { "schemaVersion": 1, "intestVersion": null, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                               """);
 
         reason.ShouldContain("intestVersion", Case.Sensitive);
         reason.ShouldContain("null");
@@ -652,9 +779,9 @@ public class ConfigLoaderTests
     public void ExplainsAnEmptyIntestVersion(string value)
     {
         var reason = ReasonFor($$"""
-        { "schemaVersion": 1, "intestVersion": "{{value}}", "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                 { "schemaVersion": 1, "intestVersion": "{{value}}", "spec": { "source": "orders.json" },
+                                   "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                 """);
 
         reason.ShouldContain("intestVersion", Case.Sensitive);
         reason.ShouldContain("empty");

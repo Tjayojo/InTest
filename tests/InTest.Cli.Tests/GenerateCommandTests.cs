@@ -8,32 +8,32 @@ namespace InTest.Cli.Tests;
 public class GenerateCommandTests
 {
     private const string Spec = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Orders", "version": "1.0" },
-      "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
-        "responses": { "200": { "description": "ok", "content": { "application/json": {
-          "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
-      "components": { "schemas": { "Order": { "type": "object" } } }
-    }
-    """;
+                                {
+                                  "openapi": "3.0.3",
+                                  "info": { "title": "Orders", "version": "1.0" },
+                                  "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
+                                    "responses": { "200": { "description": "ok", "content": { "application/json": {
+                                      "schema": { "$ref": "#/components/schemas/Order" } } } } } } } },
+                                  "components": { "schemas": { "Order": { "type": "object" } } }
+                                }
+                                """;
 
     // listOrders declares 404 but has no path parameter to target with an unmatchable value
     // (decision 5's postscript), so TestPlanBuilder withholds its declared-error case as a
     // CoverageNote rather than a guess — exactly one noted operation.
     private const string SpecWithANotedOperation = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Orders", "version": "1.0" },
-      "paths": { "/orders": { "get": { "operationId": "listOrders", "tags": ["Orders"],
-        "responses": {
-          "200": { "description": "ok", "content": { "application/json": {
-            "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } },
-          "404": { "description": "not found" }
-        } } } },
-      "components": { "schemas": { "Order": { "type": "object" } } }
-    }
-    """;
+                                                   {
+                                                     "openapi": "3.0.3",
+                                                     "info": { "title": "Orders", "version": "1.0" },
+                                                     "paths": { "/orders": { "get": { "operationId": "listOrders", "tags": ["Orders"],
+                                                       "responses": {
+                                                         "200": { "description": "ok", "content": { "application/json": {
+                                                           "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } },
+                                                         "404": { "description": "not found" }
+                                                       } } } },
+                                                     "components": { "schemas": { "Order": { "type": "object" } } }
+                                                   }
+                                                   """;
 
     private string _root = null!;
 
@@ -44,9 +44,10 @@ public class GenerateCommandTests
         Directory.CreateDirectory(_root);
         File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
         File.WriteAllText(Path.Combine(_root, "intest.json"), """
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                                                             "framework": "mstest" } }
+                                                              """);
     }
 
     [TestCleanup]
@@ -69,7 +70,7 @@ public class GenerateCommandTests
         try
         {
             return (await GenerateCommand.RunAsync(projectRoot ?? _root, CancellationToken.None),
-                    capturedError.ToString());
+                capturedError.ToString());
         }
         finally
         {
@@ -134,9 +135,9 @@ public class GenerateCommandTests
     public async Task ReturnsToolErrorForAnInvalidRootNamespaceAndWritesNothing()
     {
         File.WriteAllText(Path.Combine(_root, "intest.json"), """
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "My Project", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "My Project", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                              """);
 
         var originalError = Console.Error;
         var capturedError = new StringWriter();
@@ -160,9 +161,9 @@ public class GenerateCommandTests
     public async Task ReturnsToolErrorForAnInvalidTestBaseClassAndWritesNothing()
     {
         File.WriteAllText(Path.Combine(_root, "intest.json"), """
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
-        """);
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
+                                                              """);
 
         var originalError = Console.Error;
         var capturedError = new StringWriter();
@@ -186,9 +187,9 @@ public class GenerateCommandTests
     public async Task ReturnsToolErrorWhenRootNamespaceIsJsonNull()
     {
         File.WriteAllText(Path.Combine(_root, "intest.json"), """
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                              """);
 
         (await RunAsync()).ShouldBe(2);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
@@ -233,7 +234,7 @@ public class GenerateCommandTests
     public async Task ExplainsAMissingProjectSectionInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync(
-            """{ "schemaVersion": 1, "spec": { "source": "orders.json" } }""");
+        """{ "schemaVersion": 1, "spec": { "source": "orders.json" } }""");
 
         error.ShouldContain("project", Case.Sensitive);
         error.ShouldNotContain("KeyNotFoundException");
@@ -248,9 +249,9 @@ public class GenerateCommandTests
     public async Task ExplainsASpecSourceThatIsNotAStringInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync("""
-        { "schemaVersion": 1, "spec": { "source": 42 },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                          { "schemaVersion": 1, "spec": { "source": 42 },
+                                                            "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                          """);
 
         error.ShouldContain("spec.source", Case.Sensitive);
         error.ShouldNotContain("InvalidOperationException");
@@ -266,9 +267,9 @@ public class GenerateCommandTests
     public async Task ExplainsASpecSourceThatIsJsonNullInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync("""
-        { "schemaVersion": 1, "spec": { "source": null },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                          { "schemaVersion": 1, "spec": { "source": null },
+                                                            "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                          """);
 
         error.ShouldContain("spec.source", Case.Sensitive);
         error.ShouldNotContain("ArgumentNullException");
@@ -278,7 +279,7 @@ public class GenerateCommandTests
     public async Task ExplainsAnIntestJsonThatIsNotValidJsonInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync(
-            """{ "schemaVersion": 1, "spec": { "source": "orders.json" } """);
+        """{ "schemaVersion": 1, "spec": { "source": "orders.json" } """);
 
         error.ShouldContain("intest.json", Case.Sensitive);
         error.ShouldContain("not valid JSON");
@@ -293,9 +294,9 @@ public class GenerateCommandTests
     public async Task ExplainsARootNamespaceThatIsNotAStringInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync("""
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": 7, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                          { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                            "project": { "rootNamespace": 7, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                          """);
 
         error.ShouldContain("project.rootNamespace", Case.Sensitive);
     }
@@ -315,11 +316,10 @@ public class GenerateCommandTests
 
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldNotContain("unexpected failure",
-            customMessage: "an argument the adopter got wrong is refused, not reported as a crash");
+        customMessage: "an argument the adopter got wrong is refused, not reported as a crash");
         error.ShouldStartWith("--project", Case.Sensitive,
-            customMessage: "a refusal names the flag the adopter typed, not the parameter it bound to");
+        customMessage: "a refusal names the flag the adopter typed, not the parameter it bound to");
         error.ShouldContain("is empty");
         error.ShouldContain("for example");
     }
-
 }

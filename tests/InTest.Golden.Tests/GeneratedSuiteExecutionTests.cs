@@ -19,38 +19,38 @@ namespace InTest.Golden.Tests;
 public class GeneratedSuiteExecutionTests
 {
     private const string Spec = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Stub", "version": "1.0" },
-      "paths": {
-        "/api/status": {
-          "get": {
-            "operationId": "getStatus",
-            "tags": ["Status"],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Status" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "Status": {
-            "type": "object",
-            "required": ["state"],
-            "properties": { "state": { "type": "string" } }
-          }
-        }
-      }
-    }
-    """;
+                                {
+                                  "openapi": "3.0.3",
+                                  "info": { "title": "Stub", "version": "1.0" },
+                                  "paths": {
+                                    "/api/status": {
+                                      "get": {
+                                        "operationId": "getStatus",
+                                        "tags": ["Status"],
+                                        "responses": {
+                                          "200": {
+                                            "description": "ok",
+                                            "content": {
+                                              "application/json": {
+                                                "schema": { "$ref": "#/components/schemas/Status" }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "components": {
+                                    "schemas": {
+                                      "Status": {
+                                        "type": "object",
+                                        "required": ["state"],
+                                        "properties": { "state": { "type": "string" } }
+                                      }
+                                    }
+                                  }
+                                }
+                                """;
 
     /// <summary>
     /// <see cref="Spec"/> plus a path-parameter operation, used only by
@@ -63,57 +63,57 @@ public class GeneratedSuiteExecutionTests
     /// by this addition.
     /// </summary>
     private const string SpecWithPathParameter = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Stub", "version": "1.0" },
-      "paths": {
-        "/api/status": {
-          "get": {
-            "operationId": "getStatus",
-            "tags": ["Status"],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Status" }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "/api/status/{id}": {
-          "get": {
-            "operationId": "getStatusById",
-            "tags": ["Status"],
-            "parameters": [
-              { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-            ],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Status" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "Status": {
-            "type": "object",
-            "required": ["state"],
-            "properties": { "state": { "type": "string" } }
-          }
-        }
-      }
-    }
-    """;
+                                                 {
+                                                   "openapi": "3.0.3",
+                                                   "info": { "title": "Stub", "version": "1.0" },
+                                                   "paths": {
+                                                     "/api/status": {
+                                                       "get": {
+                                                         "operationId": "getStatus",
+                                                         "tags": ["Status"],
+                                                         "responses": {
+                                                           "200": {
+                                                             "description": "ok",
+                                                             "content": {
+                                                               "application/json": {
+                                                                 "schema": { "$ref": "#/components/schemas/Status" }
+                                                               }
+                                                             }
+                                                           }
+                                                         }
+                                                       }
+                                                     },
+                                                     "/api/status/{id}": {
+                                                       "get": {
+                                                         "operationId": "getStatusById",
+                                                         "tags": ["Status"],
+                                                         "parameters": [
+                                                           { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                                                         ],
+                                                         "responses": {
+                                                           "200": {
+                                                             "description": "ok",
+                                                             "content": {
+                                                               "application/json": {
+                                                                 "schema": { "$ref": "#/components/schemas/Status" }
+                                                               }
+                                                             }
+                                                           }
+                                                         }
+                                                       }
+                                                     }
+                                                   },
+                                                   "components": {
+                                                     "schemas": {
+                                                       "Status": {
+                                                         "type": "object",
+                                                         "required": ["state"],
+                                                         "properties": { "state": { "type": "string" } }
+                                                       }
+                                                     }
+                                                   }
+                                                 }
+                                                 """;
 
     /// <summary>
     /// A create-then-delete pair against <c>/api/items</c>, used only by
@@ -124,51 +124,51 @@ public class GeneratedSuiteExecutionTests
     /// pair, and keeping it on its own spec means nothing else in this file is affected by it.
     /// </summary>
     private const string SpecWithItemsLifecycle = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Stub", "version": "1.0" },
-      "paths": {
-        "/api/items": {
-          "post": {
-            "operationId": "createItem",
-            "tags": ["Items"],
-            "requestBody": {
-              "required": true,
-              "content": {
-                "application/json": {
-                  "schema": { "$ref": "#/components/schemas/CreateItemRequest" }
-                }
-              }
-            },
-            "responses": {
-              "201": { "description": "Created" }
-            }
-          }
-        },
-        "/api/items/{id}": {
-          "delete": {
-            "operationId": "deleteItem",
-            "tags": ["Items"],
-            "parameters": [
-              { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-            ],
-            "responses": {
-              "204": { "description": "No Content" }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "CreateItemRequest": {
-            "type": "object",
-            "required": ["sku"],
-            "properties": { "sku": { "type": "string" } }
-          }
-        }
-      }
-    }
-    """;
+                                                  {
+                                                    "openapi": "3.0.3",
+                                                    "info": { "title": "Stub", "version": "1.0" },
+                                                    "paths": {
+                                                      "/api/items": {
+                                                        "post": {
+                                                          "operationId": "createItem",
+                                                          "tags": ["Items"],
+                                                          "requestBody": {
+                                                            "required": true,
+                                                            "content": {
+                                                              "application/json": {
+                                                                "schema": { "$ref": "#/components/schemas/CreateItemRequest" }
+                                                              }
+                                                            }
+                                                          },
+                                                          "responses": {
+                                                            "201": { "description": "Created" }
+                                                          }
+                                                        }
+                                                      },
+                                                      "/api/items/{id}": {
+                                                        "delete": {
+                                                          "operationId": "deleteItem",
+                                                          "tags": ["Items"],
+                                                          "parameters": [
+                                                            { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                                                          ],
+                                                          "responses": {
+                                                            "204": { "description": "No Content" }
+                                                          }
+                                                        }
+                                                      }
+                                                    },
+                                                    "components": {
+                                                      "schemas": {
+                                                        "CreateItemRequest": {
+                                                          "type": "object",
+                                                          "required": ["sku"],
+                                                          "properties": { "sku": { "type": "string" } }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                  """;
 
     /// <summary>
     /// Plan Task 4, Step 2(b) — the F1 lesson repeated: <see cref="Specs/orders.json"/>'s golden
@@ -185,42 +185,42 @@ public class GeneratedSuiteExecutionTests
     /// </para>
     /// </summary>
     private const string SpecWithDeclaredNotFound = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Stub", "version": "1.0" },
-      "paths": {
-        "/api/widgets/{id}": {
-          "get": {
-            "operationId": "getWidgetById",
-            "tags": ["Widgets"],
-            "parameters": [
-              { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
-            ],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Widget" }
-                  }
-                }
-              },
-              "404": { "description": "not found" }
-            }
-          }
-        }
-      },
-      "components": {
-        "schemas": {
-          "Widget": {
-            "type": "object",
-            "required": ["id"],
-            "properties": { "id": { "type": "string" } }
-          }
-        }
-      }
-    }
-    """;
+                                                    {
+                                                      "openapi": "3.0.3",
+                                                      "info": { "title": "Stub", "version": "1.0" },
+                                                      "paths": {
+                                                        "/api/widgets/{id}": {
+                                                          "get": {
+                                                            "operationId": "getWidgetById",
+                                                            "tags": ["Widgets"],
+                                                            "parameters": [
+                                                              { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                                                            ],
+                                                            "responses": {
+                                                              "200": {
+                                                                "description": "ok",
+                                                                "content": {
+                                                                  "application/json": {
+                                                                    "schema": { "$ref": "#/components/schemas/Widget" }
+                                                                  }
+                                                                }
+                                                              },
+                                                              "404": { "description": "not found" }
+                                                            }
+                                                          }
+                                                        }
+                                                      },
+                                                      "components": {
+                                                        "schemas": {
+                                                          "Widget": {
+                                                            "type": "object",
+                                                            "required": ["id"],
+                                                            "properties": { "id": { "type": "string" } }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                    """;
 
     /// <summary>
     /// Task 5 Step 2's live wire proof: <see cref="Specs/orders.json"/>'s golden regeneration
@@ -238,40 +238,40 @@ public class GeneratedSuiteExecutionTests
     /// </para>
     /// </summary>
     private const string SpecWithSecuredOperation = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Stub", "version": "1.0" },
-      "paths": {
-        "/api/secure": {
-          "get": {
-            "operationId": "getSecureResource",
-            "tags": ["Secure"],
-            "security": [{ "bearerAuth": [] }],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Status" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
-        "schemas": {
-          "Status": {
-            "type": "object",
-            "required": ["state"],
-            "properties": { "state": { "type": "string" } }
-          }
-        }
-      }
-    }
-    """;
+                                                    {
+                                                      "openapi": "3.0.3",
+                                                      "info": { "title": "Stub", "version": "1.0" },
+                                                      "paths": {
+                                                        "/api/secure": {
+                                                          "get": {
+                                                            "operationId": "getSecureResource",
+                                                            "tags": ["Secure"],
+                                                            "security": [{ "bearerAuth": [] }],
+                                                            "responses": {
+                                                              "200": {
+                                                                "description": "ok",
+                                                                "content": {
+                                                                  "application/json": {
+                                                                    "schema": { "$ref": "#/components/schemas/Status" }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      },
+                                                      "components": {
+                                                        "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+                                                        "schemas": {
+                                                          "Status": {
+                                                            "type": "object",
+                                                            "required": ["state"],
+                                                            "properties": { "state": { "type": "string" } }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                    """;
 
     /// <summary>
     /// Task 4 / F11's live wire proof. Unlike <see cref="SpecWithSecuredOperation"/> above
@@ -305,57 +305,57 @@ public class GeneratedSuiteExecutionTests
     /// </para>
     /// </summary>
     private const string SpecWithScopedSecuredOperation = """
-    {
-      "openapi": "3.0.3",
-      "info": { "title": "Stub", "version": "1.0" },
-      "paths": {
-        "/api/secure-scoped": {
-          "get": {
-            "operationId": "getScopedSecureResource",
-            "tags": ["ScopedSecure"],
-            "security": [{ "bearerAuth": ["orders.write"] }],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Status" }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "/api/secure-scoped-delete": {
-          "get": {
-            "operationId": "getScopedSecureResourceRequiringDelete",
-            "tags": ["ScopedSecure"],
-            "security": [{ "bearerAuth": ["orders.write", "orders.delete"] }],
-            "responses": {
-              "200": {
-                "description": "ok",
-                "content": {
-                  "application/json": {
-                    "schema": { "$ref": "#/components/schemas/Status" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "components": {
-        "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
-        "schemas": {
-          "Status": {
-            "type": "object",
-            "required": ["state"],
-            "properties": { "state": { "type": "string" } }
-          }
-        }
-      }
-    }
-    """;
+                                                          {
+                                                            "openapi": "3.0.3",
+                                                            "info": { "title": "Stub", "version": "1.0" },
+                                                            "paths": {
+                                                              "/api/secure-scoped": {
+                                                                "get": {
+                                                                  "operationId": "getScopedSecureResource",
+                                                                  "tags": ["ScopedSecure"],
+                                                                  "security": [{ "bearerAuth": ["orders.write"] }],
+                                                                  "responses": {
+                                                                    "200": {
+                                                                      "description": "ok",
+                                                                      "content": {
+                                                                        "application/json": {
+                                                                          "schema": { "$ref": "#/components/schemas/Status" }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              },
+                                                              "/api/secure-scoped-delete": {
+                                                                "get": {
+                                                                  "operationId": "getScopedSecureResourceRequiringDelete",
+                                                                  "tags": ["ScopedSecure"],
+                                                                  "security": [{ "bearerAuth": ["orders.write", "orders.delete"] }],
+                                                                  "responses": {
+                                                                    "200": {
+                                                                      "description": "ok",
+                                                                      "content": {
+                                                                        "application/json": {
+                                                                          "schema": { "$ref": "#/components/schemas/Status" }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            "components": {
+                                                              "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+                                                              "schemas": {
+                                                                "Status": {
+                                                                  "type": "object",
+                                                                  "required": ["state"],
+                                                                  "properties": { "state": { "type": "string" } }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                          """;
 
     private string _root = null!;
     private GoldenApiStub _stub = null!;
@@ -377,7 +377,8 @@ public class GeneratedSuiteExecutionTests
 
         if (Directory.Exists(_root))
         {
-            try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
+            try { Directory.Delete(_root, recursive: true); }
+            catch (IOException) { }
         }
     }
 
@@ -445,11 +446,11 @@ public class GeneratedSuiteExecutionTests
 
         var resultsDir = Path.Combine(_root, "TestResults");
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         // The misdiagnosis this task exists to close: readiness must never be what failed here.
         test.Output.ShouldNotContain("ReadinessTimeoutException",
-            customMessage: $"the readiness probe ran on a client carrying the throwing handler — F10 regressed:{Environment.NewLine}{test.Output}");
+        customMessage: $"the readiness probe ran on a client carrying the throwing handler — F10 regressed:{Environment.NewLine}{test.Output}");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -461,7 +462,7 @@ public class GeneratedSuiteExecutionTests
 
         statusResult.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
         statusResult!.Attribute("outcome")?.Value.ShouldBe("Failed",
-            $"GetStatus_Contract should fail on the throwing handler's own exception, not pass or be skipped:{Environment.NewLine}{test.Output}");
+        $"GetStatus_Contract should fail on the throwing handler's own exception, not pass or be skipped:{Environment.NewLine}{test.Output}");
 
         // The actual failure, not just "some" failure: the throwing handler's own message must
         // reach the test's own failure output, proving the first request — not readiness — is
@@ -469,7 +470,7 @@ public class GeneratedSuiteExecutionTests
         var failureText = statusResult.Descendants().Where(e => e.Name.LocalName == "Message")
             .Select(e => e.Value).FirstOrDefault() ?? "";
         failureText.ShouldContain("identity provider unreachable",
-            customMessage: $"GetStatus_Contract failed for an unexpected reason:{Environment.NewLine}{test.Output}");
+        customMessage: $"GetStatus_Contract failed for an unexpected reason:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(1, test.Output);
     }
@@ -522,7 +523,7 @@ public class GeneratedSuiteExecutionTests
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
         File.ReadAllText(generatedFile).ShouldContain("GetStatusById_Contract",
-            customMessage: "the operation this test exists to prove must actually be generated");
+        customMessage: "the operation this test exists to prove must actually be generated");
 
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
         File.Exists(fixturePath).ShouldBeTrue("`fixtures repair` should have composed one fixture for the required path parameter");
@@ -538,14 +539,14 @@ public class GeneratedSuiteExecutionTests
         // just written) so a no-op caused by the wrong path, the wrong key, or writing to the
         // wrong file is caught here rather than only by RequireFixture further down.
         File.ReadAllText(fixturePath).ShouldNotContain("TODO:id",
-            customMessage: "the sentinel replacement must actually take effect on disk");
+        customMessage: "the sentinel replacement must actually take effect on disk");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -562,9 +563,9 @@ public class GeneratedSuiteExecutionTests
         // the literal sentinel too, so a no-op replace fails here even if the direct on-disk
         // check above were somehow fooled).
         statusByIdResult.ShouldNotBeNull(
-            $"GetStatusById_Contract did not appear in the trx at all — the suite ran one test short and nothing noticed:{Environment.NewLine}{test.Output}");
+        $"GetStatusById_Contract did not appear in the trx at all — the suite ran one test short and nothing noticed:{Environment.NewLine}{test.Output}");
         statusByIdResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
-            $"GetStatusById_Contract ran but did not pass — the fixture value likely never reached the live request:{Environment.NewLine}{test.Output}");
+        $"GetStatusById_Contract ran but did not pass — the fixture value likely never reached the live request:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
     }
@@ -633,7 +634,7 @@ public class GeneratedSuiteExecutionTests
 
         var resultsDir = Path.Combine(_root, "TestResults");
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -644,10 +645,10 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatusById_Contract", StringComparison.Ordinal));
 
         statusByIdResult.ShouldNotBeNull(
-            $"GetStatusById_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        $"GetStatusById_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
         statusByIdResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
-            $"GetStatusById_Contract ran but did not pass — a published fixture key likely never reached " +
-            $"TokenResolver:{Environment.NewLine}{test.Output}");
+        $"GetStatusById_Contract ran but did not pass — a published fixture key likely never reached " +
+        $"TokenResolver:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
 
@@ -655,8 +656,8 @@ public class GeneratedSuiteExecutionTests
         // the exact value SeedIdFixture published — "seeded-42", not "TODO:id" and not anything
         // else — must have reached the stub on the wire.
         _stub.ReceivedPaths.ShouldContain("/api/status/seeded-42",
-            $"the published fixture value never reached the live request. Paths actually served: " +
-            $"{string.Join(", ", _stub.ReceivedPaths)}");
+        $"the published fixture value never reached the live request. Paths actually served: " +
+        $"{string.Join(", ", _stub.ReceivedPaths)}");
     }
 
     /// <summary>
@@ -672,7 +673,7 @@ public class GeneratedSuiteExecutionTests
     /// wrong, and there is no positive control proving the mechanism itself works.
     /// <para>
     /// Also asserts the skip line itself reached real process output — see
-    /// <c>TestHost.ContextTextWriter</c>'s own doc for why that is
+    /// <c>TestContextDiagnostics</c>'s own doc for why that is
     /// <c>TestContext.DisplayMessage(Warning, ...)</c>, not <c>WriteLine</c>, and for the
     /// confirmed VSTest behaviour behind that choice.
     /// </para>
@@ -703,14 +704,14 @@ public class GeneratedSuiteExecutionTests
         // first thing it does if it ever runs at all, before it throws.
         var markerPath = Path.Combine(_root, "bin", "Debug", "net10.0", "skipped-fixture-ran.marker");
         File.Exists(markerPath).ShouldBeFalse(
-            "SkippedFixture ran even though its AppliesTo excludes the active profile ('local') — " +
-            "FixtureRunner's skip logic did not apply inside a live TestHost.InitializeAsync run.");
+        "SkippedFixture ran even though its AppliesTo excludes the active profile ('local') — " +
+        "FixtureRunner's skip logic did not apply inside a live TestHost.InitializeAsync run.");
 
         // The seam DisplayMessage opened up: FixtureRunner's own skip line, verbatim, reaching
         // real process stdout on a passing run.
         test.Output.ShouldContain(
-            "Skipping fixture 'Stub.ApiTests.SkippedFixture': its AppliesTo does not include profile 'local'.",
-            customMessage: $"the skip line never reached process output:{Environment.NewLine}{test.Output}");
+        "Skipping fixture 'Stub.ApiTests.SkippedFixture': its AppliesTo does not include profile 'local'.",
+        customMessage: $"the skip line never reached process output:{Environment.NewLine}{test.Output}");
     }
 
     /// <summary>
@@ -723,7 +724,7 @@ public class GeneratedSuiteExecutionTests
     /// real problem sitting in the report. Before <c>TestHost</c> used
     /// <c>TestContext.DisplayMessage</c>, this report existed only as a <c>WriteLine</c> call
     /// that VSTest silently drops on exactly this kind of passing run (see
-    /// <c>TestHost.ContextTextWriter</c>'s doc for the confirmed mechanism) — so this test would
+    /// <c>TestContextDiagnostics</c>'s doc for the confirmed mechanism) — so this test would
     /// have passed against that bug: nothing here checks that the report exists, only that it
     /// reached somewhere a human or CI system would actually see it.
     /// </summary>
@@ -741,7 +742,7 @@ public class GeneratedSuiteExecutionTests
 
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
         File.ReadAllText(fixturePath).ShouldContain("\"TODO:id\"",
-            customMessage: "left unresolved on purpose — this test needs a genuine, standing validation problem");
+        customMessage: "left unresolved on purpose — this test needs a genuine, standing validation problem");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
@@ -750,16 +751,16 @@ public class GeneratedSuiteExecutionTests
         // so this filter runs only the fixture-free operation and never touches the one with the
         // still-unresolved sentinel.
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\"");
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\"");
 
         test.ExitCode.ShouldBe(0,
-            $"the filtered run should pass — nothing calls RequireFixture for the one operation with a " +
-            $"problem:{Environment.NewLine}{test.Output}");
+        $"the filtered run should pass — nothing calls RequireFixture for the one operation with a " +
+        $"problem:{Environment.NewLine}{test.Output}");
 
         test.Output.ShouldContain("getStatusById:",
-            customMessage: $"the aggregated report never reached process output on this passing run:{Environment.NewLine}{test.Output}");
+        customMessage: $"the aggregated report never reached process output on this passing run:{Environment.NewLine}{test.Output}");
         test.Output.ShouldContain("is still unfilled (TODO:id)",
-            customMessage: $"the report reached output but not with the expected problem detail:{Environment.NewLine}{test.Output}");
+        customMessage: $"the report reached output but not with the expected problem detail:{Environment.NewLine}{test.Output}");
     }
 
     /// <summary>
@@ -787,17 +788,17 @@ public class GeneratedSuiteExecutionTests
             .ShouldHaveSingleItem("generate should have produced exactly one WidgetsTests.g.cs");
         var generated = File.ReadAllText(generatedFile);
         generated.ShouldContain("GetWidgetById_NotFound",
-            customMessage: "the declared-error case this test exists to prove must actually be generated");
+        customMessage: "the declared-error case this test exists to prove must actually be generated");
         generated.ShouldContain("Guid.NewGuid().ToString()",
-            customMessage: "decision 6: a declared-error case must send a generated, unmatchable id, never a fixture value");
+        customMessage: "decision 6: a declared-error case must send a generated, unmatchable id, never a fixture value");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetWidgetById_NotFound\" " +
-            $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetWidgetById_NotFound\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -809,13 +810,13 @@ public class GeneratedSuiteExecutionTests
         // was never filled in above, and decision 6 exists precisely so that never matters here —
         // if it did run and was blocked by RequireFixture, this count would catch it at 2.
         results.Count.ShouldBe(1,
-            $"expected exactly 1 filtered test (GetWidgetById_NotFound) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
+        $"expected exactly 1 filtered test (GetWidgetById_NotFound) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
 
         var notFoundResult = results.Single();
         (notFoundResult.Attribute("testName")?.Value ?? "").ShouldContain("GetWidgetById_NotFound",
-            customMessage: $"the filtered trx result was not the expected test:{Environment.NewLine}{test.Output}");
+        customMessage: $"the filtered trx result was not the expected test:{Environment.NewLine}{test.Output}");
         notFoundResult.Attribute("outcome")?.Value.ShouldBe("Passed",
-            $"GetWidgetById_NotFound ran but did not pass — the declared-error case likely never received a real 404 over the wire:{Environment.NewLine}{test.Output}");
+        $"GetWidgetById_NotFound ran but did not pass — the declared-error case likely never received a real 404 over the wire:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
 
@@ -824,7 +825,7 @@ public class GeneratedSuiteExecutionTests
         // under /api/widgets/, not merely have been built and never sent.
         _stub.ReceivedPaths.Any(p => p.StartsWith("/api/widgets/", StringComparison.Ordinal))
             .ShouldBeTrue($"the generated declared-error case never reached the stub over the wire. " +
-                $"Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+                          $"Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
     }
 
     /// <summary>
@@ -866,18 +867,18 @@ public class GeneratedSuiteExecutionTests
             .ShouldHaveSingleItem("generate should have produced exactly one SecureTests.g.cs");
         var generated = File.ReadAllText(generatedFile);
         generated.ShouldContain("GetSecureResource_Unauthorized",
-            customMessage: "the no-token 401 case this test exists to prove must actually be generated");
+        customMessage: "the no-token 401 case this test exists to prove must actually be generated");
         generated.ShouldContain("GetSecureResource_Forbidden",
-            customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
+        customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
         generated.ShouldContain("RequireMultipleIdentities();",
-            customMessage: "decision 3: the 403 case must carry the runtime guard");
+        customMessage: "decision 3: the 403 case must carry the runtime guard");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -886,7 +887,7 @@ public class GeneratedSuiteExecutionTests
         var results = trx.Descendants().Where(e => e.Name.LocalName == "UnitTestResult").ToList();
 
         results.Count.ShouldBe(3,
-            $"expected exactly 3 tests (Contract, Unauthorized, Forbidden) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
+        $"expected exactly 3 tests (Contract, Unauthorized, Forbidden) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
 
         foreach (var (name, expectedOutcome) in new[]
                  {
@@ -898,7 +899,7 @@ public class GeneratedSuiteExecutionTests
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
             result!.Attribute("outcome")?.Value.ShouldBe(expectedOutcome,
-                $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
+            $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -907,7 +908,7 @@ public class GeneratedSuiteExecutionTests
         // uses against ReceivedPaths: every one of the three generated requests must have
         // actually reached the stub, not merely have been built and never sent.
         _stub.ReceivedPaths.Count(p => p == "/api/secure").ShouldBe(3,
-            $"expected all 3 generated cases to reach the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+        $"expected all 3 generated cases to reach the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
     }
 
     /// <summary>
@@ -962,21 +963,21 @@ public class GeneratedSuiteExecutionTests
             .ShouldHaveSingleItem("generate should have produced exactly one ScopedSecureTests.g.cs");
         var generated = File.ReadAllText(generatedFile);
         generated.ShouldContain("GetScopedSecureResource_Forbidden",
-            customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
+        customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
         generated.ShouldContain("RequireSecondaryIdentityLacks(\"orders.write\");",
-            customMessage: "Task 4: the scoped 403 case must carry both guards, not just RequireMultipleIdentities");
+        customMessage: "Task 4: the scoped 403 case must carry both guards, not just RequireMultipleIdentities");
         generated.ShouldContain("GetScopedSecureResourceRequiringDelete_Forbidden",
-            customMessage: "the wrong-scope 403 case that must actually run — the guard's other half — must be generated");
+        customMessage: "the wrong-scope 403 case that must actually run — the guard's other half — must be generated");
         generated.ShouldContain("RequireSecondaryIdentityLacks(\"orders.delete\", \"orders.write\");",
-            customMessage: "Task 4: the running scoped 403 case must carry both guards too, not just RequireMultipleIdentities, " +
-                "and must union both required scopes (ordinal-sorted) rather than just one");
+        customMessage: "Task 4: the running scoped 403 case must carry both guards too, not just RequireMultipleIdentities, " +
+                       "and must union both required scopes (ordinal-sorted) rather than just one");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -985,24 +986,24 @@ public class GeneratedSuiteExecutionTests
         var results = trx.Descendants().Where(e => e.Name.LocalName == "UnitTestResult").ToList();
 
         results.Count.ShouldBe(6,
-            $"expected exactly 6 tests (Contract, Unauthorized, Forbidden for each of the two scoped " +
-            $"operations) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
+        $"expected exactly 6 tests (Contract, Unauthorized, Forbidden for each of the two scoped " +
+        $"operations) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
 
         // "No failures" alone would also describe a suite that stopped generating the case at
         // all — the count assertion above already rules that out, but this states the "no
         // failures" half explicitly and by name, over every result in the run.
         var failed = results.Where(e => e.Attribute("outcome")?.Value == "Failed").ToList();
         failed.ShouldBeEmpty(
-            $"expected no failures in the run, but {failed.Count} test(s) failed:{Environment.NewLine}{test.Output}");
+        $"expected no failures in the run, but {failed.Count} test(s) failed:{Environment.NewLine}{test.Output}");
 
         var forbiddenResult = results.SingleOrDefault(e =>
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResource_Forbidden", StringComparison.Ordinal));
         forbiddenResult.ShouldNotBeNull(
-            $"GetScopedSecureResource_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        $"GetScopedSecureResource_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
         forbiddenResult!.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
-            $"GetScopedSecureResource_Forbidden should have been skipped by RequireSecondaryIdentityLacks " +
-            $"— the secondary identity holds the scope this operation requires, so it cannot produce a real " +
-            $"403:{Environment.NewLine}{test.Output}");
+        $"GetScopedSecureResource_Forbidden should have been skipped by RequireSecondaryIdentityLacks " +
+        $"— the secondary identity holds the scope this operation requires, so it cannot produce a real " +
+        $"403:{Environment.NewLine}{test.Output}");
 
         // The success and 401 cases must still genuinely pass — the guard must skip only the one
         // case it exists for, not the whole class.
@@ -1011,7 +1012,7 @@ public class GeneratedSuiteExecutionTests
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
             result!.Attribute("outcome")?.Value.ShouldBe("Passed",
-                $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
+            $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
         // The gap this test exists to close: nothing above proves the guard does not over-skip.
@@ -1022,18 +1023,18 @@ public class GeneratedSuiteExecutionTests
         var runningForbiddenResult = results.SingleOrDefault(e =>
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResourceRequiringDelete_Forbidden", StringComparison.Ordinal));
         runningForbiddenResult.ShouldNotBeNull(
-            $"GetScopedSecureResourceRequiringDelete_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        $"GetScopedSecureResourceRequiringDelete_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
         runningForbiddenResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
-            $"GetScopedSecureResourceRequiringDelete_Forbidden should have run — the secondary identity does " +
-            $"not hold \"orders.delete\", so RequireSecondaryIdentityLacks must not skip it, and it must " +
-            $"receive a real 403:{Environment.NewLine}{test.Output}");
+        $"GetScopedSecureResourceRequiringDelete_Forbidden should have run — the secondary identity does " +
+        $"not hold \"orders.delete\", so RequireSecondaryIdentityLacks must not skip it, and it must " +
+        $"receive a real 403:{Environment.NewLine}{test.Output}");
 
         foreach (var name in new[] { "GetScopedSecureResourceRequiringDelete_Contract", "GetScopedSecureResourceRequiringDelete_Unauthorized" })
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
             result!.Attribute("outcome")?.Value.ShouldBe("Passed",
-                $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
+            $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -1044,13 +1045,13 @@ public class GeneratedSuiteExecutionTests
         // unmatchable-id rule exists to prevent. The .trx cannot distinguish the two; the stub
         // can.
         _stub.ReceivedPaths.Count(p => p == "/api/secure-scoped").ShouldBe(2,
-            "Contract and Unauthorized reach the stub; the skipped Forbidden case must never build a request.");
+        "Contract and Unauthorized reach the stub; the skipped Forbidden case must never build a request.");
 
         // The stub-hit assertion is what distinguishes "ran and got a real 403" from "skipped
         // quietly": all three cases for this operation — including Forbidden — must reach the
         // wire, unlike the skipped operation just above.
         _stub.ReceivedPaths.Count(p => p == "/api/secure-scoped-delete").ShouldBe(3,
-            "Contract, Unauthorized, and the running Forbidden case must all reach the stub over the wire.");
+        "Contract, Unauthorized, and the running Forbidden case must all reach the stub over the wire.");
     }
 
     /// <summary>
@@ -1113,27 +1114,27 @@ public class GeneratedSuiteExecutionTests
         // leaves the cleanup-only item behind too and this comes out higher) and no fewer (a
         // create that silently did not happen brings it down).
         _stub.ItemCount.ShouldBe(2,
-            $"expected exactly 2 leaked items after two runs (one per run's CreateItem_Contract, " +
-            $"never cleaned up) but the store has {_stub.ItemCount} — a lower count means a create " +
-            $"silently did not happen; a higher count means a delete or its cleanup did not remove " +
-            $"the row it was supposed to.");
+        $"expected exactly 2 leaked items after two runs (one per run's CreateItem_Contract, " +
+        $"never cleaned up) but the store has {_stub.ItemCount} — a lower count means a create " +
+        $"silently did not happen; a higher count means a delete or its cleanup did not remove " +
+        $"the row it was supposed to.");
 
         // 3 POSTs per run: the seeding fixture's own seed item, its cleanup-only item, and the
         // generated CreateItem_Contract test's own create.
         var createCalls = _stub.ReceivedPaths.Count(p => p == "/api/items");
         createCalls.ShouldBe(6,
-            $"expected 6 POST /api/items calls (3 per run: the seeding fixture's seed item, its " +
-            $"cleanup-only item, and the generated CreateItem_Contract test) but saw {createCalls}. " +
-            $"Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+        $"expected 6 POST /api/items calls (3 per run: the seeding fixture's seed item, its " +
+        $"cleanup-only item, and the generated CreateItem_Contract test) but saw {createCalls}. " +
+        $"Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
 
         // 3 DELETEs per run: the generated DeleteItem_Contract test (targets the seed item), the
         // seed item's own cleanup (tolerates the 404 from the line above), and the cleanup-only
         // item's cleanup (must be a genuine 204 — nothing else could have deleted it first).
         var deleteCalls = _stub.ReceivedPaths.Count(p => p.StartsWith("/api/items/", StringComparison.Ordinal));
         deleteCalls.ShouldBe(6,
-            $"expected 6 DELETE /api/items/{{id}} calls (3 per run: DeleteItem_Contract, the seed " +
-            $"item's cleanup, and the cleanup-only item's cleanup) but saw {deleteCalls}. Paths " +
-            $"served: {string.Join(", ", _stub.ReceivedPaths)}");
+        $"expected 6 DELETE /api/items/{{id}} calls (3 per run: DeleteItem_Contract, the seed " +
+        $"item's cleanup, and the cleanup-only item's cleanup) but saw {deleteCalls}. Paths " +
+        $"served: {string.Join(", ", _stub.ReceivedPaths)}");
     }
 
     /// <summary>
@@ -1159,16 +1160,16 @@ public class GeneratedSuiteExecutionTests
         var createFixturePath = Path.Combine(_root, "fixtures", "createItem.json");
         var createFixture = File.ReadAllText(createFixturePath);
         createFixture.ShouldContain("\"TODO:sku\"",
-            customMessage: "a required body property always gets a sentinel (decision 1)");
+        customMessage: "a required body property always gets a sentinel (decision 1)");
         File.WriteAllText(createFixturePath,
-            createFixture.Replace("\"TODO:sku\"", "\"{{fixture:newItem.sku}}\"", StringComparison.Ordinal));
+        createFixture.Replace("\"TODO:sku\"", "\"{{fixture:newItem.sku}}\"", StringComparison.Ordinal));
 
         var deleteFixturePath = Path.Combine(_root, "fixtures", "deleteItem.json");
         var deleteFixture = File.ReadAllText(deleteFixturePath);
         deleteFixture.ShouldContain("\"TODO:id\"",
-            customMessage: "a required path parameter always gets a sentinel (decision 1)");
+        customMessage: "a required path parameter always gets a sentinel (decision 1)");
         File.WriteAllText(deleteFixturePath,
-            deleteFixture.Replace("\"TODO:id\"", "\"{{fixture:seededItem.id}}\"", StringComparison.Ordinal));
+        deleteFixture.Replace("\"TODO:id\"", "\"{{fixture:seededItem.id}}\"", StringComparison.Ordinal));
 
         File.WriteAllText(Path.Combine(_root, "RepeatableSeedFixture.cs"), GoldenFixtureSources.RepeatableSeedFixture);
         RegisterFixture("RepeatableSeedFixture");
@@ -1187,7 +1188,7 @@ public class GeneratedSuiteExecutionTests
     {
         var resultsDir = Path.Combine(_root, "TestResults", label);
         var test = await ProcessRunner.RunAsync("dotnet",
-            $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"[{label}] expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1196,15 +1197,15 @@ public class GeneratedSuiteExecutionTests
         var results = trx.Descendants().Where(e => e.Name.LocalName == "UnitTestResult").ToList();
 
         results.Count.ShouldBe(2,
-            $"[{label}] expected exactly 2 tests (CreateItem_Contract, DeleteItem_Contract) but " +
-            $"the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
+        $"[{label}] expected exactly 2 tests (CreateItem_Contract, DeleteItem_Contract) but " +
+        $"the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
 
         foreach (var name in new[] { "CreateItem_Contract", "DeleteItem_Contract" })
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"[{label}] {name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
             result!.Attribute("outcome")?.Value.ShouldBe("Passed",
-                $"[{label}] {name} ran but did not pass:{Environment.NewLine}{test.Output}");
+            $"[{label}] {name} ran but did not pass:{Environment.NewLine}{test.Output}");
         }
 
         test.ExitCode.ShouldBe(0, $"[{label}]{Environment.NewLine}{test.Output}");
@@ -1221,8 +1222,8 @@ public class GeneratedSuiteExecutionTests
         // failing a seeding-vs-readiness golden test with a bare, seemingly-unrelated 503 (M4).
         const string consecutiveSuccessesMarker = "\"ConsecutiveSuccesses\": 2";
         original.ShouldContain(consecutiveSuccessesMarker,
-            customMessage: "the scaffold's default InTest:Readiness:ConsecutiveSuccesses changed — " +
-                "update GoldenApiStub.RequiredReadyProbes and this replacement together");
+        customMessage: "the scaffold's default InTest:Readiness:ConsecutiveSuccesses changed — " +
+                       "update GoldenApiStub.RequiredReadyProbes and this replacement together");
 
         var json = original
             .Replace("https://localhost:5001/", $"http://localhost:{_stub.Port}/", StringComparison.Ordinal)
@@ -1245,21 +1246,21 @@ public class GeneratedSuiteExecutionTests
     private void UseProjectReferenceInsteadOfPackage()
     {
         var runtimeProject = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime", "InTest.Runtime.csproj"));
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
 
         var path = Path.Combine(_root, "Stub.ApiTests.csproj");
         var csprojText = File.ReadAllText(path);
 
-        var needle = $"""<PackageReference Include="InTest.Runtime" Version="{CliVersion.Current}" />""";
+        var needle = $"""<PackageReference Include="InTest.Runtime.MSTest" Version="{CliVersion.Current}" />""";
         csprojText.ShouldContain(needle, Case.Sensitive,
-            "InitCommand's scaffold no longer writes InTest.Runtime's PackageReference in the " +
-            "expected shape (Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\") -- " +
-            "update this needle alongside whatever changed.");
+        "InitCommand's scaffold no longer writes InTest.Runtime.MSTest's PackageReference in the " +
+        "expected shape (Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\") -- " +
+        "update this needle alongside whatever changed.");
 
         var csproj = csprojText.Replace(
-            needle,
-            $"""<ProjectReference Include="{runtimeProject}" />""",
-            StringComparison.Ordinal);
+        needle,
+        $"""<ProjectReference Include="{runtimeProject}" />""",
+        StringComparison.Ordinal);
 
         File.WriteAllText(path, csproj);
     }
@@ -1275,12 +1276,12 @@ public class GeneratedSuiteExecutionTests
         var testStartup = File.ReadAllText(testStartupPath);
         const string placeholder = "// services.AddSingleton<IAssemblyFixture, YourFixture>();";
         testStartup.ShouldContain(placeholder,
-            customMessage: "the scaffolded registration placeholder must still be present to replace");
+        customMessage: "the scaffolded registration placeholder must still be present to replace");
 
         File.WriteAllText(testStartupPath, testStartup.Replace(
-            placeholder,
-            $"services.AddSingleton<IAssemblyFixture, {typeName}>();",
-            StringComparison.Ordinal));
+        placeholder,
+        $"services.AddSingleton<IAssemblyFixture, {typeName}>();",
+        StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -1298,12 +1299,12 @@ public class GeneratedSuiteExecutionTests
         var testStartup = File.ReadAllText(testStartupPath);
         const string anchor = "// Per-request fixtures: path and query parameter values live in fixtures/, not";
         testStartup.ShouldContain(anchor,
-            customMessage: "the scaffolded Register method's comment must still be present to anchor this edit");
+        customMessage: "the scaffolded Register method's comment must still be present to anchor this edit");
 
         File.WriteAllText(testStartupPath, testStartup.Replace(
-            anchor,
-            "services.AddSingleton<ITestTokenProvider, TwoIdentityTokenProvider>();\n\n        " + anchor,
-            StringComparison.Ordinal));
+        anchor,
+        "services.AddSingleton<ITestTokenProvider, TwoIdentityTokenProvider>();\n\n        " + anchor,
+        StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -1325,12 +1326,12 @@ public class GeneratedSuiteExecutionTests
         var testStartup = File.ReadAllText(testStartupPath);
         const string anchor = "// Per-request fixtures: path and query parameter values live in fixtures/, not";
         testStartup.ShouldContain(anchor,
-            customMessage: "the scaffolded Register method's comment must still be present to anchor this edit");
+        customMessage: "the scaffolded Register method's comment must still be present to anchor this edit");
 
         File.WriteAllText(testStartupPath, testStartup.Replace(
-            anchor,
-            "services.AddTransient<AlwaysThrowsHandler>();\n        services.AddHttpClient(InTestClients.Api).AddHttpMessageHandler<AlwaysThrowsHandler>();\n\n        " + anchor,
-            StringComparison.Ordinal));
+        anchor,
+        "services.AddTransient<AlwaysThrowsHandler>();\n        services.AddHttpClient(InTestClients.Api).AddHttpMessageHandler<AlwaysThrowsHandler>();\n\n        " + anchor,
+        StringComparison.Ordinal));
     }
 
     // RunAsync moved to ProcessRunner (Task 10 item 6) — shared with CompileVerificationTests
