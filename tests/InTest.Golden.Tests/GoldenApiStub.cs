@@ -55,6 +55,7 @@ internal sealed class GoldenApiStub : IDisposable
     private readonly ConcurrentDictionary<string, string> _itemsById = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _skusInUse = new(StringComparer.Ordinal);
     private int _readyProbeCount;
+    private StatusOverride? _statusOverride;
 
     public int Port { get; }
 
@@ -73,6 +74,30 @@ internal sealed class GoldenApiStub : IDisposable
     /// vacuously-passing guard).
     /// </summary>
     public int ItemCount => _itemsById.Count;
+
+    /// <summary>
+    /// Overrides GET /api/status's response for the remainder of this stub's lifetime — used only
+    /// by the [capture-not-deserialize] golden tests in GeneratedSuiteExecutionTests
+    /// (ClientRoutedSuccessCaseCatchesASchemaViolationAfterTheClientDeserializes,
+    /// ClientRoutedSuccessCaseReceivesAUsableDeserializedResult,
+    /// ClientRoutedSuccessCaseSurfacesInTestsOwnContractFailureNotTheClientsException) that prove
+    /// a client-routed test case still catches a raw-bytes schema violation, or InTest's own
+    /// status-mismatch verdict, after a typed client has deserialized the response
+    /// ResponseCaptureHandler replaced. Every other golden test in this file relies on the
+    /// unconditional 200/{"state":"ok"} default in ServeAsync's switch below and never calls this.
+    /// <para>
+    /// Volatile.Write/Read — matching this class's own _readyProbeCount pattern just above —
+    /// rather than a lock: whichever golden test calls this always does so from its own setup
+    /// code, well before the generated suite's separate `dotnet test` process ever sends its
+    /// first request, so there is no genuine concurrent writer to arbitrate. This only needs to
+    /// guarantee the one write is actually visible to whichever server thread later handles the
+    /// request, not resolve a race between writers that never happens.
+    /// </para>
+    /// </summary>
+    public void OverrideStatusResponse(int status, string body) =>
+        Volatile.Write(ref _statusOverride, new StatusOverride(status, body));
+
+    private sealed record StatusOverride(int Status, string Body);
 
     public GoldenApiStub()
     {
@@ -117,7 +142,9 @@ internal sealed class GoldenApiStub : IDisposable
                 _ => path switch
                 {
                     "/health/ready" => HandleHealthCheck(),
-                    "/api/status" => (200, """{"state":"ok"}"""),
+                    // Volatile.Read'ing OverrideStatusResponse's write — see that method's own doc
+                    // for why this is the one arm in the switch below that is not a fixed literal.
+                    "/api/status" => Volatile.Read(ref _statusOverride) is { } o ? (o.Status, o.Body) : (200, """{"state":"ok"}"""),
                     // Task 5 Step 2's live wire proof — the one path in this stub that actually
                     // inspects Authorization, everything else here trusts the request unconditionally.
                     "/api/secure" => HandleSecureResource(context.Request),
