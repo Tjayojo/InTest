@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish and the adopter dry run
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, and the full Phase 0-8 walkthrough
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -14,6 +14,7 @@ forward" list at the end is always the current one.
 | v1-e Task 6 | 2026-08-22 | `cc43714` + this commit | The verdict run for `generate --check` and `intest upgrade`. `dotnet tool restore` — Phase 8's first line, never exercised before this run because every earlier acceptance run substituted `dotnet run --project` or a `ProjectReference` — made to work for real via a temporary local NuGet feed, not substituted around; a stale `InTest.Runtime 0.1.0` in the global package cache (built one commit behind HEAD) was found and cleared, not packed over. All 5 steps ran against live `samples/Orders.Api` + `samples/Identity.Server`: spec-edit drift (exit 1), a true orphaned-file case built by removing every `/api/customers` operation (exit 1, extra file named, sibling class byte-identical), a contrived version mismatch pre-empting a simultaneous diff (exit 4, §8's exact message), `intest upgrade` resolving it and the suite passing again (20/0/4), and a real `core.autocrlf=true` cross-platform checkout — proved both ways: `.gitattributes` present keeps every byte LF and `--check` clean, absent it every generated file corrupts to CRLF and fails on every line, and `upgrade`'s migration path (scaffold `.gitattributes` if absent) fixes it live. One new finding: bare `intest …`, as shown in every code block in `getting-started.md`, does not run against a locally-restored tool — needs `dotnet intest …` (**F13**) |
 | 0.1.0-preview.1 publish | 2026-08-24 | `35056b8` (tagged) | First real tag push. `pack.yml` and `release.yml` both ran on GitHub Actions for real — trigger firing, matrix fan-out, cross-job artifact transfer, the OIDC exchange and the `nuget-release` environment gate all previously unexercised. Both jobs green; nuget.org accepted all four artifacts. Phase 8's `dotnet tool restore` now works from a bare clone for the first time — previously every acceptance run had to substitute something. The `.snupkg`-under-`tools/` question (open since readiness spec revision 2) is answered: nuget.org accepts it |
 | Adopter dry run | 2026-08-24 | `a4c8315` + this commit | The first real adoption run against the published packages (publish-actions item 6, previously open). Found both committed examples' `intestVersion` and `.config/dotnet-tools.json` pins hand-edited to `0.1.0` — a version never published — while their `.csproj`'s `InTest.Runtime` reference correctly named `0.1.0-preview.1` (**F14**). Reproduced the consequence: `dotnet tool restore` fails outright on a bare clone. Fixed with the published `0.1.0-preview.1` CLI's own `intest upgrade`, not by hand; regeneration changed nothing beyond the two version markers. Re-proved the full `dotnet tool restore` → `dotnet intest generate --check` → `dotnet build` path against both examples, cold `NUGET_PACKAGES`, all green. New guard, `ExampleProjectVersionMarkerTests`, proven to fire by reverting one marker |
+| Full Phase 0-8 walkthrough | 2026-08-25 | `b349e25` + this commit | The first full `getting-started.md` walkthrough — Phase 0 through Phase 8, in order — against the published packages with zero substitutions: `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1`, three fresh `intest init` scaffolds, `fixtures repair`, a hand-written `ITestTokenProvider` for Orders, `dotnet tool restore`, `generate --check`, and `dotnet build` all against a cold, isolated `NUGET_PACKAGES` with no local leftovers. Live results: Catalog **13 of 13**, Orders **20 passed, 0 failed, 4 skipped** (all four `RequireSecondaryIdentityLacks`), Inventory **9 of 9** — reproducing `getting-started.md`'s own stated banner numbers for the first time against the *published* tool rather than a local build. `generate --check`'s exit `4` and `intest upgrade` both exercised on a fresh scaffold and closed the loop (exit 0, suite passing again). **No new defect found** — every phase matched the document exactly. One re-run of `dotnet test InTest.sln` in the repo caught a transient `MSB3713` file-lock build failure in `InTest.Golden.Tests`, consistent with the other session's concurrent activity in this shared tree; reproduced clean in isolation, not a product defect |
 
 ---
 
@@ -2363,3 +2364,332 @@ configuration — proven once, then trusted, the same practice this repository a
 | 1 | Fix both committed examples' `intestVersion` and `.config/dotnet-tools.json` pins to name a published version | this run | **Closed** — via `intest upgrade`, not by hand; see above |
 | 2 | Add a mechanical guard so committed examples cannot silently re-drift | this run | **Closed** — `ExampleProjectVersionMarkerTests`, proven to fire by reversion |
 | 3 | Clean up `intest.*` packages and tool installs this run added to the local machine | this run | **Closed** — see this run's own commit message |
+
+---
+
+# Adopter walkthrough acceptance run — full Phase 0-8, published packages, no substitutions
+
+**Task:** run `docs/getting-started.md` end to end, Phase 0 through Phase 8, treating it as the
+specification — do only what it says, record any divergence rather than working around it — using
+the **published** `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` throughout. Every earlier
+acceptance run in this document substituted something for at least one step (a `ProjectReference`,
+`dotnet run --project`, a hand-built local NuGet feed); the previous "adopter dry run" (above)
+exercised the published tool but only against the two committed `examples/` projects and only for
+`upgrade`/`generate --check`, not a fresh scaffold walked narratively through every phase. This is
+that walkthrough.
+
+## Environment
+
+- **Repo state: local, not `origin/main`.** `HEAD` was `b349e257854245af51df8c46862a1190b8b7915a`,
+  7 commits ahead of `origin/main`, with another session's uncommitted work already sitting in
+  `src/InTest.Cli/Spec/SpecFetcher.cs` and its test — left untouched throughout, per this run's own
+  constraints. **This mattered**: the local tree carries a `Properties/launchSettings.json` per
+  sample project (4 commits back), pinning fixed, non-colliding ports, that `origin/main` does not
+  have yet. `dotnet run --project samples/<X>` therefore "just worked" on the documented ports with
+  no environment variable set by hand. An adopter cloning from GitHub today still hits the older
+  gap this document's own F9 (v1-b section) already recorded: `ASPNETCORE_URLS` has to be set
+  externally, or the launch profiles copied in by hand, until those commits reach `origin/main`.
+- **Two of the four sample processes were already running** when this run started — `Identity.Server`
+  (port 5084) and `Orders.Api` (port 5082), both started ~00:49 by the other session sharing this
+  tree. Health-checked (`/health/ready` and `/.well-known/openid-configuration`, both 200) and
+  reused rather than restarted, so as not to disturb concurrent work; `Catalog.Api` (5081) and
+  `Inventory.Api` (5083) were not running and were started by this run.
+- **NuGet**: `NUGET_PACKAGES` set to a cold, empty directory under this run's own scratch space for
+  every restore, so nothing could resolve from a locally-built leftover — the exact trap
+  getting-started.md's own "stale local package cache" section warns about.
+- **Scaffolding done entirely outside the repository**, in scratch directories, per this run's own
+  constraints — nothing under `Catalog.ApiTests/`, `Orders.ApiTests/` or `Inventory.ApiTests/`
+  below is committed to this repository.
+
+## Phase 0 — skipped, per the document's own banner
+
+`survey` is not built. Went straight to Phase 1, as instructed.
+
+## Phase 1 — spec availability
+
+Used the "same repository as the API" path for all three samples: built each sample project
+(`dotnet build samples/<Project>`, one at a time — `dotnet build a b c d` in one invocation is
+rejected by MSBuild itself with `MSB1008: Only one project can be specified`, an MSBuild limitation
+unrelated to InTest) and pointed `spec.source` at the resulting `bin/Debug/net10.0/<Project>.json`
+build artifact, exactly as Phase 1's table recommends. `Orders.Api`'s build failed to finish
+(`MSB3027`, its `.exe` locked by the already-running process noted above) but its OpenAPI document
+had already been written to disk earlier that session and did not need to change, so the existing
+artifact was used as-is — confirmed valid JSON and current for the running code before relying on
+it. The URL-sourced `spec.source` path (`spec.json` snapshot, Phase 1's "different repository, or
+only a URL" branch) was **not exercised** this run — noted below under what this run does not
+claim.
+
+## Phase 2 — scaffold, against the published tool
+
+```
+dotnet tool install -g InTest.Cli --version 0.1.0-preview.1
+```
+
+Resolved from nuget.org into the cold `NUGET_PACKAGES`, no local feed involved. `intest --version`
+afterward: `0.1.0-preview.1+35056b8cab6fa21981f9fa67e160b223a0378768`.
+
+```
+intest init --name Catalog.ApiTests   --spec .../Catalog.Api/bin/Debug/net10.0/Catalog.Api.json
+intest init --name Orders.ApiTests    --spec .../Orders.Api/bin/Debug/net10.0/Orders.Api.json
+intest init --name Inventory.ApiTests --spec .../Inventory.Api/bin/Debug/net10.0/Inventory.Api.json
+```
+
+All three exit `0`, bare `intest`, as Phase 2 says is the one deliberate exception. (One scratch
+directory named `Orders.ApiTests` already existed from an earlier, unrelated run — `intestVersion:
+"0.1.0"`, a version never published — and `init` correctly refused it with exit `3`, "`intest.json`
+already exists." Deleted and re-scaffolded cleanly rather than reused, to keep this run's own
+evidence uncontaminated by leftover state.)
+
+**The gap this run existed to close**: every scaffolded project's three version markers —
+`intest.json`'s `intestVersion`, `.config/dotnet-tools.json`'s `intest.cli` pin, and the
+`.csproj`'s `InTest.Runtime` `PackageReference` — all independently named `0.1.0-preview.1`,
+matching the running CLI's own version exactly (`[scaffold-reads-itself]`,
+`InitCommand.cs`'s `CliVersion.Current` substitution). The previous "adopter dry run" proved this
+holds for the two hand-maintained `examples/` projects after a fix; this run is the first time it
+was checked against a **freshly scaffolded** project, from the published prerelease tool, with
+nothing hand-edited first.
+
+## Phase 3 — configure
+
+`Api:BaseUrl` in each project's `appsettings.json` (the `local` default profile) set to the
+sample's origin — `http://localhost:5081/`, `5082/`, `5083/` respectively, no path prefix repeated,
+per the F3 guard's own guidance. `readiness.path` was already `/health/ready` (absolute) as
+scaffolded — the F2 fix holds.
+
+For `Orders.ApiTests` (the one sample with declared `security`), wrote `OrdersTokenProvider.cs`:
+a client-credentials `ITestTokenProvider` against `samples/Identity.Server`, with two identities —
+`orders-client` (`orders.read`, `orders.write`) and `orders-readonly` (`orders.read`) — matching
+that sample's own `Config.cs` exactly, and registered it in the scaffold's `TestStartup.Register`
+exactly as the (post-F8) scaffold doc comment instructs:
+
+```csharp
+services.AddSingleton<ITestTokenProvider, OrdersTokenProvider>();
+```
+
+No hand-written `DelegatingHandler` was needed — `AuthHandler` is already attached to
+`InTestClients.Api`, confirming F8's closure holds for a fresh scaffold, not just the runtime's own
+unit suite.
+
+## Phase 4 — generate (first pass)
+
+```
+dotnet intest generate
+```
+
+Run **before any explicit `dotnet tool restore`** in any of the three projects — worth recording
+positively: it worked anyway (the SDK's implicit local-tool restore on first invocation), so an
+adopter following Phase 4 verbatim, without first running the `dotnet tool restore` Phase 8 shows
+separately, is not stranded. All three exited `1`, "no fixture found" for every operation, matching
+this document's own v1-a section shape exactly:
+
+```
+Catalog.ApiTests:   8 operations named, exit 1
+Orders.ApiTests:    5 operations named, exit 1
+Inventory.ApiTests: 4 operations named, exit 1
+```
+
+## Phase 5 — fixtures
+
+```
+dotnet intest fixtures repair
+```
+
+`Created 8 fixture(s)`, `Created 5 fixture(s)`, `Created 4 fixture(s)` — identical counts to the
+v1-a and F14 runs on the same three specs. Every `TODO:` sentinel filled by hand with real,
+schema-conformant values: SKUs matching Catalog's `^[A-Z]{3}-[0-9]{4}$` pattern, `{{runId}}` for
+the two free-form-uniqueness fields (Catalog category name, Orders customer email), and real row
+IDs — either stable seed rows or rows left behind by this document's own earlier acceptance
+sections — for every GET/DELETE/PUT target. **F6's fix confirmed still holding**:
+`post_api_products.json`'s `dimensions` composed as a real three-property nested object
+(`lengthCentimetres`/`widthCentimetres`/`heightCentimetres`), not a flat string sentinel.
+
+## Phase 4 — generate (second pass)
+
+```
+dotnet intest generate
+```
+
+All three exit `0`:
+
+| Project | Generated | Classes | Notes |
+|---|---|---|---|
+| `Catalog.ApiTests` | 13 tests | 2 | 1 operation noted |
+| `Orders.ApiTests` | 24 tests | 2 | — |
+| `Inventory.ApiTests` | 9 tests | 2 | 1 operation noted |
+
+Exactly the counts `getting-started.md`'s own banner states for Orders (24) and that this
+document's earlier sections recorded for Catalog and Inventory.
+
+## Phase 8, pulled forward — restore and check
+
+```
+dotnet tool restore
+dotnet intest generate --check
+```
+
+All three: `Tool 'intest.cli' (version '0.1.0-preview.1') was restored.`, exit `0`; then
+`Generated/ and coverage-report.json match a fresh render.`, exit `0`.
+
+```
+dotnet build
+```
+
+All three: **Build succeeded, 0 Warning(s), 0 Error(s)** — `InTest.Runtime 0.1.0-preview.1`, a
+prerelease and the CLI's own version, resolved and compiled from nuget.org into a completely cold,
+isolated `NUGET_PACKAGES` with no local leftovers of any kind. **This is the specific gap the task
+existed to close**: a *committed* example restoring the prerelease runtime was proven in the
+previous acceptance run; a *freshly scaffolded* project had never been tried. It restores and
+builds cleanly.
+
+## Phase 6 — run, against real HTTP
+
+```
+dotnet test --logger "console;verbosity=detailed"
+```
+
+```
+Catalog.ApiTests:   Total tests: 13   Passed: 13   Failed: 0   Skipped: 0
+Orders.ApiTests:    Total tests: 24   Passed: 20   Failed: 0   Skipped: 4
+Inventory.ApiTests: Total tests: 9    Passed: 9    Failed: 0   Skipped: 0
+```
+
+All four Orders skips are `RequireSecondaryIdentityLacks`, with the exact stated reason:
+
+```
+Assert.Inconclusive. Skipped: the secondary identity 'orders-readonly' holds orders.read, which
+this operation requires, so it cannot produce a 403. Declare different scopes on that identity,
+or leave Scopes null to run this test anyway.
+```
+
+This reproduces `getting-started.md`'s own stated banner — "24 tests: 0 failed, 4 skipped, 20
+passed" — **for the first time against the published packages** rather than a local build. No
+`TODO:` sentinel failures, no genuine failures: every test that ran, ran against live HTTP and
+passed or was correctly gated.
+
+## Phase 8 — the rest
+
+**Post-deployment gate filter**, run a second time against the same, unreset `Catalog.Api`
+database:
+
+```
+dotnet test --filter "TestCategory=Contract" --settings Catalog.ApiTests.runsettings
+```
+
+`Failed: 2, Passed: 11, Total: 13` — `DeleteApiCategoriesId_Contract` 404s (its target already
+deleted by the first run) and `PostApiProducts_Contract` 409s (its SKU already created by the
+first run). This is **not a new defect** — it is Phase 5's own documented non-idempotency (F7)
+reproducing exactly as written, because this run's fixtures used literal/`{{runId}}` values with
+no `IAssemblyFixture` seeding (the repeatability pattern v1-b already proved separately). Confirmed
+in passing: every generated test today carries `[TestCategory("Contract")]` — variation tests
+don't exist yet to be excluded by this filter, so nothing here differs from Phase 6's own numbers
+except the operations a second, unreset run cannot repeat.
+
+**Exit 4 and `upgrade`**, on `Inventory.ApiTests`:
+
+```
+# intestVersion hand-edited 0.1.0-preview.1 -> 9.9.9
+dotnet intest generate --check
+  -> exit 4
+     intest.json was generated by intest 9.9.9; running tool is 0.1.0-preview.1.
+     Regenerate with the pinned version, or run `intest upgrade` to adopt 0.1.0-preview.1 deliberately.
+
+dotnet intest upgrade
+  -> exit 0
+     Generated 9 test(s) across 2 class(es).
+     Noted 1 operation(s) — see coverage-report.json.
+     Upgraded intest.json and .config/dotnet-tools.json to intest 0.1.0-preview.1.
+
+dotnet intest generate --check
+  -> exit 0, Generated/ and coverage-report.json match a fresh render.
+
+dotnet build
+  -> Build succeeded, 0 Warning(s), 0 Error(s)
+```
+
+Exact §8 wording, both version numbers named, `intestVersion` and the `.config/dotnet-tools.json`
+pin moved back together in one command — matching the F14/adopter-dry-run section's own
+description of `upgrade` exactly, now exercised on a fresh scaffold instead of a hand-maintained
+example.
+
+## F13, re-checked — and why this run could not fully re-exercise it
+
+Bare `intest` **did** resolve inside a `dotnet tool restore`-completed project directory in this
+run — the opposite of F13's own finding. This is not a contradiction: this run's Phase 2 installed
+the *same* version (`0.1.0-preview.1`) globally first, per the document's own Prerequisites
+section, so the global shim on `PATH` happens to shadow the local manifest's pin with an identical
+version rather than a different one. Phase 2's own prose already names exactly this risk — "`dotnet
+intest …` … resolve[s] the version this project just pinned, where a stray global copy on PATH
+would not" — but proving the *divergent* case (global and local pins disagreeing) is not
+constructible today: `0.1.0-preview.1` is the only version ever published to nuget.org. Recorded as
+an observation the doc already covers, not a new finding, and not something this run's environment
+could fully exercise.
+
+## What this run does not claim
+
+- **No new defect found.** Every phase, every command, every exit code matched
+  `getting-started.md` exactly, against the published packages, with zero substitutions — the
+  first time that has been true of a full Phase 0–8 walkthrough in this document's history.
+- **The URL-sourced `spec.source` path was not exercised.** All three projects used a local build
+  artifact (Phase 1's first table), not a URL and its `spec.json` snapshot.
+- **`survey`, `fixtures promote`, YAML input, variation tests, `assertions add`,
+  `generate --emit-plan`** remain unbuilt and unexercised, per the document's own banner.
+- **No CI pipeline ran any of this.** One local machine, real processes, real HTTP — not "in a real
+  pipeline," the same gap this document has carried open since v0.
+- **Phase 7 ("commit") was reviewed conceptually, not exercised.** The three scratch projects are
+  not git repositories; the file-categorization table was checked against what Phase 2/4/5 actually
+  wrote to disk, not against an actual `git add`/`git commit` cycle.
+- **F13's divergent-version case remains unconstructed** — see above.
+
+## Cleanup
+
+- `Catalog.Api` and `Inventory.Api` — the two sample processes this run started — were stopped.
+  `Identity.Server` and `Orders.Api`, already running before this run started and belonging to the
+  other session sharing this tree, were left running, untouched.
+- `intest.cli` uninstalled from the global tool registry (`dotnet tool uninstall -g InTest.Cli`).
+- `intest.cli` and `intest.runtime` removed from `~/.nuget/packages` — **despite** every restore in
+  this run using an isolated, cold `NUGET_PACKAGES`, `dotnet tool install -g`'s own asset
+  resolution populated the *default* global packages folder anyway for the tool's own install. This
+  is a `dotnet`/NuGet behavior, not an InTest one, but worth recording for whoever repeats this
+  exercise: isolating `NUGET_PACKAGES` for restores inside scaffolded projects does not also
+  isolate a `-g` tool install.
+
+## Repo suite afterward
+
+`dotnet test InTest.sln` in `D:/TestGen` at `HEAD = b349e25` (unchanged by this run — nothing
+under `src/`, `tests/`, or `docs/superpowers/` was touched):
+
+```
+Passed!  - Failed: 0, Passed:  10, Skipped: 0, Total:  10 - InTest.Architecture.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 205, Skipped: 0, Total: 205 - InTest.Runtime.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 483, Skipped: 0, Total: 483 - InTest.Cli.Tests.dll (net10.0)
+Failed!  - Failed: 1, Passed:  34, Skipped: 0, Total:  35 - InTest.Golden.Tests.dll (net10.0)
+```
+
+The one Golden failure, `ReadinessProbeSurvivesAThrowingApiHandler`:
+
+```
+error MSB3713: The file "obj\Debug\net10.0\InTest.Runtime.AssemblyInfo.cs" could not be created.
+The process cannot access the file '...\src\InTest.Runtime\obj\Debug\net10.0\InTest.Runtime.AssemblyInfo.cs'
+because it is being used by another process.
+```
+
+A file-lock race on `src/InTest.Runtime`'s own `obj/` directory — that Golden test builds a
+scaffolded project via a `ProjectReference` back into this repo's own `InTest.Runtime`, and this
+tree is shared with another session doing its own uncommitted work throughout this run (see
+Environment, above). Re-ran the single test in isolation immediately after: **1 of 1 passed, no
+retry, no code change.** Recorded as a shared-tree flake, not a product defect, per this run's own
+instruction not to quietly substitute a clean result — the raw failure is shown above rather than
+only the clean rerun.
+
+**Total with the flake counted as failed: 733 tests, 732 passed, 1 failed, 0 skipped.**
+
+## Full Phase 0-8 walkthrough actions
+
+| # | Action | Owner phase | Status |
+|---|---|---|---|
+| 1 | Prove a freshly scaffolded project (not just the committed `examples/`) restores `InTest.Runtime 0.1.0-preview.1` from nuget.org into a cold cache | this run | **Closed** — see Phase 2/Phase 8 above |
+| 2 | Walk `getting-started.md` Phase 0 through Phase 8 narratively, against the published tool, with no substitutions, and reproduce the document's own stated Orders banner (24/20/4/0) live | this run | **Closed** — see Phase 6 above |
+| 3 | Exercise `generate --check`'s exit 4 and `intest upgrade` against a fresh scaffold (not only `examples/`) using the published tool | this run | **Closed** — see Phase 8 above |
+| 4 | Add `origin/main`'s missing `Properties/launchSettings.json` for the four sample projects, so a bare GitHub clone gets fixed ports without `ASPNETCORE_URLS` set by hand | repository owner, next push | Open — local commits exist (`43d0a02`..`1b5287c`), not yet on `origin/main` |
+| 5 | Note in `CONTRIBUTING.md` or `docs/getting-started.md`'s stale-cache section that isolating `NUGET_PACKAGES` for scaffolded-project restores does not also isolate a `dotnet tool install -g`, which still populates the default global packages folder | pre-v1 release readiness | Open — recorded above, not fixed here |
+| 6 | Clean up `intest.*` packages/tool installs and sample API processes this run added to the local machine | this run | **Closed** — see Cleanup above |
