@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "intestVersion": "0.1.0",
+  "intestVersion": "0.1.0-preview.1",
   "spec": { "source": "../../samples/Catalog.Api/Catalog.Api.json", "producer": "auto" },
   "project": {
     "name": "Catalog.ApiTests",

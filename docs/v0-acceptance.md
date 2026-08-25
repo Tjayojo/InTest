@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6 and the 0.1.0-preview.1 publish
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish and the adopter dry run
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -13,6 +13,7 @@ forward" list at the end is always the current one.
 | F11 | 2026-08-21 | `0cf649a` | Orders live against a real Duende identity server, correctly scoped: **20 passed, 0 failed, 4 skipped**, all 4 skips bottoming out in `RequireSecondaryIdentityLacks` with a stated reason, the 3 write-scope 403s running and passing (**F11 closed**). Independently reproduced from scratch by a second agent with its own suite, provider, fixtures and ports — both runs agree exactly. A negative control (declared `Scopes` set to `null`) reproduces the original F11 failure on demand: 4 failed, not skipped. Catalog **13 of 13 twice**, Inventory **9 of 9 twice**, neither gains an auth test |
 | v1-e Task 6 | 2026-08-22 | `cc43714` + this commit | The verdict run for `generate --check` and `intest upgrade`. `dotnet tool restore` — Phase 8's first line, never exercised before this run because every earlier acceptance run substituted `dotnet run --project` or a `ProjectReference` — made to work for real via a temporary local NuGet feed, not substituted around; a stale `InTest.Runtime 0.1.0` in the global package cache (built one commit behind HEAD) was found and cleared, not packed over. All 5 steps ran against live `samples/Orders.Api` + `samples/Identity.Server`: spec-edit drift (exit 1), a true orphaned-file case built by removing every `/api/customers` operation (exit 1, extra file named, sibling class byte-identical), a contrived version mismatch pre-empting a simultaneous diff (exit 4, §8's exact message), `intest upgrade` resolving it and the suite passing again (20/0/4), and a real `core.autocrlf=true` cross-platform checkout — proved both ways: `.gitattributes` present keeps every byte LF and `--check` clean, absent it every generated file corrupts to CRLF and fails on every line, and `upgrade`'s migration path (scaffold `.gitattributes` if absent) fixes it live. One new finding: bare `intest …`, as shown in every code block in `getting-started.md`, does not run against a locally-restored tool — needs `dotnet intest …` (**F13**) |
 | 0.1.0-preview.1 publish | 2026-08-24 | `35056b8` (tagged) | First real tag push. `pack.yml` and `release.yml` both ran on GitHub Actions for real — trigger firing, matrix fan-out, cross-job artifact transfer, the OIDC exchange and the `nuget-release` environment gate all previously unexercised. Both jobs green; nuget.org accepted all four artifacts. Phase 8's `dotnet tool restore` now works from a bare clone for the first time — previously every acceptance run had to substitute something. The `.snupkg`-under-`tools/` question (open since readiness spec revision 2) is answered: nuget.org accepts it |
+| Adopter dry run | 2026-08-24 | `a4c8315` + this commit | The first real adoption run against the published packages (publish-actions item 6, previously open). Found both committed examples' `intestVersion` and `.config/dotnet-tools.json` pins hand-edited to `0.1.0` — a version never published — while their `.csproj`'s `InTest.Runtime` reference correctly named `0.1.0-preview.1` (**F14**). Reproduced the consequence: `dotnet tool restore` fails outright on a bare clone. Fixed with the published `0.1.0-preview.1` CLI's own `intest upgrade`, not by hand; regeneration changed nothing beyond the two version markers. Re-proved the full `dotnet tool restore` → `dotnet intest generate --check` → `dotnet build` path against both examples, cold `NUGET_PACKAGES`, all green. New guard, `ExampleProjectVersionMarkerTests`, proven to fire by reverting one marker |
 
 ---
 
@@ -2212,4 +2213,153 @@ Stated directly, because overstating it is exactly the failure mode this documen
 | 3 | Add a `CHANGELOG.md` and a standing changelog practice | this run | **Closed** — see `CHANGELOG.md` and `CONTRIBUTING.md`'s "Changelog" section |
 | 4 | Create a GitHub Release from `release.yml` on a tag push, without letting `contents: write` and `id-token: write` coexist in one job | this run | **Closed** — see `release.yml`'s `release` job |
 | 5 | Confirm a required-reviewer gate is configured on the `nuget-release` environment | repository owner, GitHub Settings | Open — recommended, not confirmed configured, same gap the readiness spec and `CONTRIBUTING.md` already name |
-| 6 | Re-run the full Phase 0–Phase 8 adopter walkthrough against the published `0.1.0-preview.1` specifically, rather than a local build | pre-v1 release readiness | Open — not attempted this run |
+| 6 | Re-run the full Phase 0–Phase 8 adopter walkthrough against the published `0.1.0-preview.1` specifically, rather than a local build | pre-v1 release readiness | **Closed** — see "Adopter dry run against the published packages" below, which also found and fixed **F14** |
+
+---
+
+# Adopter dry run against the published packages
+
+**Task:** publish-actions item 6, above — re-run the Phase 0–Phase 8 adopter walkthrough against
+the packages actually on nuget.org (`0.1.0-preview.1`, and only that version; no `0.1.0` has ever
+been published), rather than a local build or a temporary local feed. This is the first time any
+acceptance run in this document used the published CLI itself, installed the ordinary way, to act
+on this repository's own committed examples.
+
+## F14 — both committed examples pinned a version that was never published
+
+`examples/Catalog.ApiTests` and `examples/Orders.ApiTests` each carry three independent version
+markers: `intest.json`'s `intestVersion`, `.config/dotnet-tools.json`'s `intest.cli` pin, and the
+`.csproj`'s `InTest.Runtime` `PackageReference`. Before this run, the first two named `0.1.0` in
+both examples; the `.csproj` correctly named `0.1.0-preview.1`, with a comment explaining why (the
+first NuGet publish went out as a preview, not the plain `0.1.0` `intest init` normally scaffolds).
+Only the `.csproj` had been corrected after publish — the other two markers were missed.
+
+Reproduced the consequence in a scratch copy with an isolated `NUGET_PACKAGES`, before any fix:
+
+```
+dotnet restore      -> succeeds (InTest.Runtime 0.1.0-preview.1 resolves from nuget.org)
+dotnet tool restore -> Version 0.1.0 of package intest.cli is not found in NuGet feeds
+```
+
+That is Phase 8's first command, failing for anyone who copies an example verbatim. Past it sits a
+second failure: `intestVersion: 0.1.0` against a `0.1.0-preview.1` CLI trips `generate --check`'s
+`[exact-match]` gate and exits 4 — v1-e Task 6 above proved that exit code fires on exactly this
+shape of mismatch, on a different pair of values.
+
+**Nothing in this repo's existing suites caught it.** `PackageVersionCouplingTests`
+(`tests/InTest.Architecture.Tests`) guards the *scaffold template* three sites duplicate by
+design (`Directory.Packages.props`, `InitCommand.cs`, `CompileVerificationTests.cs`) — it reads no
+file under `examples/` at all. The committed examples drifted silently, and the first signal was
+this run, following the documented adoption path by hand.
+
+## Fixed with `intest upgrade`, using the published CLI
+
+`intest upgrade` exists precisely to move `intestVersion` and the `intest.cli` pin together and
+regenerate (`UpgradeCommand.cs`) — hand-editing one marker and missing the others is exactly the
+mistake that produced F14, so the fix used the command rather than repeating it. To make the fix
+itself a real test of the shipped artifact, the published package was installed the ordinary way
+rather than built locally:
+
+```
+dotnet tool install --tool-path <scratch>/upgrade-tool intest.cli --version 0.1.0-preview.1
+<scratch>/upgrade-tool/intest.exe --version
+  -> 0.1.0-preview.1+35056b8cab6fa21981f9fa67e160b223a0378768
+```
+
+Run against both examples:
+
+```
+intest upgrade --project examples/Catalog.ApiTests
+  -> Generated 13 test(s) across 2 class(es).
+     Noted 1 operation(s) - see coverage-report.json.
+     Upgraded intest.json and .config/dotnet-tools.json to intest 0.1.0-preview.1.
+  -> exit 0
+
+intest upgrade --project examples/Orders.ApiTests
+  -> Generated 24 test(s) across 2 class(es).
+     Upgraded intest.json and .config/dotnet-tools.json to intest 0.1.0-preview.1.
+  -> exit 0
+```
+
+**What changed, checked explicitly rather than assumed:** `git status` after both runs shows only
+the two version-marker files per example (`intest.json`, `.config/dotnet-tools.json`) modified.
+`Generated/` and `coverage-report.json` are byte-identical to what was already committed — the
+regenerate-first step `upgrade` always runs (Decision 4, `UpgradeCommand.cs`) confirmed the
+committed output already matched a fresh render against the unchanged specs; the version drift was
+isolated to the two markers, not a symptom of stale generated output. Neither example got a fresh
+`.gitattributes` (both already had one).
+
+**`[prerelease-reference-migration]` did not fire, for the right reason.** `upgrade`'s own
+`DetectRuntimeReferenceMismatch` reports — never rewrites — a stale `InTest.Runtime` `.csproj`
+reference after every write succeeds. It printed nothing for either example, because the `.csproj`
+already named `0.1.0-preview.1`, matching the running CLI: there was nothing to report. This is
+the code path that would have caught a *fourth* combination of this same defect (a stale
+`.csproj` reference surviving an `upgrade` that only fixed the other two markers) — worth naming
+explicitly since it is easy to mistake silence for "untested" rather than "checked, and clean".
+
+## Re-proved the adoption path from a cold, bare-clone position
+
+Same three commands publish-actions item 6 asks for, run against fresh scratch copies of both
+fixed examples, with an isolated, empty `NUGET_PACKAGES` so nothing could resolve from a leftover
+local cache:
+
+| Step | Catalog.ApiTests | Orders.ApiTests |
+|---|---|---|
+| `dotnet tool restore` | `Tool 'intest.cli' (version '0.1.0-preview.1') was restored.` — exit 0 | same — exit 0 |
+| `dotnet intest generate --check` | `Generated/ and coverage-report.json match a fresh render.` — exit 0 | same — exit 0 |
+| `dotnet build` | `Build succeeded. 0 Warning(s) 0 Error(s)` | same |
+
+The invocation is `dotnet intest generate --check`, not bare `intest …` — F13 above, already fixed
+in `getting-started.md`. This is also the second time in this document `dotnet tool restore` has
+worked from a bare clone at all (the first was the 0.1.0-preview.1 publish run above, installing
+the tool standalone into a scratch directory) — the first time it has done so against one of this
+repository's own committed, adopter-facing example projects, which is what publish-actions item 6
+actually asked to see proven.
+
+## New guard: `ExampleProjectVersionMarkerTests`
+
+`tests/InTest.Architecture.Tests/ExampleProjectVersionMarkerTests.cs` reads all three version
+markers for every directory under `examples/` that carries its own `intest.json`, and fails,
+naming the example and both disagreeing values, if `intestVersion` does not equal both the
+`intest.cli` pin and the `InTest.Runtime` `PackageReference` version. Deliberately checks internal
+consistency between the three markers, not "matches nuget.org": what actually caused F14 was the
+markers disagreeing with each other, not any one of them being wrong in isolation, and a guard
+that reaches nuget.org from every CI run would be fragile against network flakiness for a fact
+(what is published today) that has nothing to do with the commit under test.
+
+**Proven to fire, not merely written and trusted.** Reverted `examples/Orders.ApiTests/intest.json`'s
+`intestVersion` from `0.1.0-preview.1` back to `0.1.0` — the exact F14 shape — and ran the new test
+alone (`--filter FullyQualifiedName~ExampleProjectVersionMarkerTests`):
+
+```
+Failed ThreeVersionMarkersAgreeAcrossEveryExample
+Orders.ApiTests: intest.json's intestVersion ("0.1.0") disagrees with .config/dotnet-tools.json's
+  intest.cli pin ("0.1.0-preview.1"). Run `intest upgrade --project examples/Orders.ApiTests` ...
+Orders.ApiTests: intest.json's intestVersion ("0.1.0") disagrees with the InTest.Runtime
+  PackageReference pinned in the .csproj ("0.1.0-preview.1"). ...
+```
+
+Reverting the edit restored a clean pass. The mutation was not kept as a second permanent build
+configuration — proven once, then trusted, the same practice this repository already follows for
+`TemplateEscapingGuardTests` and `JsonWritingOptionsGuardTests`.
+
+## What this run does not claim
+
+- **Only the version markers were exercised as a defect class.** This run did not re-walk Phase
+  0–Phase 8 narratively step by step the way the original v0/v1-a runs did against a local build;
+  it targeted the specific gap publish-actions item 6 named (the published packages, end to end)
+  and the specific defect that gap surfaced.
+- **`init` against the published CLI was not separately re-run.** `upgrade` and `generate --check`
+  were exercised directly; a fresh `intest init` scaffold from the published tool, compared against
+  what `InitCommand.cs` currently emits, is not part of what this run covers.
+- **One version.** `0.1.0-preview.1` is the only version that has ever been published; this run
+  says nothing about `upgrade`'s behaviour crossing a future major, which Decision 3 in
+  `UpgradeCommand.cs` already documents as out of scope for the command as it exists today.
+
+## Adopter dry run actions
+
+| # | Action | Owner phase | Status |
+|---|---|---|---|
+| 1 | Fix both committed examples' `intestVersion` and `.config/dotnet-tools.json` pins to name a published version | this run | **Closed** — via `intest upgrade`, not by hand; see above |
+| 2 | Add a mechanical guard so committed examples cannot silently re-drift | this run | **Closed** — `ExampleProjectVersionMarkerTests`, proven to fire by reversion |
+| 3 | Clean up `intest.*` packages and tool installs this run added to the local machine | this run | **Closed** — see this run's own commit message |
