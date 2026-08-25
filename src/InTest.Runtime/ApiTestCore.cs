@@ -107,6 +107,14 @@ public abstract class ApiTestCore
         _testId = InTestId.ForTest(InTestRun.RunIdValue, testDisplayName);
         InTestAmbient.TestId.Value = _testId;
 
+        // A fresh CapturedResponseSlot, not merely a clear — see InTestAmbient.LastCapturedResponse's
+        // own doc for why this field carries a mutable cell rather than a CapturedResponse directly
+        // (confirmed by direct experiment: a plain AsyncLocal reassignment made deep inside
+        // ResponseCaptureHandler's awaited call does not survive back up to this test method, so
+        // the handler mutates a cell instead — and that cell must be this test's own, never a
+        // previous test's, which a brand-new object guarantees purely by holding nothing yet).
+        InTestAmbient.LastCapturedResponse.Value = new CapturedResponseSlot();
+
         // The Default slot, resolved (v1-c decision 7): every test authenticates as this unless
         // a generated auth case overrides it before sending its request. Resolved here, once per
         // test, from whatever ITestTokenProvider the generated project registered — never a
@@ -134,9 +142,63 @@ public abstract class ApiTestCore
     {
         InTestAmbient.TestId.Value = null;
         InTestAmbient.Identity.Value = null;
+        InTestAmbient.LastCapturedResponse.Value = null;
         _testId = null;
         _scope.Dispose();
     }
+
+    /// <summary>
+    /// [neutral-helper]: resolves an adopter's own typed client (Kiota, NSwag, Refit) from
+    /// <see cref="Services"/> — the same scope <see cref="Client"/> itself is resolved from — for a
+    /// generated client-routed test case to call directly. Placed here on <see cref="ApiTestCore"/>
+    /// rather than the MSTest-specific <c>ApiTestBase</c> so it is available to every future
+    /// framework adapter for free, the same reasoning that already applies to
+    /// <see cref="RequireFixture"/> and the rest of this class.
+    /// <para>
+    /// Resolution failure (nothing registered for <typeparamref name="TClient"/>) is deliberately
+    /// left to <c>GetRequiredService</c>'s own exception rather than wrapped: an adopter who forgets
+    /// to register their client in <c>ConfigureServices</c> gets a standard, well-understood DI
+    /// error naming the missing type, not a bespoke InTest message duplicating what
+    /// <c>Microsoft.Extensions.DependencyInjection</c> already says clearly.
+    /// </para>
+    /// </summary>
+    protected TClient ApiClient<TClient>() where TClient : class =>
+        Services.GetRequiredService<TClient>();
+
+    /// <summary>
+    /// The most recent response <see cref="ResponseCaptureHandler"/> observed for the currently
+    /// running test — [neutral-helper], the read-side counterpart of <see cref="ApiClient{TClient}"/>.
+    /// A generated client-routed Success case calls this, after its typed-client call returns
+    /// normally, to run <c>ApiResponseAssertions.ShouldMatchCapturedContractAsync</c> against the
+    /// same raw bytes the API actually sent, exactly as a raw-HTTP case would against its own
+    /// <see cref="HttpResponseMessage"/>.
+    /// <para>
+    /// Throws — never returns <c>default</c> — when nothing was captured, naming
+    /// <c>[client-rides-the-api-pipeline]</c> and telling the adopter to construct their client over
+    /// <c>IHttpClientFactory.CreateClient(InTestClients.Api)</c>. A silent <c>default</c> here would
+    /// make a misconfigured client's test pass against status 0 and an empty body — the exact
+    /// "passes while asserting almost nothing" outcome CLAUDE.md's fail-loudly rule forbids, and a
+    /// far worse failure mode than a clear, immediate exception naming the actual cause: no
+    /// response ever reached <see cref="InTestAmbient.LastCapturedResponse"/> because
+    /// <see cref="ResponseCaptureHandler"/> never ran on this request at all, most likely because
+    /// the client was built over a bare <see cref="HttpClient"/> rather than
+    /// <c>InTestClients.Api</c>.
+    /// </para>
+    /// <para>
+    /// Reads <see cref="InTestAmbient.LastCapturedResponse"/> directly rather than exposing any
+    /// caching or memoization of its own — this property and that ambient slot are deliberately the
+    /// same value at every read, so a generated case calling this more than once (unusual, but nothing
+    /// here forbids it) always sees whatever the most recent client-routed call actually produced.
+    /// </para>
+    /// </summary>
+    protected static CapturedResponse LastCapturedResponse =>
+        InTestAmbient.LastCapturedResponse.Value?.Value
+        ?? throw new InvalidOperationException(
+            "[client-rides-the-api-pipeline]: no response has been captured for this test. " +
+            "ResponseCaptureHandler only runs on requests sent through InTestClients.Api — " +
+            "construct your typed client over IHttpClientFactory.CreateClient(InTestClients.Api) " +
+            "rather than a bare HttpClient, so it rides the same handler pipeline as everything " +
+            "else InTest sends.");
 
     /// <summary>
     /// The Default slot resolved to a concrete identity (v1-c decision 7): <c>Identities[0]</c>
