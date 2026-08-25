@@ -1,28 +1,33 @@
 # Third-Party Notices
 
-InTest ships two NuGet packages with different packaging models, and this file's contents
-follow directly from that difference:
+InTest ships three NuGet packages with two packaging models between them, and this file's
+contents follow directly from that split:
 
 - **`InTest.Cli`** sets `PackAsTool: true`. A dotnet tool package bundles its dependencies'
   managed assemblies directly into the package (`tools/<tfm>/any/`) so the tool runs standalone
   against the shared framework — it does not declare them as ordinary NuGet dependencies for the
   installer to resolve. Redistributing those assemblies in binary form is what triggers the
   notice obligation MIT and BSD-2-Clause both carry.
-- **`InTest.Runtime`** is an ordinary library package. Its `.nupkg` contains only
-  `InTest.Runtime.dll`; its dependencies are declared in the `.nuspec` and resolved separately by
-  NuGet when a consumer restores the package. Nothing of theirs is embedded in this package's own
-  binary.
+- **`InTest.Runtime`** and **`InTest.Runtime.MSTest`** are both ordinary library packages. Each
+  `.nupkg` contains only its own assembly (`InTest.Runtime.dll`, `InTest.Runtime.MSTest.dll`);
+  each package's dependencies are declared in its own `.nuspec` and resolved separately by NuGet
+  when a consumer restores it. Nothing of theirs is embedded in either package's own binary — and
+  that now includes `InTest.Runtime.MSTest`'s dependency on `InTest.Runtime` itself, which the
+  split (`docs/superpowers/plans/2026-08-25-runtime-framework-split.md`) turned from "part of the
+  same assembly" into "one more ordinary NuGet dependency," with the practical effect that
+  `MSTest.TestFramework` moved out of `InTest.Runtime`'s dependency list below and into
+  `InTest.Runtime.MSTest`'s — the neutral package no longer pulls a test framework at all.
 
-**How this list was derived:** `dotnet pack -c Release` was run for both projects into a scratch
-output directory, each resulting `.nupkg` was unzipped, and the actual file list was inspected —
-not the `PackageReference` list in the `.csproj`, which would have missed transitive dependencies
-(`NJsonSchema.Annotations`, `Namotion.Reflection`, `Newtonsoft.Json`) and wrongly included
-`System.Text.Json`, which `NJsonSchema` also depends on but which never appears in the bundled
-tool output because it ships as part of the `net10.0` shared framework instead. Each package's
-declared licence and copyright were read from its own `.nuspec` in the local NuGet cache
+**How this list was derived:** `dotnet pack -c Release` was run for all three projects into a
+scratch output directory, each resulting `.nupkg` was unzipped, and the actual file list was
+inspected — not the `PackageReference` list in the `.csproj`, which would have missed transitive
+dependencies (`NJsonSchema.Annotations`, `Namotion.Reflection`, `Newtonsoft.Json`) and wrongly
+included `System.Text.Json`, which `NJsonSchema` also depends on but which never appears in the
+bundled tool output because it ships as part of the `net10.0` shared framework instead. Each
+package's declared licence and copyright were read from its own `.nuspec` in the local NuGet cache
 (`~/.nuget/packages/<id>/<version>/<id>.nuspec`), not assumed from memory. `Shouldly` and
 `Microsoft.NET.Test.Sdk` are referenced only by the `tests/` projects — confirmed by `git grep` —
-and are not listed below because they never ship in either published package.
+and are not listed below because they never ship in any published package.
 
 ---
 
@@ -67,18 +72,35 @@ every install of the tool.
 in its `.nuspec` as ordinary dependencies and are downloaded and placed by NuGet when a consumer
 restores the package — this project never embeds their binaries. They are included here for
 transparency about what installing `InTest.Runtime` pulls in, not because this package
-redistributes them itself.
+redistributes them itself. **No test framework is declared here** — that is the point of the split
+below.
 
 | Package | Version | Licence | Copyright |
 |---|---|---|---|
-| MSTest.TestFramework | 4.3.3 | MIT | © Microsoft Corporation. All rights reserved. |
 | Microsoft.Extensions.Http | 10.0.11 | MIT | © Microsoft Corporation. All rights reserved. |
 | Microsoft.Extensions.Configuration | 10.0.11 | MIT | © Microsoft Corporation. All rights reserved. |
 | Microsoft.Extensions.Configuration.Json | 10.0.11 | MIT | © Microsoft Corporation. All rights reserved. |
 | Microsoft.Extensions.Configuration.EnvironmentVariables | 10.0.11 | MIT | © Microsoft Corporation. All rights reserved. |
 | NJsonSchema | 11.6.1 | MIT | Copyright © Rico Suter, 2025 |
 
-All six are MIT — see the licence text below.
+All five are MIT — see the licence text below.
+
+---
+
+## `InTest.Runtime.MSTest` — declared NuGet dependencies, not bundled
+
+`InTest.Runtime.MSTest`'s own `.nupkg` contains only `InTest.Runtime.MSTest.dll`. Its `.nuspec`
+declares two dependencies: `InTest.Runtime` at the exact same version — InTest's own package, not
+third-party, and not itself a notice obligation — and the one third-party package below, which is
+what actually moved here from `InTest.Runtime`'s list when the split landed
+(`docs/superpowers/plans/2026-08-25-runtime-framework-split.md`). A team building an xUnit or
+NUnit adapter of their own against `InTest.Runtime` directly never receives this dependency.
+
+| Package | Version | Licence | Copyright |
+|---|---|---|---|
+| MSTest.TestFramework | 4.3.3 | MIT | © Microsoft Corporation. All rights reserved. |
+
+MIT — see the licence text below.
 
 ---
 
@@ -144,6 +166,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## Excluded — test-only, never shipped
 
 `Shouldly` (BSD-3-Clause) and `Microsoft.NET.Test.Sdk`, `MSTest.TestAdapter`, `MSTest.Analyzers`
-(all MIT) are referenced only by projects under `tests/`. None is a dependency of `InTest.Cli` or
-`InTest.Runtime`, bundled or declared, and none appears in either published `.nupkg`. Listed here
-explicitly so their absence above reads as verified rather than as an oversight.
+(all MIT) are referenced only by projects under `tests/`. None is a dependency of `InTest.Cli`,
+`InTest.Runtime` or `InTest.Runtime.MSTest`, bundled or declared, and none appears in any published
+`.nupkg`. Listed here explicitly so their absence above reads as verified rather than as an
+oversight.

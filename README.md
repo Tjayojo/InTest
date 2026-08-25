@@ -45,7 +45,10 @@ or in a pull request, never as part of the deployment pipeline.
 > nuget.org — `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1` resolves and
 > installs cleanly (verified by installing it into a scratch directory right after the push
 > went live). This is a v0 prerelease: breaking changes are still expected before a `0.1.0`
-> stable release. Building from source is still how you get anything past that tag.
+> stable release. Building from source is still how you get anything past that tag. A third
+> package, `InTest.Runtime.MSTest` — the MSTest adapter a generated project actually references,
+> split out of `InTest.Runtime` so a future xUnit or NUnit adapter never pulls MSTest in
+> transitively — is not published yet; build from source to try it.
 >
 > The design spec is still the source of truth and is worth reading before the code:
 > [`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md)

@@ -10,6 +10,17 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `InTest.Runtime` split into two packages — the framework-neutral `InTest.Runtime`
+  (no test-framework dependency) and a new `InTest.Runtime.MSTest` adapter (`TestHost`,
+  `ApiTestBase`, and the `MSTest.TestFramework` dependency) — so that a future xUnit or NUnit
+  adapter never pulls MSTest in transitively, and vice versa. A generated project now references
+  `InTest.Runtime.MSTest` instead of `InTest.Runtime`. **Migration:** change the
+  `PackageReference` id in your `.csproj` from `InTest.Runtime` to `InTest.Runtime.MSTest`; both
+  packages declare their types in the same `namespace InTest.Runtime`, so no source change is
+  needed. `intest upgrade` detects the old package id and reports it.
+
 ## [0.1.0-preview.1] - 2026-08-24
 
 First published prerelease of `InTest.Cli` and `InTest.Runtime`, pushed to nuget.org via NuGet

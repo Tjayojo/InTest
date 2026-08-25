@@ -180,15 +180,18 @@ compile-verification dimension with it.
 Flurl moves to the v2 backlog. Independently: its last commit is 2025-01-01 and its last
 release 2024-01-17, so it was the wrong candidate for first-class support regardless.
 
-### Deliverables — two packages
+### Deliverables — three packages
 
 | Artifact | Contents |
 |---|---|
 | `InTest.Cli` | `dotnet tool`. Front-ends, TestPlan, rendering, CLI. Internal namespaces. |
-| `InTest.Runtime` | **NuGet package referenced by the generated project.** Base class, interfaces, readiness, run ID, fixture loading, schema bundle, assertion helpers, HTTP handlers. |
+| `InTest.Runtime` | **NuGet package referenced transitively by every generated project.** Framework-neutral: readiness, run ID, fixture loading, schema bundle, assertion helpers, HTTP handlers, and the `InTestRun` composition root / `ApiTestCore` base. No test-framework dependency. |
+| `InTest.Runtime.MSTest` | **NuGet package the generated project actually references.** The MSTest adapter: `TestHost` (a thin facade over `InTestRun`) and `ApiTestBase` (a thin adapter over `ApiTestCore`). Depends on `InTest.Runtime` at the exact same version, plus `MSTest.TestFramework`. |
 
 `InTest.Runtime` earns the separation: shared behaviour ships as a versioned dependency, so a
-bug fix does not require every team to regenerate.
+bug fix does not require every team to regenerate. The neutral/adapter split within it exists so
+that shared behaviour can be shared **across frameworks too** — see "Framework portability"
+below, which this split now implements rather than merely designs for.
 
 ### Framework portability — designed for three, ships one
 
@@ -198,10 +201,17 @@ its lower layers caps the tool's reach permanently. **The architecture must make
 additive rather than a rewrite**, on the same reasoning that made the assertion seam pay off:
 that seam existed before a second assertion set did, and adding one cost nothing as a result.
 
-This is a design constraint, not a v1 feature. Nothing framework-specific is abstracted
-speculatively; what is required is that the neutral layers stay neutral.
+This was a design constraint before it was a v1 feature, and the runtime-framework split
+(`docs/superpowers/plans/2026-08-25-runtime-framework-split.md`) has now built the boundary it
+called for: `src/InTest.Runtime` holds only the neutral layer, `src/InTest.Runtime.MSTest` holds
+only the MSTest-specific adapter, and `InTest.Architecture.Tests`' `NeutralityTests` enforces the
+boundary at compile time — the neutral project carries no reference to
+`Microsoft.VisualStudio.TestTools.UnitTesting`, so no file under it can name an MSTest type even
+by accident. Nothing framework-specific beyond MSTest itself is built speculatively; what is
+required, and now enforced, is that the neutral layer stay neutral.
 
-**The boundary.** Everything below is framework-neutral and must not name an MSTest type:
+**The boundary.** Everything below is framework-neutral, lives in `InTest.Runtime`, and must not
+name an MSTest type:
 
 | Neutral | Why it can be |
 |---|---|
@@ -211,14 +221,21 @@ speculatively; what is required is that the neutral layers stay neutral.
 | Readiness, run ID, fixture loading and token resolution | No test-framework surface |
 | `IAssemblyFixture`, `ITestTokenProvider`, `ITestDataProvider` | Already framework-neutral interfaces |
 | HTTP handlers and the ambient accessor | `AsyncLocal`, not framework state |
+| `InTestRun` | The composition root: configuration, DI, schema bundle, run id, profile, fixture store, readiness probe. Built once, from a plain `string?` profile and an `IRunDiagnostics` sink — no `TestContext`, no MSTest type anywhere in its signature |
+| `ApiTestCore` | The base class holding scope-containment logic: DI scope, `TestId`, ambient identity, `Client`. Takes a plain `string?` display name at `BeginTest`, not a framework-specific identity type |
+| `IRunDiagnostics` | The neutral diagnostics seam — `Note`/`Warn` — a runner implements so `FixtureRunner` can report progress without knowing how any particular framework surfaces messages |
 
-Everything below is **framework-specific** and belongs in a thin adapter — one namespace in v1,
-one package per framework when a second ships:
+Everything below is **framework-specific** and lives in the adapter — one namespace shared with
+the neutral layer (`namespace InTest.Runtime` in both), **one package per framework**, exactly as
+this section originally called for. `InTest.Runtime.MSTest` is that package for MSTest today; a
+future `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit` would sit beside it, each depending on
+`InTest.Runtime` and nothing else in this list:
 
 | MSTest-specific | What the others need instead |
 |---|---|
-| `ApiTestBase` and its `TestContext` | xUnit has no `TestContext`; identity and output arrive differently |
-| `TestId` from `TestContext.TestDisplayName` (§14) | Each framework exposes the resolved data-row name differently. **This is the sharpest coupling in the design** and needs a neutral `ITestIdentity` the adapter supplies |
+| `TestHost` and `ApiTestBase` | Thin facades over `InTestRun` / `ApiTestCore` — `TestHost` exists only because it must name `TestContext`, which is exactly what keeps it out of the neutral layer. xUnit has no `TestContext`; identity and output arrive differently |
+| `TestContextDiagnostics` (`TestHost`'s nested `IRunDiagnostics` implementation) | Maps `Note` to `TestContext.WriteLine` and `Warn` to `TestContext.DisplayMessage(MessageLevel.Warning, …)` — the specific mapping proven (§14 references the evidence) to survive a passing `[AssemblyInitialize]` under MSTest's actual VSTest runner. A different framework supplies its own `IRunDiagnostics` implementation against its own output mechanism |
+| `TestContext.TestDisplayName` → `ApiTestCore.BeginTest`'s `testDisplayName` parameter | **Corrected from rev 2.** This row previously read: "`TestId` from `TestContext.TestDisplayName` — each framework exposes the resolved data-row name differently. This is the sharpest coupling in the design and needs a neutral `ITestIdentity` the adapter supplies." That is no longer accurate, and rather than delete the claim this row records what was built instead and why. `ApiTestCore.BeginTest` takes a plain `string?` display name, not an `ITestIdentity`. **`ITestIdentity` was the rejected alternative**: it would carry exactly one member — a display-name getter — and calling through it would deliver the same `string?` this parameter already carries, one indirection later. An interface earns its keep by having more than one implementation with genuinely different behaviour, or by letting a caller defer resolution to a point it doesn't control yet; neither holds here. The display name is obtainable only from *inside* the test framework's own per-test callback — `TestContext.TestDisplayName` is only valid inside `[TestInitialize]` — and that per-test callback is exactly where `ApiTestBase.ApiTestInitialize` already calls `BeginTest` from. There is nowhere upstream of that call site that would need to store or thread an `ITestIdentity` instance before handing it to the neutral layer; the adapter already has the string in hand at the only moment it is ever available, and simply passes it. A different framework's adapter reads whatever its own framework calls the per-data-row display name and passes that string instead — no interface required on either side |
 | `[AssemblyInitialize]` / `[AssemblyCleanup]` | xUnit: assembly fixtures; NUnit: `SetUpFixture` with `[OneTimeSetUp]` |
 | `[DataRow]` / `[DynamicData]` | xUnit: `[InlineData]` / `[MemberData]`; NUnit: `[TestCase]` / `[TestCaseSource]` |
 | `[TestCategory]` | xUnit: `[Trait]`; NUnit: `[Category]` |
@@ -226,8 +243,12 @@ one package per framework when a second ships:
 | Parallelization and timeout models (§11) | Differ substantially, and are consumer-owned in every case |
 
 **The practical rule for v1:** if a type in the neutral layer would have to change to support
-xUnit, it is in the wrong layer. `project.framework` stays frozen per project (§5) — a suite
-cannot be migrated in place — but the *tool* must be able to emit all three.
+xUnit, it is in the wrong layer — and `NeutralityTests` now fails the build if an MSTest reference
+leaks into that layer, so this rule is checked, not merely followed. `project.framework` stays
+frozen per project (§5) and is now read and validated (`ConfigLoader.RequireSupportedFramework`
+refuses anything other than `"mstest"`) — a suite cannot be migrated in place — but the *tool*
+must still be able to emit all three; `TemplateRenderer` hardcoding `mstest-class.scriban` (§17)
+is the one piece of "ships one" that the split has not yet touched.
 
 ### Versioning and compatibility
 
@@ -411,7 +432,7 @@ inline:
 | Field | Note |
 |---|---|
 | `spec.producer` | `auto` \| `swashbuckle` \| `aspnetcore` \| `nswag` |
-| `project.framework` | **Frozen** — see "Frozen vs. additive axes" below |
+| `project.framework` | **Frozen** — see "Frozen vs. additive axes" below. Required, not optional, and validated: `ConfigLoader.RequireSupportedFramework` refuses any value other than the exact lowercase `"mstest"`, naming the roadmap (§3) in the refusal rather than silently defaulting |
 | `project.assertions` | `shouldly` \| `mstest` — additive, never a swap |
 | `naming.identifiers` | **Frozen** — see "Frozen vs. additive axes" below |
 | `naming.display` | Changeable any time — cosmetic, no compile impact |
@@ -2501,9 +2522,19 @@ v1 must land before anything ships externally.
 Ordered. The first item is first everywhere else in this document and belongs at the top of the
 one list that exists to be the backlog.
 
-1. **xUnit and NUnit template sets.** The largest constraint on reach — MSTest is 21.7% of
-   framework downloads (§18). §3's portability boundary exists to keep this additive rather
-   than a rewrite; the sharpest coupling to break is `TestId` from `TestContext.TestDisplayName`.
+1. **xUnit and NUnit template sets, plus their adapter packages.** The largest remaining
+   constraint on reach — MSTest is 21.7% of framework downloads (§18). The runtime-framework
+   split (`docs/superpowers/plans/2026-08-25-runtime-framework-split.md`) already broke what was
+   previously the sharpest coupling — `TestId` from `TestContext.TestDisplayName` — by threading
+   a plain `string?` display name into `ApiTestCore.BeginTest` instead; see §3's boundary table
+   for the rejected `ITestIdentity` alternative and why. What genuinely remains for a second
+   framework: (a) a second Scriban template set — `TemplateRenderer` still hardcodes
+   `mstest-class.scriban` regardless of `project.framework`'s value; (b) `project.framework`
+   actually selecting which template renders, rather than only being validated against the single
+   supported value; and (c) a new adapter package (`InTest.Runtime.xUnit` or
+   `InTest.Runtime.NUnit`) built the same way `InTest.Runtime.MSTest` was — depending on
+   `InTest.Runtime` at an exact version plus the framework's own package, declaring types in the
+   same `namespace InTest.Runtime`, and supplying its own `IRunDiagnostics` implementation.
 2. **Flurl HTTP pack.** Requires first resolving how `ApiTestBase.Client` is typed — generic
    base, third package, or no client on the base (§3).
 3. **Version selection.** An explicit rule, never inferred (§12).
@@ -2753,7 +2784,7 @@ answers it will never receive.
 | Own generator, not openapi-generator templates | Full output control; no JVM on agents; org-specific assertions |
 | `net10.0`, no preview packages | .NET 8/9 EOL Nov 2026; preview churn is not worth the features |
 | `Microsoft.OpenApi` 3.10.0, not 2.3.x | All 2.x stable versions are deprecated with a vulnerability advisory |
-| Design for MSTest, xUnit and NUnit; ship MSTest | MSTest is 21.7% of test-framework downloads (§18), so baking it into the neutral layers would cap reach permanently. The assertion seam proved the pattern: build the boundary before the second implementation, and adding one costs nothing |
+| Design for MSTest, xUnit and NUnit; ship MSTest | MSTest is 21.7% of test-framework downloads (§18), so baking it into the neutral layers would cap reach permanently. The assertion seam proved the pattern: build the boundary before the second implementation, and adding one costs nothing. The runtime-framework split (`docs/superpowers/plans/2026-08-25-runtime-framework-split.md`) has since built that boundary as two packages — `InTest.Runtime` (neutral) and `InTest.Runtime.MSTest` (adapter) — with `NeutralityTests` enforcing it at compile time; a second framework still ships only a template set and an adapter package, not a rewrite |
 | Fixture sentinels keep failing, despite the adoption cost | A green suite asserting nothing is unrecoverable — nobody investigates a passing test. Aggregated messages, `intest survey`, and a fixture-free day-one subset make it navigable without weakening it |
 | URL specs snapshotted, not fetched at build or check time | MSBuild cannot copy from a URL; a committed snapshot also gives a URL source the reviewable diff it otherwise lacks, and keeps `--check` hermetic |
 | One HTTP pack in v1: HttpClient via `IHttpClientFactory` | `ApiTestBase.Client` cannot be typed for two packs from one package. Shipping one removes the constraint rather than working around it, and drops a template set plus two test dimensions |

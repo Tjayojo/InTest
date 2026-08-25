@@ -5,10 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 InTest generates a committed, owned MSTest project that exercises a **deployed** API over real
-HTTP, from its OpenAPI document. Two shipped packages (`InTest.Cli`, `InTest.Runtime`), four
-sample APIs used as fixtures, four test suites. `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1`
-are published to nuget.org (prerelease, via `release.yml`'s trusted-publishing push) — build
-from source for anything past that tag.
+HTTP, from its OpenAPI document. Three shipped packages (`InTest.Cli`, `InTest.Runtime`,
+`InTest.Runtime.MSTest`), four sample APIs used as fixtures, four test suites.
+`InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org (prerelease, via
+`release.yml`'s trusted-publishing push) — build from source for anything past that tag.
+`InTest.Runtime.MSTest` does not exist on nuget.org at that tag; `examples/` still pins
+`InTest.Runtime` there for that reason.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
@@ -84,21 +86,23 @@ SHA — see CONTRIBUTING.md's dependency policy.
   shallow git clone — MinVer would otherwise silently compute a plausible-looking but wrong
   version there. See `CONTRIBUTING.md`'s "Branching and how a release is cut" for the full
   explanation of both.
-- The scaffold's `InTest.Runtime` reference is **not** a hardcoded literal — `InitCommand.cs`
+- The scaffold's `InTest.Runtime.MSTest` reference is **not** a hardcoded literal — `InitCommand.cs`
   interpolates `CliVersion.Current` (`[scaffold-reads-itself]`, same plan), so whatever version the
-  running CLI was built as is exactly what a freshly scaffolded project references. `intest
-  upgrade` reads a scaffolded `.csproj` and *reports* (never rewrites) when that reference has
-  drifted from the running CLI's version.
+  running CLI was built as is exactly what a freshly scaffolded project references. This is the
+  adapter package, not the neutral one: a generated project references `InTest.Runtime.MSTest`
+  directly and gets `InTest.Runtime` transitively, at the exact same version, through the adapter's
+  own dependency on it. `intest upgrade` reads a scaffolded `.csproj` and *reports* (never
+  rewrites) when that reference has drifted from the running CLI's version.
 - **Third-party package versions are still duplicated by design in three places** and must be
   changed together: `Directory.Packages.props`, the scaffolded `.csproj` string in
   `InitCommand.cs`, and the hand-written test project in `CompileVerificationTests.cs`.
   `InTest.Architecture.Tests`' `PackageVersionCouplingTests` enforces this mechanically — it fails,
   by package name with both versions and both files, if a hardcoded version in either scaffold
-  site disagrees with `Directory.Packages.props`. `InTest.Runtime` is checked separately from this
-  three-way rule, not as a fourth member of it: it has no `Directory.Packages.props` entry at all
-  (it is InTest's own version, not a third-party one), so `PackageVersionCouplingTests` instead
-  confirms the scaffold's source text still interpolates `CliVersion.Current` rather than any
-  literal, plus a behavioral test that actually scaffolds a project and compares the emitted
+  site disagrees with `Directory.Packages.props`. `InTest.Runtime.MSTest` is checked separately
+  from this three-way rule, not as a fourth member of it: it has no `Directory.Packages.props`
+  entry at all (it is InTest's own version, not a third-party one), so `PackageVersionCouplingTests`
+  instead confirms the scaffold's source text still interpolates `CliVersion.Current` rather than
+  any literal, plus a behavioral test that actually scaffolds a project and compares the emitted
   reference against `CliVersion.Current` directly.
 - `.github/dependabot.yml` proposes weekly version bumps to `Directory.Packages.props` and to the
   SHA-pinned actions in `.github/workflows/build-and-test.yml`. It only ever edits
@@ -165,22 +169,50 @@ They look mergeable and are not. Merging them has been reasoned through and reje
   `NeedsFixture`, because a key only becomes a filename when a fixture is written for it. The
   canonical explanation lives in `TestPlanBuilder.Build`; other sites point at it.
 
-### Runtime (`src/InTest.Runtime`)
+### Runtime (`src/InTest.Runtime`, `src/InTest.Runtime.MSTest`)
 
-Split into `Neutral/` and `MSTest/`. **No file under `Neutral/` may name
-`Microsoft.VisualStudio.TestTools.UnitTesting`** — `InTest.Architecture.Tests` enforces this at
-source level. This is what keeps xUnit/NUnit additive rather than a rewrite (§3). Anything
-framework-coupled goes under `MSTest/`.
+Two projects, not one, and not subfolders of one. `src/InTest.Runtime` is the neutral package;
+**no file in it may name `Microsoft.VisualStudio.TestTools.UnitTesting`**, and it has no
+`PackageReference` to any test framework, so the check is compiler-enforced by construction — no
+MSTest reference means no implicit `global using Microsoft.VisualStudio.TestTools.UnitTesting`
+either. `InTest.Architecture.Tests`' `NeutralityTests` (a csproj guard) and `pack-and-verify.ps1`
+(a packed-nuspec guard, checking the shipped dependency list rather than the project file) both
+still check it, because the compiler can only catch a *reference*, not a regression in either
+guard file itself. This is what keeps xUnit/NUnit additive rather than a rewrite (§3). Anything
+framework-coupled lives in `src/InTest.Runtime.MSTest`, which depends on `InTest.Runtime` at the
+exact same version plus `MSTest.TestFramework`. **Both projects declare their types in the same
+`namespace InTest.Runtime`** — an adopter migrating from a hypothetical all-in-one package changes
+only the `PackageReference` id, never a `using` or a type name in their own source; `intest
+upgrade` detects the old package id and reports it.
 
-`MSTest/TestHost` is the assembly-scope composition root: configuration, DI, schema bundle, run
-id, profile, fixture store, readiness probe, and the one `FixtureValidation.Report` every
-`ApiTestBase.RequireFixture` consults. Generated projects delegate `[AssemblyInitialize]` to it
-and add their own registrations through `TestHost.ConfigureServices`.
+`InTest.Runtime.MSTest`'s `TestHost` is a thin facade over `InTest.Runtime`'s `InTestRun`, the
+actual assembly-scope composition root: configuration, DI, schema bundle, run id, profile, fixture
+store, readiness probe, and the one `FixtureValidation.Report` every `ApiTestBase.RequireFixture`
+consults. Generated projects delegate `[AssemblyInitialize]` to `TestHost` and add their own
+registrations through `TestHost.ConfigureServices`; `TestHost` cannot itself live in the neutral
+assembly because it names `TestContext`, which `[TypeForwardedTo]` cannot bridge past a rename.
 
-`MSTest/ApiTestBase` is the generated classes' base. Auth cases use `UseIdentity(IdentitySlot)`
-plus the guards `RequireMultipleIdentities` and `RequireSecondaryIdentityLacks` — the latter
-*skips* a wrong-scope 403 case when the secondary identity genuinely holds the scope, rather than
-asserting a 403 the API is correct not to return.
+`InTest.Runtime.MSTest`'s `ApiTestBase` is the generated classes' base, and is itself a thin
+adapter over `InTest.Runtime`'s `ApiTestCore`, which holds the actual scope-containment logic. Auth
+cases use `UseIdentity(IdentitySlot)` plus the guards `RequireMultipleIdentities` and
+`RequireSecondaryIdentityLacks` — the latter *skips* a wrong-scope 403 case when the secondary
+identity genuinely holds the scope, rather than asserting a 403 the API is correct not to return.
+
+Four seams were extracted from the pre-split code so this boundary could exist without a rewrite,
+each deliberately the plainest shape that does the job rather than a speculative interface:
+`IRunDiagnostics` (`Note`/`Warn`, states intent rather than MSTest's `DisplayMessage(MessageLevel,
+…)` mechanism — replaced `ContextTextWriter`), the run-settings profile (a plain `string?`, not an
+`IRunSettings` interface), the test display name (a plain `string?` passed to
+`ApiTestCore.BeginTest`, deliberately not the `ITestIdentity` the design spec's §3 once
+prescribed — see that section for the rejected-alternative reasoning), and skip (the neutral layer
+returns a reason `string?`, null meaning "run"; the MSTest adapter turns a non-null reason into
+`Assert.Inconclusive` — xUnit's `Assert.Skip` and NUnit's `Assert.Ignore` drop straight in).
+
+`project.framework` in `intest.json` is read and validated (`ConfigLoader.RequireSupportedFramework`)
+— required, and only the exact lowercase `"mstest"` is accepted; anything else is refused as "not
+supported yet", naming §3's roadmap. `TemplateRenderer` still hardcodes `mstest-class.scriban`
+regardless of the value — the config now carries `project.framework` correctly, but nothing yet
+*branches* on it to select a template.
 
 ## Working conventions
 

@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
     Exercises InTest's local adoption path (init, generate, fixtures repair, generate --check,
-    upgrade) against a from-source build of InTest.Cli/InTest.Runtime, without ever letting a
-    restore reach the machine-wide NuGet cache.
+    upgrade) against a from-source build of InTest.Cli/InTest.Runtime/InTest.Runtime.MSTest,
+    without ever letting a restore reach the machine-wide NuGet cache.
 
 .DESCRIPTION
     Nothing is published to NuGet yet (see CLAUDE.md / docs/getting-started.md). Trying the
@@ -238,9 +238,15 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot 'THIRD-PARTY-NOTICES.md') -Destinati
 Copy-SourceTree -From (Join-Path $RepoRoot 'assets') -To (Join-Path $SrcCopyRoot 'assets')
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Cli') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Cli')
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime')
+# InTest.Runtime.MSTest.csproj ProjectReferences "../InTest.Runtime/InTest.Runtime.csproj" by
+# relative path, so it needs to land at the same sibling-of-InTest.Runtime spot the real repo has
+# it -- src/InTest.Runtime.MSTest next to src/InTest.Runtime under the same scratch root -- or the
+# restore below fails to resolve the reference.
+Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime.MSTest') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.MSTest')
 
 $CliProject = Join-Path $SrcCopyRoot 'src' 'InTest.Cli'
 $RuntimeProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime' 'InTest.Runtime.csproj'
+$MSTestProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.MSTest' 'InTest.Runtime.MSTest.csproj'
 
 function Write-Step {
     param([string]$Text)
@@ -292,13 +298,14 @@ try {
     Write-Host "NUGET_PACKAGES: $NuGetPackagesScratch"
     Write-Host "Spec:           $Spec"
 
-    # ---- Pack InTest.Cli and InTest.Runtime at the local-only version into the scratch feed.
-    # -p:MinVerVersionOverride tells MinVer to skip its own git-based computation and use this
-    # value verbatim -- a plain `-p:Version=` no longer works for this (see the header comment's
-    # defence 2 for the measured reason: MinVer overwrites it unconditionally). Confirmed below by
-    # asserting the packed .nupkg is actually named with $LocalVersion, not silently packed at
-    # whatever MinVer would otherwise have computed for this non-git source copy (MINVER1001,
-    # "0.1.0-preview.0" -- see Copy-SourceTree's own header for why this copy has no .git at all).
+    # ---- Pack InTest.Cli, InTest.Runtime and InTest.Runtime.MSTest at the local-only version into
+    # the scratch feed. -p:MinVerVersionOverride tells MinVer to skip its own git-based computation
+    # and use this value verbatim -- a plain `-p:Version=` no longer works for this (see the header
+    # comment's defence 2 for the measured reason: MinVer overwrites it unconditionally). Confirmed
+    # below by asserting each packed .nupkg is actually named with $LocalVersion, not silently
+    # packed at whatever MinVer would otherwise have computed for this non-git source copy
+    # (MINVER1001, "0.1.0-preview.0" -- see Copy-SourceTree's own header for why this copy has no
+    # .git at all).
     Invoke-Dotnet -StepName 'pack InTest.Cli' -Arguments @(
         'pack', $CliProject, '-c', 'Release',
         "-p:MinVerVersionOverride=$LocalVersion",
@@ -309,24 +316,33 @@ try {
         "-p:MinVerVersionOverride=$LocalVersion",
         '-o', $LocalFeed
     )
+    Invoke-Dotnet -StepName 'pack InTest.Runtime.MSTest' -Arguments @(
+        'pack', $MSTestProject, '-c', 'Release',
+        "-p:MinVerVersionOverride=$LocalVersion",
+        '-o', $LocalFeed
+    )
 
     # Filename casing here must match each project's <PackageId> exactly ("InTest.Cli",
-    # "InTest.Runtime") -- `dotnet pack` names the .nupkg after PackageId verbatim, not
-    # lowercased. A lowercase "intest.cli.*" check passed here for a long time only because NTFS
-    # path lookups are case-insensitive; on a case-sensitive filesystem (ext4, the Linux container
-    # this was verified against) Test-Path against the wrong case returns false even though the
-    # file exists one case away. Confirmed by direct experiment: this check failed on Linux before
-    # the fix, immediately after both packs had visibly succeeded and written
+    # "InTest.Runtime", "InTest.Runtime.MSTest") -- `dotnet pack` names the .nupkg after PackageId
+    # verbatim, not lowercased. A lowercase "intest.cli.*" check passed here for a long time only
+    # because NTFS path lookups are case-insensitive; on a case-sensitive filesystem (ext4, the
+    # Linux container this was verified against) Test-Path against the wrong case returns false
+    # even though the file exists one case away. Confirmed by direct experiment: this check failed
+    # on Linux before the fix, immediately after both packs had visibly succeeded and written
     # "InTest.Cli.<version>.nupkg" / "InTest.Runtime.<version>.nupkg" to the feed.
     $cliPackage = Join-Path $LocalFeed "InTest.Cli.$LocalVersion.nupkg"
     $runtimePackage = Join-Path $LocalFeed "InTest.Runtime.$LocalVersion.nupkg"
+    $mstestPackage = Join-Path $LocalFeed "InTest.Runtime.MSTest.$LocalVersion.nupkg"
     if (-not (Test-Path $cliPackage)) {
         throw "Expected package not found: $cliPackage -- the -p:MinVerVersionOverride override did not take effect as expected."
     }
     if (-not (Test-Path $runtimePackage)) {
         throw "Expected package not found: $runtimePackage -- the -p:MinVerVersionOverride override did not take effect as expected."
     }
-    Write-Host "Confirmed both packages carry the local-only version: $LocalVersion" -ForegroundColor Green
+    if (-not (Test-Path $mstestPackage)) {
+        throw "Expected package not found: $mstestPackage -- the -p:MinVerVersionOverride override did not take effect as expected."
+    }
+    Write-Host "Confirmed all three packages carry the local-only version: $LocalVersion" -ForegroundColor Green
 
     # ---- Bootstrap: `intest init` via `dotnet run`, the same way a project has no `intest` on
     # PATH to run it with yet (docs/getting-started.md Phase 2's note; F13 in v0-acceptance.md).
@@ -344,14 +360,18 @@ try {
     # [scaffold-reads-itself] (Task 1) replaced InitCommand.cs's hardcoded
     # Include="InTest.Runtime" Version="0.1.0" with an interpolation of CliVersion.Current, so
     # `intest init` -- run above via `dotnet run ... -p:MinVerVersionOverride=$LocalVersion -- init ...` --
-    # already scaffolds InTest.Runtime at $LocalVersion on its own; this script no longer has
+    # already scaffolds a PackageReference at $LocalVersion on its own; this script no longer has
     # anything to patch. What used to be a patch step is now a verification of that fact: this is
     # the "confirm the generated .csproj references that same version" proof this script exists
     # to run end to end, and its absence would otherwise surface only indirectly, as a NU1102
     # restore failure several steps later at `dotnet build`, pointing at the wrong cause.
+    #
+    # The reference target is InTest.Runtime.MSTest, not InTest.Runtime -- since the
+    # runtime-framework split, InitCommand.cs's scaffold references the MSTest adapter (which in
+    # turn depends on the neutral InTest.Runtime package), not the neutral package directly.
     $csprojPath = Join-Path $ScaffoldDir "$ProjectName.csproj"
     $csprojText = Get-Content -Raw -LiteralPath $csprojPath
-    $needle = "Include=`"InTest.Runtime`" Version=`"$LocalVersion`""
+    $needle = "Include=`"InTest.Runtime.MSTest`" Version=`"$LocalVersion`""
     $matchCount = ([regex]::Matches($csprojText, [regex]::Escape($needle))).Count
     if ($matchCount -ne 1) {
         throw "Expected exactly one '$needle' in $csprojPath, found $matchCount -- either InitCommand's scaffolded csproj shape changed, or [scaffold-reads-itself] regressed and the scaffold is no longer following CliVersion.Current."
@@ -483,7 +503,7 @@ finally {
     # make this structurally impossible regardless of anything above, so if either package ever
     # shows up here, that is itself a finding worth shouting about rather than silently ignoring.
     $globalPackages = Join-Path $HOME '.nuget' 'packages'
-    foreach ($pkg in 'intest.cli', 'intest.runtime') {
+    foreach ($pkg in 'intest.cli', 'intest.runtime', 'intest.runtime.mstest') {
         $found = Join-Path $globalPackages $pkg
         if (Test-Path $found) {
             Write-Warning "UNEXPECTED: $found exists in the machine-wide NuGet cache. This script's NUGET_PACKAGES redirection should have made this impossible -- investigate before trusting this machine's cache again."
@@ -492,6 +512,6 @@ finally {
 
     if (-not $Failed) {
         Write-Host ''
-        Write-Host "Confirmed: $globalPackages has no intest.cli or intest.runtime entries." -ForegroundColor Green
+        Write-Host "Confirmed: $globalPackages has no intest.cli, intest.runtime or intest.runtime.mstest entries." -ForegroundColor Green
     }
 }
