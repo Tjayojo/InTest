@@ -92,7 +92,7 @@ public class AuthHandlerTests
 
     /// <summary>
     /// Makes the previously-dead <see cref="RecordingProvider.LastAudience"/> field load-bearing.
-    /// Question (c)'s audience resolution lives in <c>TestHost.ResolveAudience</c> (covered
+    /// Question (c)'s audience resolution lives in <c>InTestRun.ResolveAudience</c> (covered
     /// separately in <c>TestHostTests</c>) and is passed into <see cref="AuthHandler"/>'s
     /// constructor; this pins the second half — that whatever audience the handler was
     /// constructed with is the one that actually reaches the provider, not a value hardcoded
@@ -146,7 +146,7 @@ public class AuthHandlerTests
         var ex = await Should.ThrowAsync<InvalidOperationException>(() => SendThroughHandler(new ThrowingProvider()));
 
         ex.Message.ShouldContain(nameof(ThrowingProvider),
-            customMessage: "a bare HttpRequestException doesn't say which provider or identity failed");
+        customMessage: "a bare HttpRequestException doesn't say which provider or identity failed");
         ex.Message.ShouldContain("identity-under-test");
     }
 
@@ -163,7 +163,7 @@ public class AuthHandlerTests
         var provider = new CancelingProvider(cts);
 
         await Should.ThrowAsync<OperationCanceledException>(
-            () => SendThroughHandler(provider, cancellationToken: cts.Token));
+        () => SendThroughHandler(provider, cancellationToken: cts.Token));
     }
 
     [TestMethod]

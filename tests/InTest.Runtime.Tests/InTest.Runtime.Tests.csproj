@@ -10,6 +10,11 @@
     <PackageReference Include="Shouldly" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Explicit, kept alongside the InTest.Runtime.MSTest reference below (which brings
+         InTest.Runtime in transitively) rather than relying on the transitive reference alone:
+         explicit beats transitive and documents that this suite tests InTest.Runtime's own
+         types directly, not just what the adapter happens to expose. -->
     <ProjectReference Include="../../src/InTest.Runtime/InTest.Runtime.csproj" />
+    <ProjectReference Include="../../src/InTest.Runtime.MSTest/InTest.Runtime.MSTest.csproj" />
   </ItemGroup>
 </Project>

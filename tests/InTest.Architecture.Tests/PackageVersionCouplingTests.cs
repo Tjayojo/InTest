@@ -99,11 +99,18 @@ public class PackageVersionCouplingTests
     /// found in a scaffold with no matching central entry is a real gap (Directory.Packages.props
     /// missing an entry, or a name that doesn't match), and must fail loudly rather than be
     /// silently skipped — see <see cref="AssertScaffoldMatchesCentral"/>.
+    /// <para>
+    /// This is the MSTest adapter's package id, <c>InTest.Runtime.MSTest</c> — the runtime split
+    /// (<c>src/InTest.Runtime.MSTest/</c>) moved the scaffold's own reference from the neutral
+    /// <c>InTest.Runtime</c> package to the adapter, which ProjectReferences the neutral package
+    /// transitively. Both packages still declare their types in <c>namespace InTest.Runtime</c>, so
+    /// nothing else in the scaffold (e.g. <c>testBaseClass</c>) needed to change alongside this.
+    /// </para>
     /// </summary>
-    private const string RuntimeSelfVersionedPackage = "InTest.Runtime";
+    private const string RuntimeSelfVersionedPackage = "InTest.Runtime.MSTest";
 
     /// <summary>
-    /// The exact text InitCommand.cs's scaffold is expected to carry as InTest.Runtime's
+    /// The exact text InitCommand.cs's scaffold is expected to carry as the MSTest adapter's
     /// <c>Version</c> attribute value, verbatim, since <c>[scaffold-reads-itself]</c>
     /// (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md, Task 1) replaced the
     /// hardcoded "0.1.0" literal with an interpolation of <see cref="CliVersion.Current"/>.
@@ -135,10 +142,10 @@ public class PackageVersionCouplingTests
         // syntax — that is this guard silently going blind, not a clean bill of health (mirrors
         // TemplateEscapingGuardTests' and JsonWritingOptionsGuardTests' own zero-match checks).
         matches.Count.ShouldBeGreaterThan(0,
-            "no <PackageVersion Include=\"...\" Version=\"...\" /> entries were found in " +
-            "Directory.Packages.props. Either its format changed and " +
-            "PackageVersionCouplingTests.PackageVersionPattern no longer matches it, or this " +
-            "guard is passing vacuously — do not leave it silently disabled.");
+        "no <PackageVersion Include=\"...\" Version=\"...\" /> entries were found in " +
+        "Directory.Packages.props. Either its format changed and " +
+        "PackageVersionCouplingTests.PackageVersionPattern no longer matches it, or this " +
+        "guard is passing vacuously — do not leave it silently disabled.");
 
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (Match match in matches)
@@ -198,10 +205,10 @@ public class PackageVersionCouplingTests
         // stops matching this pattern (reformatted, attributes reordered, etc.) must fail loudly,
         // not silently stop checking anything.
         matches.Count.ShouldBeGreaterThan(0,
-            $"no <PackageReference Include=\"...\" Version=\"...\" /> entries were found in " +
-            $"{fileLabel}. Either its scaffold string's format changed and " +
-            $"PackageVersionCouplingTests.PackageReferencePattern no longer matches it, or this " +
-            $"guard is passing vacuously — do not leave it silently disabled.");
+        $"no <PackageReference Include=\"...\" Version=\"...\" /> entries were found in " +
+        $"{fileLabel}. Either its scaffold string's format changed and " +
+        $"PackageVersionCouplingTests.PackageReferencePattern no longer matches it, or this " +
+        $"guard is passing vacuously — do not leave it silently disabled.");
 
         var offenders = new List<string>();
 
@@ -224,12 +231,12 @@ public class PackageVersionCouplingTests
                 if (scaffoldVersion != RuntimeVersionExpression)
                 {
                     offenders.Add(
-                        $"{package}: {fileLabel} pins \"{scaffoldVersion}\" for its Version " +
-                        $"attribute, but this must be exactly {RuntimeVersionExpression} — " +
-                        "InitCommand.cs's scaffold is required to reference CliVersion.Current " +
-                        "there rather than any literal version, or a CLI built as a prerelease " +
-                        "scaffolds a restore that can never succeed (see [scaffold-reads-itself], " +
-                        "docs/superpowers/plans/2026-08-23-trunk-based-versioning.md).");
+                    $"{package}: {fileLabel} pins \"{scaffoldVersion}\" for its Version " +
+                    $"attribute, but this must be exactly {RuntimeVersionExpression} — " +
+                    "InitCommand.cs's scaffold is required to reference CliVersion.Current " +
+                    "there rather than any literal version, or a CLI built as a prerelease " +
+                    "scaffolds a restore that can never succeed (see [scaffold-reads-itself], " +
+                    "docs/superpowers/plans/2026-08-23-trunk-based-versioning.md).");
                 }
                 continue;
             }
@@ -237,27 +244,27 @@ public class PackageVersionCouplingTests
             if (!central.TryGetValue(package, out var centralVersion))
             {
                 offenders.Add(
-                    $"{package}: {fileLabel} hardcodes version {scaffoldVersion}, but " +
-                    $"Directory.Packages.props has no PackageVersion entry for it at all. Either " +
-                    $"add one, or — if this package is deliberately not centrally versioned, the " +
-                    $"way InTest.Runtime is — add it to " +
-                    $"PackageVersionCouplingTests.RuntimeSelfVersionedPackage's reasoning and give " +
-                    $"it the same treatment.");
+                $"{package}: {fileLabel} hardcodes version {scaffoldVersion}, but " +
+                $"Directory.Packages.props has no PackageVersion entry for it at all. Either " +
+                $"add one, or — if this package is deliberately not centrally versioned, the " +
+                $"way InTest.Runtime is — add it to " +
+                $"PackageVersionCouplingTests.RuntimeSelfVersionedPackage's reasoning and give " +
+                $"it the same treatment.");
                 continue;
             }
 
             if (scaffoldVersion != centralVersion)
             {
                 offenders.Add(
-                    $"{package}: Directory.Packages.props pins {centralVersion}, but {fileLabel} " +
-                    $"pins {scaffoldVersion}.");
+                $"{package}: Directory.Packages.props pins {centralVersion}, but {fileLabel} " +
+                $"pins {scaffoldVersion}.");
             }
         }
 
         offenders.ShouldBeEmpty(
-            $"{fileLabel} and Directory.Packages.props disagree on package versions that CLAUDE.md's " +
-            "Build configuration section says must be changed together:" + Environment.NewLine +
-            string.Join(Environment.NewLine, offenders));
+        $"{fileLabel} and Directory.Packages.props disagree on package versions that CLAUDE.md's " +
+        "Build configuration section says must be changed together:" + Environment.NewLine +
+        string.Join(Environment.NewLine, offenders));
     }
 
     [TestMethod]
@@ -266,7 +273,7 @@ public class PackageVersionCouplingTests
         var central = ReadCentralPackageVersions();
         var runtimeSelfVersion = ReadRuntimeSelfVersion();
         AssertScaffoldMatchesCentral(
-            Path.Combine("src", "InTest.Cli", "Commands", "InitCommand.cs"), central, runtimeSelfVersion);
+        Path.Combine("src", "InTest.Cli", "Commands", "InitCommand.cs"), central, runtimeSelfVersion);
     }
 
     /// <summary>
@@ -326,12 +333,12 @@ public class PackageVersionCouplingTests
             }
 
             runtimeMatch.ShouldNotBeNull(
-                "the scaffolded .csproj has no InTest.Runtime PackageReference at all — " +
-                "InitCommand.cs's scaffold shape has changed; update this test alongside it.");
+            "the scaffolded .csproj has no InTest.Runtime.MSTest PackageReference at all — " +
+            "InitCommand.cs's scaffold shape has changed; update this test alongside it.");
 
             runtimeMatch!.Groups[2].Value.ShouldBe(CliVersion.Current,
-                "the scaffolded InTest.Runtime PackageReference must carry the running intest's " +
-                "own version — see [scaffold-reads-itself].");
+            "the scaffolded InTest.Runtime.MSTest PackageReference must carry the running intest's " +
+            "own version — see [scaffold-reads-itself].");
         }
         finally
         {
@@ -345,6 +352,6 @@ public class PackageVersionCouplingTests
         var central = ReadCentralPackageVersions();
         var runtimeSelfVersion = ReadRuntimeSelfVersion();
         AssertScaffoldMatchesCentral(
-            Path.Combine("tests", "InTest.Golden.Tests", "CompileVerificationTests.cs"), central, runtimeSelfVersion);
+        Path.Combine("tests", "InTest.Golden.Tests", "CompileVerificationTests.cs"), central, runtimeSelfVersion);
     }
 }

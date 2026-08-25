@@ -41,6 +41,26 @@ internal static class TestSupport
     };
 
     /// <summary>
+    /// Records every <see cref="IRunDiagnostics.Note"/> and <see cref="IRunDiagnostics.Warn"/>
+    /// call it receives, in <see cref="Notes"/> and <see cref="Warnings"/> respectively — serving
+    /// both the "record and assert" role (a test reads either list back) and the "discard" role
+    /// (a test that does not care simply never reads them, the same way the prior <c>TextWriter
+    /// log</c> parameter's tests passed <c>TextWriter.Null</c> when the content of the log was not
+    /// the point). One recorder replaces both of those prior call shapes rather than the suite
+    /// carrying two separate doubles for them.
+    /// </summary>
+    internal sealed class RecordingDiagnostics : IRunDiagnostics
+    {
+        public List<string> Notes { get; } = [];
+
+        public List<string> Warnings { get; } = [];
+
+        public void Note(string message) => Notes.Add(message);
+
+        public void Warn(string message) => Warnings.Add(message);
+    }
+
+    /// <summary>
     /// A 30-second safety net against a genuine hang in the code under test — not a stand-in for
     /// <c>TestContext.CancellationToken</c>, which reflects the runner's own timeout policy (none,
     /// by default, for these tests) and would let a real bug spin forever instead of failing this

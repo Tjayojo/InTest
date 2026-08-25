@@ -3,24 +3,25 @@
     <PackageId>InTest.Runtime</PackageId>
     <Description>Runtime support for InTest-generated API integration tests.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>testing;mstest;openapi;api-testing;test-runtime</PackageTags>
+    <PackageTags>testing;openapi;api-testing;test-runtime</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
-    <!-- TestHost.RetainedFixtureContext is internal: only TestHost.CleanupAsync reads it, Task
-         6's InitializeAsync writes it, and tests need to drive both without a public setter a
-         generated project's own code could reach and corrupt. The real write path lives inside
-         InitializeAsync, which needs configuration, a built provider, a schema bundle and a live
-         readiness probe — only the Golden build-and-run harness could reach it that way, and
-         that harness can prove a suite doesn't blow up but not that a drain failure stays out of
-         the run's headline while still reaching the log, which is what this task exists to
-         cover. Same repo-sanctioned pattern as InTest.Cli.csproj's InternalsVisibleTo for
-         InTest.Cli.Tests (see the rationale at Fixtures/FixtureDocument.cs), new to this project
-         only. Caveat: InternalsVisibleTo is assembly-wide, so it also exposes
-         FixtureContext.TakeCleanupActions() — whose own doc says "nothing else should be able to
-         empty a context's cleanup list out from under it" — and FixtureValidation.Report's
-         internal constructor. No test reaches either today, but the encapsulation those doc
-         comments claim is weaker than it looks as long as this line exists. -->
+    <!-- InTestRun.RetainedFixtureContext is internal: only InTestRun.CleanupAsync (forwarded to
+         by TestHost.CleanupAsync) reads it, InTestRun.InitializeAsync writes it, and tests need
+         to drive both without a public setter a generated project's own code could reach and
+         corrupt. The real write path lives inside InitializeAsync, which needs configuration, a
+         built provider, a schema bundle and a live readiness probe — only the Golden
+         build-and-run harness could reach it that way, and that harness can prove a suite
+         doesn't blow up but not that a drain failure stays out of the run's headline while still
+         reaching the log, which is what this task exists to cover. Same repo-sanctioned pattern
+         as InTest.Cli.csproj's InternalsVisibleTo for InTest.Cli.Tests (see the rationale at
+         Fixtures/FixtureDocument.cs), new to this project only. Caveat: InternalsVisibleTo is
+         assembly-wide, so it also exposes FixtureContext.TakeCleanupActions() — whose own doc
+         says "nothing else should be able to empty a context's cleanup list out from under it" —
+         and FixtureValidation.Report's internal constructor. No test reaches either today, but
+         the encapsulation those doc comments claim is weaker than it looks as long as this line
+         exists. -->
     <InternalsVisibleTo Include="InTest.Runtime.Tests" />
   </ItemGroup>
   <ItemGroup>
@@ -32,7 +33,6 @@
          FileExtensions transitively) and AddEnvironmentVariables. -->
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
-    <PackageReference Include="MSTest.TestFramework" />
   </ItemGroup>
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />

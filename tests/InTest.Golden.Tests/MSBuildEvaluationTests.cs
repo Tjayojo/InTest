@@ -52,7 +52,7 @@ public class MSBuildEvaluationTests
     /// <summary>
     /// <c>dotnet msbuild &lt;csproj&gt; -getProperty:InTestSpecSource</c> evaluates the property
     /// the same way any real build would, without needing a package restore first — confirmed
-    /// here by using the exact <c>InTest.Runtime</c> <c>PackageReference</c> <c>InitCommand</c>
+    /// here by using the exact <c>InTest.Runtime.MSTest</c> <c>PackageReference</c> <c>InitCommand</c>
     /// itself writes (a version that does not need to resolve for property evaluation to
     /// succeed) rather than a hand-simplified project. <paramref name="hazardous"/> exercises
     /// both escaping layers and several of <c>MSBuildPropertyValue</c>'s MSBuild specials at
@@ -68,7 +68,7 @@ public class MSBuildEvaluationTests
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
         var (exitCode, output) = await ProcessRunner.RunAsync(
-            "dotnet", $"msbuild \"{csprojPath}\" -getProperty:InTestSpecSource");
+        "dotnet", $"msbuild \"{csprojPath}\" -getProperty:InTestSpecSource");
 
         // Asserted before the value check, and separately from it: a load failure (an unescaped
         // '&' breaking XML well-formedness, reported as MSB4025) surfaces here as a non-zero exit
@@ -80,9 +80,9 @@ public class MSBuildEvaluationTests
         // sees the escaped "%24(Cfg)" text and has no way to know whether MSBuild would later
         // expand it as a property reference. Only MSBuild evaluating the property can say so.
         output.Trim().ShouldBe(hazardous,
-            customMessage: "MSBuild's evaluated InTestSpecSource must equal exactly what the adopter typed, " +
-                            "with $(Cfg) left unexpanded — anything else means the escape/unescape round trip " +
-                            "through %XX and XML entities lost or transformed the adopter's path");
+        customMessage: "MSBuild's evaluated InTestSpecSource must equal exactly what the adopter typed, " +
+                       "with $(Cfg) left unexpanded — anything else means the escape/unescape round trip " +
+                       "through %XX and XML entities lost or transformed the adopter's path");
     }
 
     /// <summary>
@@ -119,17 +119,17 @@ public class MSBuildEvaluationTests
         var csprojText = File.ReadAllText(csprojPath);
 
         File.WriteAllText(csprojPath, csprojText.Replace(
-            "</Project>",
-            """
-              <ItemGroup>
-                <InTestSpecCheck Include="$(InTestSpecSource)" />
-              </ItemGroup>
-            </Project>
-            """,
-            StringComparison.Ordinal));
+        "</Project>",
+        """
+          <ItemGroup>
+            <InTestSpecCheck Include="$(InTestSpecSource)" />
+          </ItemGroup>
+        </Project>
+        """,
+        StringComparison.Ordinal));
 
         var (exitCode, output) = await ProcessRunner.RunAsync(
-            "dotnet", $"msbuild \"{csprojPath}\" -getItem:InTestSpecCheck");
+        "dotnet", $"msbuild \"{csprojPath}\" -getItem:InTestSpecCheck");
 
         exitCode.ShouldBe(0, $"dotnet msbuild failed to evaluate the generated project:{Environment.NewLine}{output}");
 
@@ -141,8 +141,8 @@ public class MSBuildEvaluationTests
         // below and can never fail unless that one already has. The decoy's identity and why it
         // is on disk at all live here instead, at the assertion that actually discriminates.
         identity.ShouldBe("specs/orders?.json",
-            customMessage: "the escaped '?' (%3F) must survive as literal text in the resolved item, not " +
-                            "glob-match specs/ordersX.json, the decoy on disk an unescaped '?' would have " +
-                            "silently resolved to instead — the exact defect MSBuildPropertyValue exists to prevent");
+        customMessage: "the escaped '?' (%3F) must survive as literal text in the resolved item, not " +
+                       "glob-match specs/ordersX.json, the decoy on disk an unescaped '?' would have " +
+                       "silently resolved to instead — the exact defect MSBuildPropertyValue exists to prevent");
     }
 }

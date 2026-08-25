@@ -43,9 +43,10 @@ public class GenerateUrlSpecTests
         _root = Path.Combine(Path.GetTempPath(), "intest-url-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_root);
         File.WriteAllText(Path.Combine(_root, "intest.json"), $$"""
-        { "schemaVersion": 1, "spec": { "source": "{{Url}}" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                                { "schemaVersion": 1, "spec": { "source": "{{Url}}" },
+                                                                  "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                                                               "framework": "mstest" } }
+                                                                """);
     }
 
     [TestCleanup]
@@ -83,7 +84,7 @@ public class GenerateUrlSpecTests
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken) =>
             throw new ShouldAssertException(
-                $"a request was issued to {request.RequestUri} by a command that must never fetch");
+            $"a request was issued to {request.RequestUri} by a command that must never fetch");
     }
 
     private string SnapshotPath => Path.Combine(_root, SpecSnapshot.FileName);
@@ -93,7 +94,7 @@ public class GenerateUrlSpecTests
     {
         var report = new StringWriter();
         var exitCode = await GenerateCommand.RunAsync(
-            _root, CancellationToken.None, report, check, transport);
+        _root, CancellationToken.None, report, check, transport);
         return (exitCode, report.ToString());
     }
 
@@ -106,7 +107,7 @@ public class GenerateUrlSpecTests
         try
         {
             var exitCode = await GenerateCommand.RunAsync(
-                _root, CancellationToken.None, new StringWriter(), check: false, transport);
+            _root, CancellationToken.None, new StringWriter(), check: false, transport);
             return (exitCode, captured.ToString());
         }
         finally
@@ -196,10 +197,10 @@ public class GenerateUrlSpecTests
         report.ShouldContain("no fixture found");
 
         File.Exists(SnapshotPath).ShouldBeTrue(
-            "without this, `fixtures repair` would read a stale snapshot and repair against the " +
-            "wrong spec — the drift would never clear, however many times either command ran");
+        "without this, `fixtures repair` would read a stale snapshot and repair against the " +
+        "wrong spec — the drift would never clear, however many times either command ran");
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse(
-            "the invariant that still holds: no generated output before the drift gate");
+        "the invariant that still holds: no generated output before the drift gate");
     }
 
     /// <summary>
@@ -239,8 +240,8 @@ public class GenerateUrlSpecTests
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldContain("503");
         File.ReadAllBytes(SnapshotPath).ShouldBe(before,
-            "a stale snapshot silently standing in for a refresh is the quiet-green failure " +
-            "\"Fail loudly\" exists to reject");
+        "a stale snapshot silently standing in for a refresh is the quiet-green failure " +
+        "\"Fail loudly\" exists to reject");
     }
 
     /// <summary>
@@ -309,9 +310,9 @@ public class GenerateUrlSpecTests
 
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldNotContain("unexpected failure",
-            customMessage: "an unwritable checkout is an adopter's condition, not a crash");
+        customMessage: "an unwritable checkout is an adopter's condition, not a crash");
         error.ShouldContain(SpecSnapshot.FileName,
-            customMessage: "a refusal names the file it could not write");
+        customMessage: "a refusal names the file it could not write");
     }
 
     /// <summary>
@@ -347,9 +348,9 @@ public class GenerateUrlSpecTests
             exitCode.ShouldBe(ExitCode.ToolError);
             error.ShouldNotContain("unexpected failure");
             error.ShouldContain("read-only",
-                customMessage: "a refusal names the condition the adopter has to clear");
+            customMessage: "a refusal names the condition the adopter has to clear");
             File.ReadAllBytes(SnapshotPath).ShouldBe(before,
-                "a refused write leaves the existing snapshot exactly as it was");
+            "a refused write leaves the existing snapshot exactly as it was");
         }
         finally
         {
@@ -464,9 +465,10 @@ public class GenerateUrlSpecTests
     {
         File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
         File.WriteAllText(Path.Combine(_root, "intest.json"), """
-        { "schemaVersion": 1, "spec": { "source": "orders.json" },
-          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-        """);
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                                                             "framework": "mstest" } }
+                                                              """);
 
         using var forbidden = new ForbiddenTransport();
         var (exitCode, report) = await RunAsync(forbidden);

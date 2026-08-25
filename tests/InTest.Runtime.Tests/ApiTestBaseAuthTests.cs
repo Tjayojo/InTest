@@ -5,14 +5,26 @@ namespace InTest.Runtime.Tests;
 /// <summary>
 /// v1-c Task 5: the runtime guard that replaces <c>MemberCondition</c> (decision 3 — measured to
 /// be evaluated before <c>[AssemblyInitialize]</c>, so it cannot see anything the DI container
-/// built), and <see cref="ApiTestBase.UseIdentity"/>, the override point a generated auth case
-/// calls before building its request (decision 7). Also <see cref="ApiTestBase.ResolveIdentitySlot"/>,
+/// built), and <see cref="ApiTestCore.UseIdentity"/>, the override point a generated auth case
+/// calls before building its request (decision 7). Also <see cref="ApiTestCore.ResolveIdentitySlot"/>,
 /// the slot-to-identity resolution <c>UseIdentity</c> defers to, and Task 2's
-/// <see cref="ApiTestBase.RequireSecondaryIdentityLacks"/>, the guard that skips a wrong-scope
+/// <see cref="ApiTestCore.SecondaryIdentityScopeSkipReason"/>, the guard that reports a wrong-scope
 /// 403 the secondary identity is actually authorized for.
 /// <para>
-/// <see cref="TestHost.TokenProvider"/> is process-wide static state, the same shape
-/// <c>TestHostTests</c> already hand-rolls for <c>TestHost.RetainedFixtureContext</c>: reset
+/// Task 5 (the neutral/adapter split) moves most of this class's assertions onto the neutral,
+/// pure functions — <see cref="ApiTestCore.MultipleIdentitiesSkipReason"/> and
+/// <see cref="ApiTestCore.SecondaryIdentityScopeSkipReason"/> — asserting directly on the reason
+/// string each returns (null means "run") rather than catching <see cref="AssertInconclusiveException"/>
+/// and parsing its <c>Message</c>. That is strictly stronger: it tests the actual decision instead
+/// of an MSTest side effect of the decision. A small number of tests deliberately keep going
+/// through <see cref="ApiTestBase.RequireMultipleIdentities"/> / <see cref="ApiTestBase.RequireSecondaryIdentityLacks"/>
+/// instead, so the adapter's "reason string in, Assert.Inconclusive out" delegation is itself
+/// covered by something — see <see cref="ATwoIdentityProviderLetsTheForbiddenTestRun"/> and
+/// <see cref="SecondaryHoldingEveryRequiredScopeSkips"/>.
+/// </para>
+/// <para>
+/// <see cref="InTestRun.TokenProvider"/> is process-wide static state, the same shape
+/// <c>TestHostTests</c> already hand-rolls for <c>InTestRun.RetainedFixtureContext</c>: reset
 /// before and after every test here so no test is at the mercy of what its predecessor left
 /// behind, and so this class never leaks into whatever runs after it.
 /// </para>
@@ -37,12 +49,14 @@ public class ApiTestBaseAuthTests
 
     /// <summary>
     /// Gives the tests below a way to call the <c>protected static</c>
-    /// <see cref="ApiTestBase.UseIdentity"/> — the same reason <c>FixtureValidationTests</c>
-    /// tests <c>FixtureValidation</c> directly rather than through <c>ApiTestBase.RequireFixture</c>
+    /// <see cref="ApiTestCore.UseIdentity"/> — the same reason <c>FixtureValidationTests</c>
+    /// tests <c>FixtureValidation</c> directly rather than through <c>ApiTestCore.RequireFixture</c>
     /// wherever possible, except <c>UseIdentity</c>'s scope-restore behaviour is new enough this
     /// task that it earns a direct test rather than only the golden execution suite's live proof.
+    /// Derives from <see cref="ApiTestCore"/> directly, not <see cref="ApiTestBase"/>: UseIdentity
+    /// is neutral logic with no MSTest dependency, so testing it needs none either.
     /// </summary>
-    private sealed class TestableApiTestBase : ApiTestBase
+    private sealed class TestableApiTestCore : ApiTestCore
     {
         public static IDisposable ExposeUseIdentity(IdentitySlot slot) => UseIdentity(slot);
     }
@@ -50,66 +64,71 @@ public class ApiTestBaseAuthTests
     [TestInitialize]
     public void Reset()
     {
-        TestHost.TokenProvider = null;
+        InTestRun.TokenProvider = null;
         InTestAmbient.Identity.Value = null;
     }
 
     [TestCleanup]
     public void ResetAfter()
     {
-        TestHost.TokenProvider = null;
+        InTestRun.TokenProvider = null;
         InTestAmbient.Identity.Value = null;
     }
 
-    // --- RequireMultipleIdentities (decision 3) ---
+    // --- MultipleIdentitiesSkipReason (decision 3) ---
 
     [TestMethod]
-    public void AOneIdentityProviderSkipsTheForbiddenTestAndSaysWhy()
+    public void AOneIdentityProviderReportsASkipReasonNamingTheCount()
     {
-        // Must fail if the guard stops throwing OR stops explaining. A bare ShouldBeFalse on
-        // some condition property would pass just as well with nothing registered at all —
-        // asserting through the guard itself, on a provider deliberately built one-identity, is
-        // the point.
-        TestHost.TokenProvider = new FakeTokenProvider("only-one");
+        // Must fail if the guard stops reporting a reason OR stops explaining. A bare
+        // ShouldBeFalse on some condition property would pass just as well with nothing
+        // registered at all — asserting the actual reason text, on a provider deliberately built
+        // one-identity, is the point.
+        InTestRun.TokenProvider = new FakeTokenProvider("only-one");
 
-        var ex = Should.Throw<AssertInconclusiveException>(ApiTestBase.RequireMultipleIdentities);
+        var reason = ApiTestCore.MultipleIdentitiesSkipReason();
 
         // Task 10 item 4: this must name the count a *registered* provider advertised — the
-        // phrase that distinguishes this case from NoRegisteredProviderAlsoSkips... below, which
+        // phrase that distinguishes this case from NoRegisteredProviderAlsoReports... below, which
         // has no provider at all. Asserting only "identit"/"403" (as both tests did before this
         // task) passes equally on either message and would not have caught the wording bug that
         // motivated the branch.
-        ex.Message.ShouldContain("advertises 1 identity");
-        ex.Message.ShouldContain("403");
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("advertises 1 identity");
+        reason.ShouldContain("403");
     }
 
     [TestMethod]
-    public void NoRegisteredProviderAlsoSkipsTheForbiddenTestAndSaysWhy()
+    public void NoRegisteredProviderAlsoReportsASkipReason()
     {
-        // TestHost.TokenProvider is null for every spec that declares no security — the same
+        // InTestRun.TokenProvider is null for every spec that declares no security — the same
         // zero-identity state ResolveDefaultIdentity already treats as ordinary, not an error.
-        TestHost.TokenProvider = null;
+        InTestRun.TokenProvider = null;
 
-        var ex = Should.Throw<AssertInconclusiveException>(ApiTestBase.RequireMultipleIdentities);
+        var reason = ApiTestCore.MultipleIdentitiesSkipReason();
 
         // Task 10 item 4: must say no provider is registered, not "advertises 0 identities" —
         // that older wording reads as if a provider *is* registered and simply advertises none,
         // sending a reader hunting for a bug in code they never wrote.
-        ex.Message.ShouldContain("no ITestTokenProvider is registered");
-        ex.Message.ShouldContain("403");
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("no ITestTokenProvider is registered");
+        reason.ShouldContain("403");
     }
 
     [TestMethod]
     public void ATwoIdentityProviderLetsTheForbiddenTestRun()
     {
-        TestHost.TokenProvider = new FakeTokenProvider("default", "wrong-scope");
+        // Kept going through the adapter (Should.NotThrow rather than a bare reason.ShouldBeNull())
+        // so ApiTestBase.RequireMultipleIdentities' throw-on-reason delegation is itself covered —
+        // see this class's own doc for why only a couple of tests do this.
+        InTestRun.TokenProvider = new FakeTokenProvider("default", "wrong-scope");
 
         Should.NotThrow(ApiTestBase.RequireMultipleIdentities);
     }
 
     /// <summary>Returns a null <c>Identities</c> despite the interface's non-nullable
     /// annotation — nothing at compile time stops a misbehaving <see cref="ITestTokenProvider"/>
-    /// implementation from doing this, and <see cref="ApiTestBase.ResolveDefaultIdentity"/>
+    /// implementation from doing this, and <see cref="ApiTestCore.ResolveDefaultIdentity"/>
     /// already guards against exactly this shape.</summary>
     private sealed class NullIdentitiesProvider : ITestTokenProvider
     {
@@ -120,21 +139,22 @@ public class ApiTestBaseAuthTests
     }
 
     [TestMethod]
-    public void AProviderWithANullIdentitiesListSkipsTheForbiddenTestRatherThanThrowing()
+    public void AProviderWithANullIdentitiesListReportsASkipReasonRatherThanThrowing()
     {
-        // Task 10 item 3: RequireMultipleIdentities' neighbour, ResolveDefaultIdentity, guards
+        // Task 10 item 3: MultipleIdentitiesSkipReason's neighbour, ResolveDefaultIdentity, guards
         // both "no provider" and "provider whose Identities is itself null" — deliberately,
         // since ITestTokenProvider.Identities is non-nullable only by annotation, not by
-        // anything the runtime enforces. `TestHost.TokenProvider?.Identities.Count` chains `?.`
+        // anything the runtime enforces. `InTestRun.TokenProvider?.Identities.Count` chains `?.`
         // through the first access only, so a provider with a null Identities list threw
-        // NullReferenceException here instead of the same Inconclusive skip every other
-        // zero/one-identity state produces.
-        TestHost.TokenProvider = new NullIdentitiesProvider();
+        // NullReferenceException here instead of the same skip reason every other zero/one-identity
+        // state produces.
+        InTestRun.TokenProvider = new NullIdentitiesProvider();
 
-        var ex = Should.Throw<AssertInconclusiveException>(ApiTestBase.RequireMultipleIdentities);
+        var reason = ApiTestCore.MultipleIdentitiesSkipReason();
 
-        ex.Message.ShouldContain("identit");
-        ex.Message.ShouldContain("403");
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("identit");
+        reason.ShouldContain("403");
     }
 
     // --- ResolveIdentitySlot (decision 7's resolution, pulled out the same way ResolveDefaultIdentity was) ---
@@ -146,7 +166,7 @@ public class ApiTestBaseAuthTests
         // must never be resolved to an actual identity.
         var provider = new FakeTokenProvider("default", "secondary");
 
-        ApiTestBase.ResolveIdentitySlot(IdentitySlot.None, provider).ShouldBe(InTestIdentities.None);
+        ApiTestCore.ResolveIdentitySlot(IdentitySlot.None, provider).ShouldBe(InTestIdentities.None);
     }
 
     [TestMethod]
@@ -154,7 +174,7 @@ public class ApiTestBaseAuthTests
     {
         var provider = new FakeTokenProvider("default", "wrong-scope");
 
-        ApiTestBase.ResolveIdentitySlot(IdentitySlot.Secondary, provider).ShouldBe("wrong-scope");
+        ApiTestCore.ResolveIdentitySlot(IdentitySlot.Secondary, provider).ShouldBe("wrong-scope");
     }
 
     [TestMethod]
@@ -162,8 +182,8 @@ public class ApiTestBaseAuthTests
     {
         var provider = new FakeTokenProvider("default", "secondary");
 
-        ApiTestBase.ResolveIdentitySlot(IdentitySlot.Default, provider).ShouldBe("default");
-        ApiTestBase.ResolveIdentitySlot(IdentitySlot.Default, null).ShouldBe(InTestIdentities.None);
+        ApiTestCore.ResolveIdentitySlot(IdentitySlot.Default, provider).ShouldBe("default");
+        ApiTestCore.ResolveIdentitySlot(IdentitySlot.Default, null).ShouldBe(InTestIdentities.None);
     }
 
     // --- UseIdentity (the generated auth case's override point) ---
@@ -171,10 +191,10 @@ public class ApiTestBaseAuthTests
     [TestMethod]
     public void UseIdentityOverridesTheAmbientIdentityForTheScope()
     {
-        TestHost.TokenProvider = new FakeTokenProvider("default", "secondary");
+        InTestRun.TokenProvider = new FakeTokenProvider("default", "secondary");
         InTestAmbient.Identity.Value = "default";
 
-        using (TestableApiTestBase.ExposeUseIdentity(IdentitySlot.Secondary))
+        using (TestableApiTestCore.ExposeUseIdentity(IdentitySlot.Secondary))
         {
             InTestAmbient.Identity.Value.ShouldBe("secondary");
         }
@@ -187,10 +207,10 @@ public class ApiTestBaseAuthTests
         // that throws mid-body must not leave a secondary identity set for whatever runs next.
         // [TestCleanup] clearing InTestAmbient.Identity is not the only thing standing between
         // one test and the next — the using-scope's own Dispose must restore it independently.
-        TestHost.TokenProvider = new FakeTokenProvider("default", "secondary");
+        InTestRun.TokenProvider = new FakeTokenProvider("default", "secondary");
         InTestAmbient.Identity.Value = "default";
 
-        using (TestableApiTestBase.ExposeUseIdentity(IdentitySlot.Secondary))
+        using (TestableApiTestCore.ExposeUseIdentity(IdentitySlot.Secondary))
         {
         }
 
@@ -202,7 +222,7 @@ public class ApiTestBaseAuthTests
     {
         InTestAmbient.Identity.Value = "default";
 
-        using (TestableApiTestBase.ExposeUseIdentity(IdentitySlot.None))
+        using (TestableApiTestCore.ExposeUseIdentity(IdentitySlot.None))
         {
             InTestAmbient.Identity.Value.ShouldBe(InTestIdentities.None);
         }
@@ -210,7 +230,7 @@ public class ApiTestBaseAuthTests
         InTestAmbient.Identity.Value.ShouldBe("default");
     }
 
-    // --- RequireSecondaryIdentityLacks (Task 2: the runtime guard for a wrong-scope 403) ---
+    // --- SecondaryIdentityScopeSkipReason (Task 2: the runtime guard for a wrong-scope 403) ---
 
     [TestMethod]
     public void SecondaryWithNullScopesAlwaysRuns()
@@ -218,37 +238,37 @@ public class ApiTestBaseAuthTests
         // null = not declared / unknown (Task 1). Unknown-means-run is deliberate: treating it
         // as a skip would switch auth testing off by default for anyone who never declares
         // scopes on their secondary identity.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("secondary"));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("secondary"));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
     }
 
     [TestMethod]
-    public void SecondaryHoldingTheRequiredScopeSkipsAndNamesTheIdentityAndScope()
+    public void SecondaryHoldingTheRequiredScopeReportsASkipReasonNamingTheIdentityAndScope()
     {
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["orders.read"]));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["orders.read"]));
 
-        var ex = Should.Throw<AssertInconclusiveException>(() =>
-            ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        var reason = ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read");
 
-        ex.Message.ShouldContain("readonly");
-        ex.Message.ShouldContain("orders.read");
-        ex.Message.ShouldContain("403");
-        ex.Message.ShouldNotContain("including");
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("readonly");
+        reason.ShouldContain("orders.read");
+        reason.ShouldContain("403");
+        reason.ShouldNotContain("including");
     }
 
     [TestMethod]
     public void SecondaryLackingTheRequiredScopeRuns()
     {
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["orders.read"]));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["orders.read"]));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.write"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.write").ShouldBeNull();
     }
 
     [TestMethod]
@@ -256,11 +276,11 @@ public class ApiTestBaseAuthTests
     {
         // Holding one of two required scopes does not authorize the operation, so a 403 is still
         // provable. Must fail against an `Any` implementation — the easy wrong version of this.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["orders.read"]));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["orders.read"]));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read", "orders.write"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read", "orders.write").ShouldBeNull();
     }
 
     [TestMethod]
@@ -270,19 +290,19 @@ public class ApiTestBaseAuthTests
         // that holds several read scopes. A message that joins only the held scopes under "which
         // this operation requires" states something false the moment the identity holds more
         // than the operation needs, and gives the reader no clue which scope to remove.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["orders.read", "products.read"]));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["orders.read", "products.read"]));
 
-        var ex = Should.Throw<AssertInconclusiveException>(() =>
-            ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        var reason = ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read");
 
-        ex.Message.ShouldContain("readonly");
-        ex.Message.ShouldContain("orders.read");
-        ex.Message.ShouldContain("products.read");
+        reason.ShouldNotBeNull();
+        reason.ShouldContain("readonly");
+        reason.ShouldContain("orders.read");
+        reason.ShouldContain("products.read");
         // The identity holds products.read too, but the operation never asked for it — the
         // message must not claim otherwise.
-        ex.Message.ShouldNotContain("products.read, which this operation requires");
+        reason.ShouldNotContain("products.read, which this operation requires");
     }
 
     [TestMethod]
@@ -292,11 +312,11 @@ public class ApiTestBaseAuthTests
         // passed to the three-argument Contains overload is the correct comparer. Pins the
         // behaviour so a future switch to OrdinalIgnoreCase would be caught rather than passing
         // every existing test.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["ORDERS.READ"]));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["ORDERS.READ"]));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
 
         // Regression: a secondary whose Scopes is a HashSet<string> built with
         // OrdinalIgnoreCase must not change the outcome. requiredScopes.All(scopes.Contains)
@@ -307,21 +327,24 @@ public class ApiTestBaseAuthTests
         // skipping a provable 403. The explicit three-argument overload has no such fast path:
         // it always enumerates and compares with the comparer passed to it, regardless of what
         // collection type backs `scopes`.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ORDERS.READ" }));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ORDERS.READ" }));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
     }
 
     [TestMethod]
     public void SecondaryHoldingEveryRequiredScopeSkips()
     {
         // Containment is over the whole set: holding both required scopes really does authorize
-        // the operation, so the 403 genuinely cannot happen.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["orders.read", "orders.write"]));
+        // the operation, so the 403 genuinely cannot happen. Kept going through the adapter
+        // (Should.Throw rather than a bare reason.ShouldNotBeNull()) so
+        // ApiTestBase.RequireSecondaryIdentityLacks' throw-on-reason delegation is itself
+        // covered — see this class's own doc for why only a couple of tests do this.
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["orders.read", "orders.write"]));
 
         Should.Throw<AssertInconclusiveException>(() =>
             ApiTestBase.RequireSecondaryIdentityLacks("orders.read", "orders.write"));
@@ -332,11 +355,11 @@ public class ApiTestBaseAuthTests
     {
         // [] is a real declaration — "holds no scopes" — not the same as null, but it still can
         // never be a superset of a non-empty requirement, so the test runs either way.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", []));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", []));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.write"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.write").ShouldBeNull();
     }
 
     [TestMethod]
@@ -347,11 +370,11 @@ public class ApiTestBaseAuthTests
         // `requiredScopes.All(scopes.Contains)` is vacuously true over an empty requiredScopes,
         // which read as "the secondary already holds everything required" and skipped; that is
         // the bug this test exists to catch.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", ["orders.read"]));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", ["orders.read"]));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks());
+        ApiTestCore.SecondaryIdentityScopeSkipReason().ShouldBeNull();
     }
 
     [TestMethod]
@@ -360,48 +383,49 @@ public class ApiTestBaseAuthTests
         // Same bug, [] variant: an empty requiredScopes is still vacuously "All" over an empty
         // Scopes, and Scopes being non-null (even though empty) meant the guard's `is not { }
         // scopes` half didn't save it either — this must run regardless.
-        TestHost.TokenProvider = new FakeTokenProvider(
-            new TestIdentity("default"),
-            new TestIdentity("readonly", []));
+        InTestRun.TokenProvider = new FakeTokenProvider(
+        new TestIdentity("default"),
+        new TestIdentity("readonly", []));
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks());
+        ApiTestCore.SecondaryIdentityScopeSkipReason().ShouldBeNull();
     }
 
     [TestMethod]
     public void NoRegisteredProviderRunsRatherThanSkippingASecondTime()
     {
-        // RequireMultipleIdentities already owns this skip; never skip twice for one reason.
-        TestHost.TokenProvider = null;
+        // MultipleIdentitiesSkipReason already owns this skip; never skip twice for one reason.
+        InTestRun.TokenProvider = null;
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
     }
 
     [TestMethod]
     public void OnlyOneRegisteredIdentityRuns()
     {
-        // Same reason: RequireMultipleIdentities owns the "fewer than two identities" skip.
-        TestHost.TokenProvider = new FakeTokenProvider("only-one");
+        // Same reason: MultipleIdentitiesSkipReason owns the "fewer than two identities" skip.
+        InTestRun.TokenProvider = new FakeTokenProvider("only-one");
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
     }
 
     [TestMethod]
     public void ANullIdentitiesListRunsRatherThanThrowing()
     {
-        // Task 2 step 2: this guard reaches further than RequireMultipleIdentities
+        // Task 2 step 2: this guard reaches further than MultipleIdentitiesSkipReason
         // (Identities[1], not just Identities.Count), so it must guard the same
         // provider-registered-but-Identities-itself-null shape that guard already does — v1-c's
         // live NullReferenceException on exactly this shape is why.
         //
         // This is the only one of these two null-shape tests that can actually carry a "runs"
-        // claim: a null Identities *list* fails RequireMultipleIdentities' count check (Count 0),
-        // so UseIdentity is never reached and "runs" is never falsified. Its sibling below, on a
-        // null *element*, passes that same count check (Count 2) and reaches UseIdentity, where
-        // ResolveIdentitySlot throws on the null element's .Name — so it cannot make the same
-        // claim. That asymmetry is intentional; see the sibling's own doc comment.
-        TestHost.TokenProvider = new NullIdentitiesProvider();
+        // claim: a null Identities *list* fails MultipleIdentitiesSkipReason's count check
+        // (Count 0), so UseIdentity is never reached and "runs" is never falsified. Its sibling
+        // below, on a null *element*, passes that same count check (Count 2) and reaches
+        // UseIdentity, where ResolveIdentitySlot throws on the null element's .Name — so it
+        // cannot make the same claim. That asymmetry is intentional; see the sibling's own doc
+        // comment.
+        InTestRun.TokenProvider = new NullIdentitiesProvider();
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
     }
 
     /// <summary>A provider whose second identity is itself null despite the non-nullable element
@@ -416,21 +440,21 @@ public class ApiTestBaseAuthTests
             throw new NotSupportedException("not exercised by this test");
     }
 
-    /// <summary>Confirms the null-element shape is not skipped by <see
-    /// cref="ApiTestBase.RequireSecondaryIdentityLacks"/> itself. It does not confirm the test
-    /// goes on to run: the second identity being null violates <see
-    /// cref="ITestTokenProvider.Identities"/>'s non-null element annotation, and <see
-    /// cref="ApiTestBase.UseIdentity"/>'s subsequent call to <c>ResolveIdentitySlot</c> throws
-    /// <see cref="NullReferenceException"/> on exactly this shape — intentionally, so a provider
-    /// that breaks its own contract fails loudly rather than being silently defended against.
-    /// Unlike <see cref="ANullIdentitiesListRunsRatherThanThrowing"/>, this one cannot carry a
-    /// "runs" claim: it passes the count guard that test relies on, so it reaches
+    /// <summary>Confirms the null-element shape is not reported as a skip by
+    /// <see cref="ApiTestCore.SecondaryIdentityScopeSkipReason"/> itself. It does not confirm the
+    /// test goes on to run: the second identity being null violates
+    /// <see cref="ITestTokenProvider.Identities"/>'s non-null element annotation, and
+    /// <see cref="ApiTestCore.UseIdentity"/>'s subsequent call to <c>ResolveIdentitySlot</c>
+    /// throws <see cref="NullReferenceException"/> on exactly this shape — intentionally, so a
+    /// provider that breaks its own contract fails loudly rather than being silently defended
+    /// against. Unlike <see cref="ANullIdentitiesListRunsRatherThanThrowing"/>, this one cannot
+    /// carry a "runs" claim: it passes the count guard that test relies on, so it reaches
     /// <c>UseIdentity</c> instead of stopping short of it.</summary>
     [TestMethod]
-    public void ANullSecondaryIdentityElementIsNotSkippedByThisGuard()
+    public void ANullSecondaryIdentityElementIsNotReportedAsASkipByThisGuard()
     {
-        TestHost.TokenProvider = new NullSecondaryIdentityProvider();
+        InTestRun.TokenProvider = new NullSecondaryIdentityProvider();
 
-        Should.NotThrow(() => ApiTestBase.RequireSecondaryIdentityLacks("orders.read"));
+        ApiTestCore.SecondaryIdentityScopeSkipReason("orders.read").ShouldBeNull();
     }
 }

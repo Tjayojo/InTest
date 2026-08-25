@@ -10,7 +10,7 @@ namespace InTest.Runtime;
 /// <see cref="FixtureStore.Keys"/> to begin with, and a fixture where everything resolves adds
 /// nothing to it either, so <see cref="Report.ThrowIfBlocked"/> is a no-op for both.
 /// <para>
-/// <see cref="ApiTestBase.RequireFixture"/> is the only way a generated test reaches this, and it
+/// <see cref="ApiTestCore.RequireFixture"/> is the only way a generated test reaches this, and it
 /// consults the <see cref="Report"/> — never <see cref="FixtureStore.Get"/> directly — precisely
 /// so "no fixture" (the majority case) can never be confused with "unresolved fixture". Get
 /// throws for an unknown key by design (Task 5); delegating to it here would fail every
@@ -156,8 +156,8 @@ public static class FixtureValidation
             }
 
             throw new FixtureUnresolvedException(
-                $"Fixture for operation '{operationKey}' has unresolved values:\n" +
-                string.Join("\n", problems.Select(p => "  - " + p)));
+            $"Fixture for operation '{operationKey}' has unresolved values:\n" +
+            string.Join("\n", problems.Select(p => "  - " + p)));
         }
 
         private static string BuildMessage(IReadOnlyDictionary<string, List<string>> problemsByOperation)

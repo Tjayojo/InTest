@@ -3,7 +3,7 @@ namespace InTest.Runtime;
 /// <summary>
 /// Which identity a generated auth case authenticates as (v1-c decision 7) — never a literal
 /// identity name, since the CLI generates this code long before any adopter has written an
-/// <see cref="ITestTokenProvider"/> and cannot know one. <see cref="ApiTestBase.UseIdentity"/>
+/// <see cref="ITestTokenProvider"/> and cannot know one. <see cref="ApiTestCore.UseIdentity"/>
 /// resolves a slot to a concrete identity (or the no-token sentinel) at the point a generated
 /// test overrides <see cref="InTestAmbient.Identity"/>, immediately before building its request.
 /// </summary>
@@ -12,7 +12,7 @@ public enum IdentitySlot
     /// <summary>The ordinary authenticated identity — <c>Identities[0]</c>, or
     /// <see cref="InTestIdentities.None"/> when the provider advertises none. Already the
     /// ambient value every test starts with (<c>ApiTestBase.ApiTestInitialize</c>), so a case in
-    /// this slot never needs to call <see cref="ApiTestBase.UseIdentity"/> at all — it is
+    /// this slot never needs to call <see cref="ApiTestCore.UseIdentity"/> at all — it is
     /// carried on <c>TestCasePlan</c> only so the template has a value that means "no
     /// override."</summary>
     Default,

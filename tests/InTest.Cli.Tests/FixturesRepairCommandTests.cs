@@ -12,15 +12,15 @@ public class FixturesRepairCommandTests
     private string _root = null!;
 
     private const string Spec = """
-    {
-      "openapi":"3.0.3","info":{"title":"T","version":"1"},
-      "paths":{"/api/products":{"post":{
-        "operationId":"createProduct",
-        "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-          "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
-        "responses":{"201":{"description":"ok"}}}}}
-    }
-    """;
+                                {
+                                  "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                  "paths":{"/api/products":{"post":{
+                                    "operationId":"createProduct",
+                                    "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                                      "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
+                                    "responses":{"201":{"description":"ok"}}}}}
+                                }
+                                """;
 
     [TestInitialize]
     public void CreateProject()
@@ -81,8 +81,8 @@ public class FixturesRepairCommandTests
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
         File.WriteAllText(Path.Combine(_root, "spec.json"), Spec.Replace(
-            """"required":["sku"],"properties":{"sku":{"type":"string"}}"""",
-            """"required":["sku","name"],"properties":{"sku":{"type":"string"},"name":{"type":"string"}}""""));
+        """"required":["sku"],"properties":{"sku":{"type":"string"}}"""",
+        """"required":["sku","name"],"properties":{"sku":{"type":"string"},"name":{"type":"string"}}""""));
 
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
@@ -104,7 +104,7 @@ public class FixturesRepairCommandTests
         // §10 requires both halves: not deleted, and reported. Silent retention is how a
         // property nobody meant to keep survives three refactors.
         FixtureDocument.Parse(File.ReadAllText(FixturePath)).Body!["legacyRef"].ShouldNotBeNull(
-            "never silently deleted — it may be deliberate");
+        "never silently deleted — it may be deliberate");
         report.ToString().ShouldContain("legacyRef", Case.Sensitive);
         report.ToString().ShouldContain("no longer in schema");
     }
@@ -117,32 +117,32 @@ public class FixturesRepairCommandTests
         // document instead, it would create fixtures for operations no generated test uses,
         // and generate's drift check would disagree with it about the operation set.
         const string withSkipped = """
-        {
-          "openapi":"3.0.3","info":{"title":"T","version":"1"},
-          "paths":{
-            "/api/products":{"post":{"operationId":"createProduct",
-              "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-                "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
-              "responses":{"201":{"description":"ok"}}}},
-            "/api/upload":{"post":{"operationId":"upload",
-              "requestBody":{"content":{"multipart/form-data":{"schema":{"type":"object"}}}},
-              "responses":{"200":{"description":"ok"}}}}}
-        }
-        """;
+                                   {
+                                     "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                     "paths":{
+                                       "/api/products":{"post":{"operationId":"createProduct",
+                                         "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                                           "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
+                                         "responses":{"201":{"description":"ok"}}}},
+                                       "/api/upload":{"post":{"operationId":"upload",
+                                         "requestBody":{"content":{"multipart/form-data":{"schema":{"type":"object"}}}},
+                                         "responses":{"200":{"description":"ok"}}}}}
+                                   }
+                                   """;
 
         File.WriteAllText(Path.Combine(_root, "spec.json"), withSkipped);
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
         File.Exists(Path.Combine(_root, "fixtures", "createProduct.json")).ShouldBeTrue();
         File.Exists(Path.Combine(_root, "fixtures", "upload.json")).ShouldBeFalse(
-            "multipart operations are skipped by the plan, so they get no fixture");
+        "multipart operations are skipped by the plan, so they get no fixture");
     }
 
     [TestMethod]
     public async Task NeverWritesOutsideFixtures()
     {
         var before = Directory.GetFiles(_root, "*", SearchOption.TopDirectoryOnly)
-                              .ToDictionary(f => f, File.GetLastWriteTimeUtc);
+            .ToDictionary(f => f, File.GetLastWriteTimeUtc);
 
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
@@ -160,31 +160,31 @@ public class FixturesRepairCommandTests
         // example or default both compose to an empty body/$parameters — repair must not turn
         // that into a junk fixture file just because the test plan covers the operation.
         const string withNoFixtureNeeded = """
-        {
-          "openapi":"3.0.3","info":{"title":"T","version":"1"},
-          "paths":{
-            "/api/products":{"post":{"operationId":"createProduct",
-              "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-                "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
-              "responses":{"201":{"description":"ok"}}}},
-            "/api/health":{"get":{"operationId":"getHealth",
-              "responses":{"200":{"description":"ok"}}}},
-            "/api/items":{"get":{"operationId":"listItems",
-              "parameters":[{"name":"sort","in":"query","required":false,
-                "schema":{"type":"string"}}],
-              "responses":{"200":{"description":"ok"}}}}}
-        }
-        """;
+                                           {
+                                             "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                             "paths":{
+                                               "/api/products":{"post":{"operationId":"createProduct",
+                                                 "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                                                   "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
+                                                 "responses":{"201":{"description":"ok"}}}},
+                                               "/api/health":{"get":{"operationId":"getHealth",
+                                                 "responses":{"200":{"description":"ok"}}}},
+                                               "/api/items":{"get":{"operationId":"listItems",
+                                                 "parameters":[{"name":"sort","in":"query","required":false,
+                                                   "schema":{"type":"string"}}],
+                                                 "responses":{"200":{"description":"ok"}}}}}
+                                           }
+                                           """;
 
         File.WriteAllText(Path.Combine(_root, "spec.json"), withNoFixtureNeeded);
         (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         File.Exists(Path.Combine(_root, "fixtures", "createProduct.json")).ShouldBeTrue(
-            "this operation needs a fixture and must still get one");
+        "this operation needs a fixture and must still get one");
         File.Exists(Path.Combine(_root, "fixtures", "getHealth.json")).ShouldBeFalse(
-            "a parameterless GET needs no fixture — NeedsFixture is false");
+        "a parameterless GET needs no fixture — NeedsFixture is false");
         File.Exists(Path.Combine(_root, "fixtures", "listItems.json")).ShouldBeFalse(
-            "an all-optional query parameter with no example or default needs no fixture");
+        "an all-optional query parameter with no example or default needs no fixture");
     }
 
     [TestMethod]
@@ -194,19 +194,19 @@ public class FixturesRepairCommandTests
         // corrupted fixture first. One bad committed fixture must not stop repair from adding a
         // sentinel to an unrelated operation that legitimately needs one.
         const string twoOperations = """
-        {
-          "openapi":"3.0.3","info":{"title":"T","version":"1"},
-          "paths":{
-            "/api/products":{"post":{"operationId":"createProduct",
-              "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-                "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
-              "responses":{"201":{"description":"ok"}}}},
-            "/api/widgets":{"post":{"operationId":"createWidget",
-              "requestBody":{"content":{"application/json":{"schema":{"type":"object",
-                "required":["name"],"properties":{"name":{"type":"string"}}}}}},
-              "responses":{"201":{"description":"ok"}}}}}
-        }
-        """;
+                                     {
+                                       "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                       "paths":{
+                                         "/api/products":{"post":{"operationId":"createProduct",
+                                           "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                                             "required":["sku"],"properties":{"sku":{"type":"string"}}}}}},
+                                           "responses":{"201":{"description":"ok"}}}},
+                                         "/api/widgets":{"post":{"operationId":"createWidget",
+                                           "requestBody":{"content":{"application/json":{"schema":{"type":"object",
+                                             "required":["name"],"properties":{"name":{"type":"string"}}}}}},
+                                           "responses":{"201":{"description":"ok"}}}}}
+                                     }
+                                     """;
 
         File.WriteAllText(Path.Combine(_root, "spec.json"), twoOperations);
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
@@ -216,14 +216,14 @@ public class FixturesRepairCommandTests
         File.WriteAllText(productPath, "{ not valid json");
 
         File.WriteAllText(Path.Combine(_root, "spec.json"), twoOperations.Replace(
-            """"required":["name"],"properties":{"name":{"type":"string"}}"""",
-            """"required":["name","color"],"properties":{"name":{"type":"string"},"color":{"type":"string"}}""""));
+        """"required":["name"],"properties":{"name":{"type":"string"}}"""",
+        """"required":["name","color"],"properties":{"name":{"type":"string"},"color":{"type":"string"}}""""));
 
         var report = new StringWriter();
         var exitCode = await FixturesRepairCommand.RunAsync(_root, CancellationToken.None, report);
 
         exitCode.ShouldBe(ExitCode.ToolError,
-            "a malformed committed fixture is a real tool error and must be reflected in the exit code");
+        "a malformed committed fixture is a real tool error and must be reflected in the exit code");
         FixtureDocument.Parse(File.ReadAllText(widgetPath)).Body!["color"]!.GetValue<string>()
             .ShouldBe("TODO:color", "the unrelated, legitimate repair must still be applied");
         // The report should say which operation's fixture could not be read.
@@ -246,7 +246,7 @@ public class FixturesRepairCommandTests
         try
         {
             return (await FixturesRepairCommand.RunAsync(projectRoot ?? _root, CancellationToken.None),
-                    capturedError.ToString());
+                capturedError.ToString());
         }
         finally
         {
@@ -262,7 +262,7 @@ public class FixturesRepairCommandTests
 
         exitCode.ShouldBe(ExitCode.ToolError);
         Directory.Exists(Path.Combine(_root, "fixtures")).ShouldBeFalse(
-            "§5 reserves exit 2 for a tool error where nothing was written");
+        "§5 reserves exit 2 for a tool error where nothing was written");
         error.ShouldNotContain("unexpected failure");
         return error;
     }
@@ -278,7 +278,7 @@ public class FixturesRepairCommandTests
     public async Task ExplainsAMissingProjectSectionInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync(
-            """{ "schemaVersion": 1, "spec": { "source": "spec.json" } }""");
+        """{ "schemaVersion": 1, "spec": { "source": "spec.json" } }""");
 
         error.ShouldContain("project", Case.Sensitive);
         error.ShouldNotContain("KeyNotFoundException");
@@ -288,9 +288,9 @@ public class FixturesRepairCommandTests
     public async Task ExplainsASpecSourceThatIsNotAStringInsteadOfReportingAnUnexpectedFailure()
     {
         var error = await ExpectExplainedConfigErrorAsync("""
-        { "schemaVersion": 1, "spec": { "source": 42 },
-          "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
-        """);
+                                                          { "schemaVersion": 1, "spec": { "source": 42 },
+                                                            "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
+                                                          """);
 
         error.ShouldContain("spec.source", Case.Sensitive);
         error.ShouldNotContain("InvalidOperationException");
@@ -307,10 +307,10 @@ public class FixturesRepairCommandTests
     public async Task RefusesAnInvalidRootNamespaceEvenThoughItNeverRendersOne()
     {
         var error = await ExpectExplainedConfigErrorAsync("""
-        { "schemaVersion": 1, "spec": { "source": "spec.json" },
-          "project": { "rootNamespace": "T.ApiTests; class Injected { } //",
-                       "testBaseClass": "T.ApiTests.TTestBase" } }
-        """);
+                                                          { "schemaVersion": 1, "spec": { "source": "spec.json" },
+                                                            "project": { "rootNamespace": "T.ApiTests; class Injected { } //",
+                                                                         "testBaseClass": "T.ApiTests.TTestBase" } }
+                                                          """);
 
         error.ShouldContain("project.rootNamespace", Case.Sensitive);
     }
@@ -319,9 +319,9 @@ public class FixturesRepairCommandTests
     public async Task RefusesASchemaVersionThisCliDoesNotImplement()
     {
         var error = await ExpectExplainedConfigErrorAsync("""
-        { "schemaVersion": 2, "spec": { "source": "spec.json" },
-          "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
-        """);
+                                                          { "schemaVersion": 2, "spec": { "source": "spec.json" },
+                                                            "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
+                                                          """);
 
         error.ShouldContain("schemaVersion", Case.Sensitive);
         error.ShouldNotContain("upgrade");
@@ -354,9 +354,9 @@ public class FixturesRepairCommandTests
 
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldNotContain("unexpected failure",
-            customMessage: "an argument the adopter got wrong is refused, not reported as a crash");
+        customMessage: "an argument the adopter got wrong is refused, not reported as a crash");
         error.ShouldStartWith("--project", Case.Sensitive,
-            customMessage: "a refusal names the flag the adopter typed, not the parameter it bound to");
+        customMessage: "a refusal names the flag the adopter typed, not the parameter it bound to");
         error.ShouldContain("is empty");
         error.ShouldContain("for example");
     }
@@ -370,9 +370,10 @@ public class FixturesRepairCommandTests
     /// there.
     /// </summary>
     private void UseUrlSpecSource() => File.WriteAllText(Path.Combine(_root, "intest.json"), """
-    { "schemaVersion": 1, "spec": { "source": "https://orders-staging.example.com/swagger/v1/swagger.json" },
-      "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase" } }
-    """);
+                                                                                             { "schemaVersion": 1, "spec": { "source": "https://orders-staging.example.com/swagger/v1/swagger.json" },
+                                                                                               "project": { "rootNamespace": "T.ApiTests", "testBaseClass": "T.ApiTests.TTestBase",
+                                                                                                            "framework": "mstest" } }
+                                                                                             """);
 
     /// <summary>
     /// [no-refetch]: repair reads the committed snapshot `generate` took, and opens no socket to
@@ -394,7 +395,7 @@ public class FixturesRepairCommandTests
         (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(ExitCode.Ok);
 
         File.Exists(FixturePath).ShouldBeTrue(
-            "the snapshot is where a URL-sourced project's spec lives");
+        "the snapshot is where a URL-sourced project's spec lives");
     }
 
     /// <summary>
@@ -415,10 +416,10 @@ public class FixturesRepairCommandTests
 
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldContain("intest generate",
-            customMessage: "the remedy is the command that takes the snapshot");
+        customMessage: "the remedy is the command that takes the snapshot");
         error.ShouldNotContain("Spec file not found",
-            customMessage: "an accurate sentence about the wrong thing sends the adopter hunting " +
-                           "for a file that was never theirs to create");
+        customMessage: "an accurate sentence about the wrong thing sends the adopter hunting " +
+                       "for a file that was never theirs to create");
         error.ShouldNotContain("unexpected failure");
     }
 }
