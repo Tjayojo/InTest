@@ -287,6 +287,28 @@ public static class SpecFetcher
                 "Check that the URL names the OpenAPI document directly — a redirect through a " +
                 "login page or a load balancer can send a Location header no client can follow.", ex);
         }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            // A second escaping shape for the same defect the UriFormatException clause above
+            // exists for — a malformed redirect Location that SocketsHttpHandler cannot
+            // resolve. `Location: file://server/share/x.json` parses far enough to accept
+            // "server" as a host, but resolving the resulting URI's Port then fails with
+            // ArgumentOutOfRangeException ("port ('-1') must be >= '0'") rather than the
+            // FormatException family the clause above catches. Same class, same consequence:
+            // uncaught, this reaches Program's crash floor as "intest: unexpected failure:
+            // ArgumentOutOfRangeException", blaming the tool for a remote server's bad header.
+            // Measured directly against a real socket sending that exact Location value —
+            // see SpecFetcherTests.ReportsAMalformedLocationHeaderRatherThanCrashing.
+            //
+            // Caught as ArgumentOutOfRangeException specifically, not ArgumentException, for
+            // the same reason the clause above catches UriFormatException rather than
+            // FormatException: a wider catch here would also swallow an out-of-range argument
+            // raised by a bug in this method's own future code.
+            throw new SpecLoadException(
+                $"spec.source '{url}' redirected to a location InTest could not parse: {ex.Message} " +
+                "Check that the URL names the OpenAPI document directly — a redirect through a " +
+                "login page or a load balancer can send a Location header no client can follow.", ex);
+        }
         catch (IOException ex)
         {
             // A connection dropped part-way through the body, which is NOT an
