@@ -75,17 +75,19 @@ jobs:
       # [both-platforms] reasoning (docs/superpowers/plans/2026-08-22-intest-ci.md) already applied
       # to the three test jobs.
       #
-      # scripts/ci/pack-and-verify.ps1 does the real work: packs both projects at whatever version
-      # this checkout's git history resolves (Task 3 Step 1/2), unzips both .nuspec files rather
+      # scripts/ci/pack-and-verify.ps1 does the real work: packs all three projects (InTest.Cli,
+      # InTest.Runtime, InTest.Runtime.MSTest -- the runtime-framework split) at whatever version
+      # this checkout's git history resolves (Task 3 Step 1/2), unzips every .nuspec file rather
       # than trusting `dotnet pack`'s exit code, and confirms a scaffold built from the just-packed
-      # InTest.Cli.dll references the exact InTest.Runtime version that was actually packed (Task 3
-      # Step 3 -- [scaffold-reads-itself] end to end against a packed build). See that script's own
+      # InTest.Cli.dll references the exact InTest.Runtime.MSTest version that was actually packed
+      # (Task 3 Step 3 -- [scaffold-reads-itself] end to end against a packed build), which in turn
+      # depends on the exact InTest.Runtime version packed alongside it. See that script's own
       # header for the full design.
       #
       # -ExpectedTag is populated only when this run was triggered by a tag push (Task 3 Step 4);
       # left empty for an ordinary push to main, where [tag-is-the-release] makes no exact-version
       # promise to check. github.ref_type is 'tag' for a tag push and 'branch' for a branch push.
-      - name: Pack and verify InTest.Cli / InTest.Runtime
+      - name: Pack and verify InTest.Cli / InTest.Runtime / InTest.Runtime.MSTest
         run: >-
           ./scripts/ci/pack-and-verify.ps1
           -RepoRoot ${{ github.workspace }}

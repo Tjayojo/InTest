@@ -203,7 +203,7 @@ jobs:
       # conditional use of it: every trigger of *this* workflow is a tag push by construction (see
       # the `on:` block above), so [tag-is-the-release]'s "no prerelease height on a tagged build"
       # check always applies.
-      - name: Pack and verify InTest.Cli / InTest.Runtime
+      - name: Pack and verify InTest.Cli / InTest.Runtime / InTest.Runtime.MSTest
         run: >-
           ./scripts/ci/pack-and-verify.ps1
           -RepoRoot ${{ github.workspace }}

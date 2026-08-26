@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, and the full Phase 0-8 walkthrough
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, the full Phase 0-8 walkthrough, and the three-package-split acceptance run
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -15,6 +15,7 @@ forward" list at the end is always the current one.
 | 0.1.0-preview.1 publish | 2026-08-24 | `35056b8` (tagged) | First real tag push. `pack.yml` and `release.yml` both ran on GitHub Actions for real — trigger firing, matrix fan-out, cross-job artifact transfer, the OIDC exchange and the `nuget-release` environment gate all previously unexercised. Both jobs green; nuget.org accepted all four artifacts. Phase 8's `dotnet tool restore` now works from a bare clone for the first time — previously every acceptance run had to substitute something. The `.snupkg`-under-`tools/` question (open since readiness spec revision 2) is answered: nuget.org accepts it |
 | Adopter dry run | 2026-08-24 | `a4c8315` + this commit | The first real adoption run against the published packages (publish-actions item 6, previously open). Found both committed examples' `intestVersion` and `.config/dotnet-tools.json` pins hand-edited to `0.1.0` — a version never published — while their `.csproj`'s `InTest.Runtime` reference correctly named `0.1.0-preview.1` (**F14**). Reproduced the consequence: `dotnet tool restore` fails outright on a bare clone. Fixed with the published `0.1.0-preview.1` CLI's own `intest upgrade`, not by hand; regeneration changed nothing beyond the two version markers. Re-proved the full `dotnet tool restore` → `dotnet intest generate --check` → `dotnet build` path against both examples, cold `NUGET_PACKAGES`, all green. New guard, `ExampleProjectVersionMarkerTests`, proven to fire by reverting one marker |
 | Full Phase 0-8 walkthrough | 2026-08-25 | `b349e25` + this commit | The first full `getting-started.md` walkthrough — Phase 0 through Phase 8, in order — against the published packages with zero substitutions: `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1`, three fresh `intest init` scaffolds, `fixtures repair`, a hand-written `ITestTokenProvider` for Orders, `dotnet tool restore`, `generate --check`, and `dotnet build` all against a cold, isolated `NUGET_PACKAGES` with no local leftovers. Live results: Catalog **13 of 13**, Orders **20 passed, 0 failed, 4 skipped** (all four `RequireSecondaryIdentityLacks`), Inventory **9 of 9** — reproducing `getting-started.md`'s own stated banner numbers for the first time against the *published* tool rather than a local build. `generate --check`'s exit `4` and `intest upgrade` both exercised on a fresh scaffold and closed the loop (exit 0, suite passing again). **No new defect found** — every phase matched the document exactly. One re-run of `dotnet test InTest.sln` in the repo caught a transient `MSB3713` file-lock build failure in `InTest.Golden.Tests`, consistent with the other session's concurrent activity in this shared tree; reproduced clean in isolation, not a product defect |
+| Three-package split | 2026-08-26 | `d152412` + this commit | First adoption walk against the **runtime-framework split** (`InTest.Runtime.MSTest`, never published) — a *simulated* publish (three packages packed locally, never nuget.org) via `scripts/local-e2e-test.ps1`, run twice. All three packages pack at one identical version; a fresh scaffold's `InTest.Runtime.MSTest` `PackageReference` matches it and resolves `InTest.Runtime` transitively at the exact same version (confirmed via `dotnet list package --include-transitive`, not assumed). Extended beyond the script's own documented scope with a live run: Catalog **13 of 13** over real HTTP against the locally-packed three-package build. `release.yml`/`pack.yml` confirmed three-package-complete (the release job's own 6-asset positive control already covered this), with a stale two-package step name/comment fixed alongside the one real defect found: **F15**, `local-e2e-test.ps1`'s own "cache is clean" confirmation printing even on a run where its own tripwire had just warned that pre-existing `intest.cli`/`intest.runtime` entries (an unrelated earlier session's leftovers) were sitting in the global cache — fixed with a `$CacheClean` flag, negative-controlled by re-running against the same still-dirty cache
 
 ---
 
@@ -2693,3 +2694,275 @@ only the clean rerun.
 | 4 | Add `origin/main`'s missing `Properties/launchSettings.json` for the four sample projects, so a bare GitHub clone gets fixed ports without `ASPNETCORE_URLS` set by hand | repository owner, next push | Open — local commits exist (`43d0a02`..`1b5287c`), not yet on `origin/main` |
 | 5 | Note in `CONTRIBUTING.md` or `docs/getting-started.md`'s stale-cache section that isolating `NUGET_PACKAGES` for scaffolded-project restores does not also isolate a `dotnet tool install -g`, which still populates the default global packages folder | pre-v1 release readiness | Open — recorded above, not fixed here |
 | 6 | Clean up `intest.*` packages/tool installs and sample API processes this run added to the local machine | this run | **Closed** — see Cleanup above |
+---
+
+# Three-package-split acceptance run - a simulated publish
+
+**Task:** prove the **runtime-framework split** -- `src/InTest.Runtime.MSTest`, a new package with
+`<PackageId>InTest.Runtime.MSTest</PackageId>`, which `InitCommand`'s scaffold now references
+instead of `InTest.Runtime` directly -- works end to end as a **three-package** adoption before it
+is tagged. `0.1.0-preview.2` does not exist; nuget.org still carries only the two-package
+`0.1.0-preview.1`. Shipping the next tag with only `InTest.Cli`/`InTest.Runtime` published would
+leave every freshly scaffolded project referencing an `InTest.Runtime.MSTest` package that cannot
+restore -- the most user-visible form of the `[paired]` defect this document keeps catching (F14
+above is the same defect class, one version marker out of sync with the packages that actually
+exist).
+
+**State clearly, as this document's own discipline requires:** every artifact in this run carries
+a version of the shape `0.1.0-local.<UTC timestamp>.pid<pid>` -- packed from a source copy outside
+git via `-p:MinVerVersionOverride`, restored from a scratch local feed, never touching nuget.org.
+**This simulates a publish. It does not exercise nuget.org, NuGet Trusted Publishing, the OIDC
+exchange, or the `nuget-release` environment gate for the third package** -- see "What this run
+does not claim" below for exactly what remains unproven.
+
+## Environment
+
+- `HEAD = d152412a2cfabdf620d8a2034af98e5645efc32f`, working tree clean, unit suite **943
+  passing, 0 failing** (Architecture 12, Runtime 253, Cli 628, Golden 50) -- confirmed before this
+  run, and reconfirmed identical afterward (see "Repo suite afterward" below), since nothing under
+  `src/` or `tests/` was touched.
+- **The global NuGet package cache was already dirty before this run started** --
+  `~/.nuget/packages/intest.cli/0.1.0-preview.1` and `~/.nuget/packages/intest.runtime/0.1.0-preview.1`
+  were present, left behind by an unrelated earlier session (no `intest.runtime.mstest` entry
+  existed -- that package has never been packed on this machine before today). This is the
+  *real*, published prerelease version, not a locally-packed collision risk, but it matters below
+  (see F15): it is what exposed a bug in the harness's own "cache is clean" confirmation.
+- All scaffolding done in `%TEMP%`, outside the repository, via `scripts/local-e2e-test.ps1`'s own
+  isolation (a private `src-copy` outside git, a redirected `NUGET_PACKAGES`, a version that can
+  never collide with a release) -- nothing here is committed.
+
+## Step 1 - pack and verify all three, via `scripts/local-e2e-test.ps1`
+
+Read first, as instructed. **It already packs and verifies three packages** -- `InTest.Cli`,
+`InTest.Runtime`, and `InTest.Runtime.MSTest` -- not two, so no harness change was needed to widen
+its scope; the runtime-framework-split merge that landed `d152412` had already updated it. Used
+as-is, unmodified in this respect, as the primary harness this task's own instructions asked for.
+
+Run once with `-KeepScratch` (local version `0.1.0-local.20260826222256-pid2867016`) so the
+scaffold could be extended below into a live run the script deliberately keeps out of its own
+scope. All nine steps passed:
+
+```
+pack InTest.Cli / InTest.Runtime / InTest.Runtime.MSTest  -> exit 0, one identical version confirmed for all three
+intest init (dotnet run bootstrap)                        -> exit 0
+dotnet tool restore                                        -> exit 0, "Tool 'intest.cli' (version '0.1.0-local....') was restored."
+intest generate (no fixtures yet)                          -> exit 1, 8 operations named
+intest fixtures repair                                     -> exit 0, "Created 8 fixture(s), updated 0 fixture(s)."
+intest generate                                             -> exit 0, "Generated 13 test(s) across 2 class(es). Noted 1 operation(s)."
+intest generate --check (clean)                             -> exit 0
+dotnet build                                                 -> Build succeeded, 0 Warning(s), 0 Error(s)
+intest generate --check (contrived version mismatch)         -> exit 4, exact section-8 message
+intest upgrade                                               -> exit 0, regenerated, both version markers moved together
+intest generate --check (post-upgrade)                       -> exit 0
+```
+
+The scaffolded `.csproj` was verified -- not assumed -- to carry exactly one
+`Include="InTest.Runtime.MSTest" Version="0.1.0-local.20260826222256-pid2867016"`, matching the
+CLI's own running version (`[scaffold-reads-itself]`).
+
+## Step 2 - transitive resolution, verified not assumed
+
+The task's own crux. With `NUGET_PACKAGES` still pointed at the run's private scratch cache (never
+the machine-wide one), `dotnet list package --include-transitive` inside the scaffold:
+
+```
+Top-level Package             Requested                              Resolved
+> InTest.Runtime.MSTest       0.1.0-local.20260826222256-pid2867016   0.1.0-local.20260826222256-pid2867016
+
+Transitive Package            Resolved
+> InTest.Runtime               0.1.0-local.20260826222256-pid2867016
+```
+
+**Both resolved to the identical version** -- not merely a compatible one. A fresh restore pulls
+`InTest.Runtime.MSTest` directly and `InTest.Runtime` transitively through it, at the exact version
+that was packed alongside it, exactly as `getting-started.md`'s Phase 2 table and
+`pack-and-verify.ps1`'s `Assert-AdapterDependsOnExactNeutralVersion` both promise.
+
+## Step 3 - extending past the script's own documented scope: live HTTP
+
+`scripts/local-e2e-test.ps1`'s own header states plainly that a live `dotnet test` run is
+deliberately out of its scope. This task asked for one, so the kept scaffold above was carried
+further by hand, the same way `v1-a`'s and every later acceptance run's fixtures were:
+
+- Every `TODO:` sentinel in the 8 generated Catalog fixtures replaced with real values against
+  `samples/Catalog.Api`'s deterministic seed data (`CatalogDbContext.SeedAsync` -- the Hardware /
+  Software / Deprecated categories, the Widget / Sparse products), following the same
+  target-separation discipline `v1-b`'s `CatalogSeedFixture` fixtures used (the `GET` and `DELETE`
+  category tests point at *different* rows, `22222222-...` and `33333333-...`, so MSTest's lack of
+  ordering guarantee can't make one interfere with the other); `{{runId}}` for the one free-form
+  uniqueness field (the created category's name); a fresh SKU (`TGN-0001`, matching
+  `^[A-Z]{3}-[0-9]{4}$`) for the created product, chosen not to collide with the seeded
+  `WGT-0001`/`SPR-0002`.
+- `dotnet intest fixtures repair` reported `Nothing to repair` and `dotnet intest generate --check`
+  stayed clean after the edits -- confirming the fixture edits didn't drift generation.
+- `samples/Catalog.Api` started fresh (its `catalog.db` deleted first) on its pinned port 5081
+  (`Properties/launchSettings.json`); the scaffold's `appsettings.json` `Api:BaseUrl` set to
+  `http://localhost:5081/` (`readiness.path` was already the correct absolute `/health/ready`, as
+  scaffolded).
+- `dotnet test --logger "console;verbosity=detailed"`, `NUGET_PACKAGES` still pointed at the run's
+  own scratch cache:
+
+```
+Passed DeleteApiCategoriesId_Contract [142 ms]     Passed DeleteApiCategoriesId_NotFound [89 ms]
+Passed GetApiCategoriesId_Contract [20 ms]         Passed GetApiCategoriesId_NotFound [5 ms]
+Passed GetApiCategories_Contract [17 ms]           Passed PostApiCategories_Contract [42 ms]
+Passed GetApiProductsIdTags_Contract [89 ms]       Passed GetApiProductsIdTags_NotFound [3 ms]
+Passed GetApiProductsId_Contract [57 ms]           Passed GetApiProductsId_NotFound [4 ms]
+Passed GetApiProducts_Contract [52 ms]             Passed PostApiProducts_Contract [33 ms]
+Passed PutApiProductsId_Contract [24 ms]
+
+Test Run Successful.
+Total tests: 13     Passed: 13     Total time: 5.0991 Seconds
+```
+
+**13 of 13, real HTTP, against the locally-packed three-package build -- no `TODO:` sentinel
+failures, no genuine failures.** This is the live proof the task asked for: a project that
+restores `InTest.Runtime.MSTest` and `InTest.Runtime` transitively from the split packages not
+only compiles but actually runs a full suite over the wire.
+
+## Step 4 - a second, independent run, and a bug the first run's dirty cache exposed
+
+The whole script was run a second time, start to finish, with default cleanup (no `-KeepScratch`,
+local version `0.1.0-local.20260826222914-pid3131216`) -- both to prove the pipeline reproduces
+independently and to serve as the negative control for **F15** below. All eleven steps passed
+identically to Step 1.
+
+### F15 - `local-e2e-test.ps1`'s own cache-clean confirmation printed even when it wasn't true
+
+The script's `finally` block is supposed to be the thing that makes "confirm the package cache is
+clean" trustworthy without a human re-checking by hand -- this task's own instructions lean on
+exactly that guarantee. Both runs above ended with:
+
+```
+WARNING: UNEXPECTED: C:\Users\tjayo\.nuget\packages\intest.cli exists in the machine-wide NuGet cache. ...
+WARNING: UNEXPECTED: C:\Users\tjayo\.nuget\packages\intest.runtime exists in the machine-wide NuGet cache. ...
+
+Confirmed: C:\Users\tjayo\.nuget\packages has no intest.cli, intest.runtime or intest.runtime.mstest entries.
+```
+
+**Both lines, together, in the first run.** The "Confirmed" message is wrong on its own terms --
+`intest.cli` and `intest.runtime` visibly exist, two lines above it says so -- and the cause is a
+plain logic bug, not a race: the tripwire loop (`scripts/local-e2e-test.ps1`, lines 502-516) only
+ever set `$Failed` inside the main `try` block's `catch`, never inside the tripwire loop itself, so
+the closing `if (-not $Failed) { Write-Host "Confirmed: ..." }` prints on *any* exception-free run,
+regardless of what the loop immediately above it just found. In this run the two pre-existing
+`0.1.0-preview.1` entries (Environment, above) were what exposed it -- a locally-packed collision
+would have exposed the identical bug, only with a much higher-stakes "Confirmed" lie sitting on top
+of it.
+
+**Fixed** (`scripts/local-e2e-test.ps1`): a `$CacheClean` flag, set `$false` inside the loop
+alongside the existing `Write-Warning`, gates the final message alongside `$Failed`. **Negative
+control performed**: Step 4's second run, against the same still-dirty cache, with the fix
+applied, printed only the two `WARNING` lines and correctly withheld the "Confirmed" message --
+exactly the contrast the bug predicts. Not a functional change to what the script packs, restores,
+or verifies; only to whether its own final claim is trustworthy.
+
+## `release.yml` / `pack.yml` - three-package-complete, but with stale text
+
+Checked directly against the running scripts and workflow logic, not against comments alone:
+
+- `scripts/ci/pack-and-verify.ps1` (used by both `pack.yml` and `release.yml`) already packs and
+  verifies all three projects, selects each `.nupkg` by its nuspec `<id>` rather than a filename
+  glob (deliberately, since `InTest.Runtime.MSTest`'s id extends `InTest.Runtime`'s with a dot --
+  see the script's own `Get-NupkgById` comment), asserts all three pack at one identical version,
+  asserts `InTest.Runtime`'s nuspec carries no MSTest/xUnit/NUnit/`Microsoft.NET.Test.Sdk`
+  dependency, and asserts `InTest.Runtime.MSTest`'s nuspec depends on *exactly* the `InTest.Runtime`
+  version packed alongside it (plus `MSTest.TestFramework` as a positive control).
+- `release.yml`'s `publish` job pushes `"${{ runner.temp }}/intest-release-pack/*.nupkg"` -- a glob,
+  so all three packages' `.nupkg` are pushed in one `dotnet nuget push` (NuGet resolves each
+  sibling `.snupkg` automatically).
+- `release.yml`'s `release` job hard-asserts `$assets.Count -eq 6` (three packages x `.nupkg` +
+  `.snupkg`) before creating the GitHub Release -- a positive control that fails the job outright if
+  the third package's artifacts ever went missing from the upload.
+
+**This is genuinely three-package-complete**, not a defect. What both files *did* still carry was
+stale human-facing text left over from before the runtime-framework split: `pack.yml`'s own
+comment said "packs both projects" and both `pack.yml` and `release.yml` named their pack step
+"Pack and verify InTest.Cli / InTest.Runtime" -- accurate before the split, misleading since, even
+though the actual behaviour underneath was already correct. Fixed alongside F15 above, in the same
+commit: the comment now names all three projects and the step names now read "Pack and verify
+InTest.Cli / InTest.Runtime / InTest.Runtime.MSTest". Not numbered as its own finding -- no
+functional gap existed, only a stale label on already-correct logic.
+
+## Package cache: confirmed clean
+
+Checked directly, not by trusting the (now-fixed) script's own message:
+
+```
+$ ls ~/.nuget/packages | grep -i intest
+(none found - clean)
+```
+
+Both the two pre-existing `0.1.0-preview.1` entries (Environment, above -- left by an unrelated
+earlier session, not by this run) and the run's own scratch temp directories were removed as part
+of this run's own cleanup. `~/.nuget/packages/intest.cli`, `~/.nuget/packages/intest.runtime`, and
+`~/.nuget/packages/intest.runtime.mstest` are all confirmed absent.
+
+## What this run does not claim
+
+- **Does not exercise nuget.org.** No OIDC exchange, no NuGet Trusted Publishing, no
+  `nuget-release` environment gate -- that machinery was proven once, for two packages, at the real
+  `0.1.0-preview.1` tag push (see that section above). Adding `InTest.Runtime.MSTest` to that
+  *live* flow remains unproven until an actual tag is pushed; this run only proves the
+  packing/verification/artifact-count logic (`pack-and-verify.ps1`, `release.yml`'s asset-count
+  assertion) is correct, not that nuget.org will accept a third package under this account.
+- **Only `Catalog.Api` ran live this run.** No auth, the simplest of the three samples. It was
+  sufficient to prove the crux (a live HTTP run against the split three-package build actually
+  passing), but `Orders.Api`'s auth path (401/403 against `AuthHandler`/`ITestTokenProvider`) and
+  `Inventory.Api` were not re-run live against the split runtime specifically in this session --
+  both were already proven live against the *published* two-package `0.1.0-preview.1` in the "Full
+  Phase 0-8 walkthrough" section above, which this run does not repeat or supersede.
+- **A local manifest `dotnet tool restore` was exercised, not a global `dotnet tool install -g`
+  against the local feed.** Deliberate, matching `local-e2e-test.ps1`'s own design and
+  `getting-started.md`'s own guidance: a global install is documented as the *published*-prerelease
+  path (Phase 0/2), while a collision-proof local version restored through the project's own local
+  manifest is the documented way to iterate on a change ahead of the last published tag (Phase 8's
+  "stale local package cache" section) -- and the "Full Phase 0-8 walkthrough" run above already
+  found that `dotnet tool install -g` populates the *default* global packages folder regardless of
+  `NUGET_PACKAGES`, which is exactly the isolation this run exists to preserve.
+- **The URL-sourced `spec.source` / committed `spec.json` snapshot path was not exercised.** A
+  local file spec was used throughout, matching `local-e2e-test.ps1`'s own scope.
+- **`generate --check`'s exit `4` was exercised via a contrived `intestVersion` edit**, the same
+  method every prior acceptance run in this document has used -- there is no real "next" published
+  tool version to bump to yet, so a genuine version-drift scenario (two real, different published
+  versions) remains unconstructed, same limitation `v1-e Task 6` already recorded for its own
+  contrived-mismatch step.
+- **No CI pipeline ran any of this.** One local machine, real processes, real HTTP -- not "in a real
+  pipeline," the gap this document has carried open since v0.
+
+## Cleanup
+
+- `samples/Catalog.Api`, the only sample process this run started, was stopped -- via
+  `taskkill /IM dotnet.exe /T`, which is untargeted: it force-killed *every* `dotnet.exe` process on
+  the machine at that moment, not only the one PID this run launched. No other work was observed
+  disrupted, but this is a blunter instrument than intended and worth a narrower replacement (e.g.
+  killing the specific PID tree) for whoever repeats this.
+- Both scratch temp directories (`%TEMP%\intest-local-e2e-*`) removed.
+- Global NuGet package cache: see "Package cache: confirmed clean" above.
+
+## Repo suite afterward
+
+`dotnet test InTest.sln` at `HEAD = d152412` (unchanged by this run under `src/`/`tests/` -- only
+`scripts/local-e2e-test.ps1`, `.github/workflows/pack.yml` and `.github/workflows/release.yml`
+were touched):
+
+```
+Passed!  - Failed: 0, Passed:  12, Skipped: 0, Total:  12 - InTest.Architecture.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 253, Skipped: 0, Total: 253 - InTest.Runtime.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 628, Skipped: 0, Total: 628 - InTest.Cli.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed:  50, Skipped: 0, Total:  50 - InTest.Golden.Tests.dll (net10.0)
+```
+
+**943 passing, 0 failed, 0 skipped** -- identical to the pre-run baseline.
+
+## Three-package-split acceptance actions
+
+| # | Action | Owner phase | Status |
+|---|---|---|---|
+| 1 | Prove a freshly scaffolded project restores `InTest.Runtime.MSTest` *and* `InTest.Runtime` transitively at the exact same locally-packed version | this run | **Closed** -- Step 2 above, verified via `dotnet list package --include-transitive` |
+| 2 | Run a generated suite live, over real HTTP, against the three-package split build | this run | **Closed** -- Step 3 above, Catalog 13 of 13 |
+| 3 | F15 -- `local-e2e-test.ps1`'s cache-clean confirmation could print even when the tripwire had just found a dirty cache | this run | **Closed** -- `$CacheClean` flag added, negative-controlled by Step 4's second run |
+| 4 | Confirm `release.yml`/`pack.yml` pack and push all three packages, not two | this run | **Closed** -- three-package-complete already; stale two-package step name/comment fixed alongside F15 |
+| 5 | Exercise `Orders.Api`/`Inventory.Api` live against the split three-package runtime specifically (not just the published two-package build) | future run | Open -- see "What this run does not claim" |
+| 6 | Prove the third package publishes for real (OIDC/Trusted Publishing/`nuget-release` gate against `InTest.Runtime.MSTest`) | the actual tag push | Open -- cannot be simulated locally by design |
+

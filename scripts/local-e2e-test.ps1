@@ -502,15 +502,23 @@ finally {
     # ---- Belt-and-suspenders tripwire, not a cleanup step: NUGET_PACKAGES redirection should
     # make this structurally impossible regardless of anything above, so if either package ever
     # shows up here, that is itself a finding worth shouting about rather than silently ignoring.
+    # $CacheClean tracks whether the loop below found anything, independently of $Failed (which
+    # only reflects whether the try block above threw) -- confirmed by direct experiment during
+    # the three-package acceptance run (docs/v0-acceptance.md, F15) that without this variable the
+    # "Confirmed clean" message below prints unconditionally on a successful run even when this
+    # very loop just warned that a pre-existing entry (left by an unrelated earlier session) was
+    # found -- a false confirmation of the one guarantee this script exists to make.
     $globalPackages = Join-Path $HOME '.nuget' 'packages'
+    $CacheClean = $true
     foreach ($pkg in 'intest.cli', 'intest.runtime', 'intest.runtime.mstest') {
         $found = Join-Path $globalPackages $pkg
         if (Test-Path $found) {
+            $CacheClean = $false
             Write-Warning "UNEXPECTED: $found exists in the machine-wide NuGet cache. This script's NUGET_PACKAGES redirection should have made this impossible -- investigate before trusting this machine's cache again."
         }
     }
 
-    if (-not $Failed) {
+    if (-not $Failed -and $CacheClean) {
         Write-Host ''
         Write-Host "Confirmed: $globalPackages has no intest.cli, intest.runtime or intest.runtime.mstest entries." -ForegroundColor Green
     }
