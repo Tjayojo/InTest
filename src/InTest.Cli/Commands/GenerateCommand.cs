@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using InTest.Cli.Clients;
 using InTest.Cli.Configuration;
 using InTest.Cli.Coverage;
 using InTest.Cli.Fixtures;
@@ -101,7 +102,7 @@ public static class GenerateCommand
         foreach (var testClass in plan.Classes)
         {
             outputs[$"Generated/{testClass.ClassName}.g.cs"] =
-                renderer.RenderClass(testClass, config.RootNamespace, config.TestBaseClass);
+                renderer.RenderClass(testClass, config.RootNamespace, config.TestBaseClass, config.Client?.TypeName);
         }
 
         outputs["Generated/spec-schemas.json"] = SchemaBundleBuilder.Build(document, plan);
@@ -109,6 +110,22 @@ public static class GenerateCommand
         // The prefix every operation path shares, if any. TestHost uses it to detect a base URL
         // that repeats it; otherwise every request 404s and nothing says why.
         var pathManifest = new JsonObject { ["operationPathPrefix"] = CommonPathPrefix(plan) };
+
+        // [capture-is-opt-in]: the key is present, and only ever `true`, when at least one case
+        // in this plan resolved a non-null TestCasePlan.ClientCallExpression — never written as
+        // `false` and never written at all otherwise, matching InTestRun.ReadSpecPaths's own
+        // "absent/false → false" contract on the runtime side (InTestRun.cs). Checked against the
+        // plan's own ClientCallExpression, not TemplateRenderer's per-case client_call_expression:
+        // the latter can additionally fall back to null for a schema-less case
+        // (TemplateRenderer.BuildClientCallExpression's own doc comment), but registering
+        // ResponseCaptureHandler is harmless for a case that ends up rendering raw HTTP anyway —
+        // Client and every typed client both resolve over the same InTestClients.Api pipeline
+        // (ApiTestCore.cs), so the handler simply has nothing extra to do for those cases.
+        if (plan.Classes.SelectMany(c => c.Cases).Any(c => c.ClientCallExpression is not null))
+        {
+            pathManifest["clientCaptureEnabled"] = true;
+        }
+
         // CommittedJsonOptions pins interior line endings to CRLF; see its own doc comment for
         // why. The trailing "+ \"\r\n\"" is the final newline after the closing brace, which
         // indented JSON serialization never emits on its own.
@@ -193,7 +210,20 @@ public static class GenerateCommand
             }
 
             var spec = resolved.Spec;
-            var plan = TestPlanBuilder.Build(spec.Document);
+
+            // Assembling a ClientPlanningConfig from LoadedConfig.Client (intest.json's own
+            // "client" section) plus client-map.json's overrides is this command's job, not
+            // ConfigLoader's or ClientCallMap's — see LoadedClientConfig's own doc comment for why
+            // the two stay separate types. Null short-circuits to null: no `client` section means
+            // TestPlanBuilder.Build's second argument stays the default it already has for every
+            // project that predates this feature, so a project with no client config resolves
+            // exactly as it always has ([capture-is-opt-in]'s opening premise).
+            var clientPlanningConfig = config.Client is { } clientConfig
+                ? new ClientPlanningConfig(
+                    ResolveClientKind(clientConfig.Kind), clientConfig.TypeName, ClientCallMap.Load(projectRoot).Overrides)
+                : null;
+
+            var plan = TestPlanBuilder.Build(spec.Document, clientPlanningConfig);
 
             // Fixture drift is checked — and reported — before anything is written, in both
             // modes. It is read-only already (DetectFixtureDrift never touches fixtures/), so
@@ -266,7 +296,33 @@ public static class GenerateCommand
             Console.Error.WriteLine(ex.Message);
             return ExitCode.ToolError;
         }
+        catch (ClientCallMapFormatException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return ExitCode.ToolError;
+        }
     }
+
+    /// <summary>
+    /// Maps <c>LoadedClientConfig.Kind</c>'s already-validated string to <see cref="ClientKind"/>.
+    /// The default arm should be unreachable in production: <c>ConfigLoader.ReadOptionalClientConfig</c>
+    /// refuses any <c>client.kind</c> other than <c>"kiota"</c>, <c>"nswag"</c> or <c>"refit"</c>
+    /// before a <see cref="LoadedClientConfig"/> ever exists, so a fourth string reaching here
+    /// would mean that validation itself regressed, not that an adopter wrote bad JSON — hence an
+    /// exception naming the defect rather than another <see cref="ConfigLoadException"/> aimed at
+    /// the adopter.
+    /// </summary>
+    private static ClientKind ResolveClientKind(string kind) => kind switch
+    {
+        "kiota" => ClientKind.Kiota,
+        "nswag" => ClientKind.NSwag,
+        "refit" => ClientKind.Refit,
+        _ => throw new InvalidOperationException(
+            $"client.kind \"{kind}\" reached GenerateCommand.ResolveClientKind unvalidated. " +
+            "ConfigLoader.ReadOptionalClientConfig should have already refused any value other " +
+            "than \"kiota\", \"nswag\" or \"refit\" — this indicates a defect in that validation, " +
+            "not bad adopter input.")
+    };
 
     /// <summary>
     /// Either the loaded spec, or the exit code a caller should return because this step already

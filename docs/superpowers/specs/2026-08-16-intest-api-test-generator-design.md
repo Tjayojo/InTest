@@ -419,7 +419,8 @@ requests rather than orphaning them.
   "operations": {
     "createOrder": { "expect": 201, "mutates": true },
     "deleteTenant": { "skip": "destructive" }
-  }
+  },
+  "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" }
 }
 ```
 
@@ -436,6 +437,7 @@ inline:
 | `project.assertions` | `shouldly` \| `mstest` — additive, never a swap |
 | `naming.identifiers` | **Frozen** — see "Frozen vs. additive axes" below |
 | `naming.display` | Changeable any time — cosmetic, no compile impact |
+| `client` | **Optional, and absent by default.** Opts generated `Success` cases into calling an adopter-owned, pre-generated API client (Kiota, NSwag, Refit) instead of building `HttpRequestMessage` by hand. `kind` and `typeName` are required together once the section is present at all. See "Typed-client invocation (opt-in)" below §9 |
 
 `generation.parallel` does not exist — see §11.
 
@@ -467,6 +469,20 @@ migration document until a second framework ships.
 The honest migration for any frozen axis is: generate fresh alongside, port hand-written tests
 manually, delete the old project. Ship it as a procedure, not a `--force` flag that produces
 something uncompilable.
+
+**The `client` section above is not the HTTP pack axis, even though both are about how a request
+gets sent.** "HTTP pack" is about `ApiTestBase.Client` itself being *typed per pack* — `HttpClient`
+under one pack, `IFlurlClient` under another — a single concrete base class cannot expose both,
+so a pack swap is frozen and would need a template-set change. The `client` section does not swap
+anything: `Client` stays `HttpClient`, resolved exactly as it always has been, for every case that
+does not opt into a typed client. A configured `client` section adds a **parallel route** — a
+`Success` case may instead call `ApiClient<TClient>()` and issue its request through the adopter's
+own generated client — alongside the raw-HTTP route every other case still uses. The frozen-axis
+*reasoning* transfers (hand-written code touching `ApiClient<T>()` would need to change if
+`client.typeName` changed to a different client type), but the *identity* does not: this is a
+second, additive way to send a request, not the HTTP pack axis under a new name. See
+`docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s "Why this is not the §5
+'HTTP pack' axis" for the full argument.
 
 ### Naming constraints
 
@@ -931,6 +947,55 @@ per-test data travels via the ambient accessor.
 `AllowAnyHttpStatus()` also disappears. `HttpClient` never throws on a non-2xx status unless
 `EnsureSuccessStatusCode()` is called. That is one fewer concept in every generated method,
 and it existed in rev 2's generated code only because Flurl throws by default.
+
+### Typed-client invocation (opt-in)
+
+Shipped in `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`. A team commonly
+already owns a pre-generated API client (Kiota, NSwag, Refit) for the same API this test project
+targets. Declaring `client: { kind, typeName }` in `intest.json` (§5) opts qualifying `Success`
+cases into calling that client — `ApiClient<TClient>()` — instead of building
+`HttpRequestMessage` by hand. **Absent the section, output is byte-identical to a build without
+this feature at all.**
+
+**The spec stays the sole planning input.** A generated client is a *contract-lossy projection*
+of the spec: it encodes invocation facts (path, method, params) typed, but discards contract facts
+(expected statuses, response schemas, `security` scopes, `example`/`required`) on its way to a
+strongly-typed result — and those discarded facts are the entirety of what InTest asserts.
+Planning from a client rather than the spec would therefore drop schema validation and both auth
+case kinds; the client changes only *how* a qualifying request is issued, never *what* is
+asserted. `TestPlanBuilder.Build` reads nothing new from the OpenAPI document because of this
+feature.
+
+**Raw-bytes schema validation survives the client's own deserialization.** A `DelegatingHandler`
+(`ResponseCaptureHandler`) sits in the `InTestClients.Api` pipeline and buffers the response body
+into a byte array *before* the typed client ever reads it, stashes it for the assertion helper,
+then replaces `response.Content` with a fresh, equally-readable copy so the client's own
+deserialization proceeds normally. `ApiResponseAssertions.ShouldMatchCapturedContractAsync` /
+`ShouldMatchCapturedStatusAsync` then validate those buffered bytes exactly as
+`ShouldMatchContractAsync` validates a raw-HTTP response's bytes — schema validation stays
+byte-level either way.
+
+**Which cases qualify.** Only `CaseRole.Success` cases are ever routed through a client —
+declared-error and auth cases exist to exercise the API's own behaviour against a deliberately
+unmatchable input, not a client's exception handling, and continue to use raw `HttpRequestMessage`
+unconditionally. Among `Success` cases, a per-generator convention derives the call expression for
+an operation with **no query parameters and no request body**: for Kiota that condition alone is
+enough; for NSwag the operation's `operationId` must additionally be present and contain no `_`,
+both measured constraints (`[nswag-needs-operationid]` — see the plan document) rather than
+assumed ones. An adopter-owned `client-map.json` override bypasses every gate and covers
+everything convention does not — a query-parameter or request-body operation regardless of kind,
+an NSwag operation whose `operationId` does not qualify, and any Refit operation at all, since
+Refit gets no convention whatsoever (`[refit-override-only]`, permanent — no spec-derived fact
+could make an arbitrary interface's method naming deterministic).
+
+**The adopter's client must be constructed over the same pipeline InTest's own `Client` uses** —
+`IHttpClientFactory.CreateClient(InTestClients.Api)` — or it silently loses capture, the auth
+header, and the run-id header at once, since a typed client built over its own independently
+configured `HttpClient` never passes through `InTestClients.Api`'s handlers at all.
+`docs/getting-started.md` documents the three concrete registrations (Kiota, NSwag, Refit); the
+plan document's `[client-rides-the-api-pipeline]` records the two guards (a throwing accessor, and
+an authority check inside `ResponseCaptureHandler`) that make missing this self-diagnosing rather
+than a silent hole.
 
 ### Schema validation
 

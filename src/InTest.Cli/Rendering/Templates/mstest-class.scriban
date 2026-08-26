@@ -35,6 +35,67 @@ public partial class {{ class_name }} : {{ base_class }}
         RequireFixture("{{ tc.operation_key_literal }}");
 
 {{~ end ~}}
+{{~ if tc.client_call_expression ~}}
+        // [captured-response-is-the-verdict], pinned shape — see
+        // docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md. stopwatch starts
+        // before the try because ShouldMatchCapturedContractAsync takes elapsed and the throwing
+        // path still needs a real number. The filter's two '?.'s are load-bearing, not stylistic —
+        // see that decision's own text before changing it.
+        //
+        // The second catch's own filter (`ex is not OperationCanceledException`) is load-bearing
+        // too, added after a review finding: a bare `catch (Exception)` here would swallow a
+        // cancellation — the test run being cancelled mid-call, say — and report whatever the
+        // captured response happened to hold as the verdict instead of letting the cancellation
+        // propagate. It went unnoticed because ShouldMatchCapturedContractAsync/
+        // ShouldMatchCapturedStatusAsync both call TestContext.CancellationToken.
+        // ThrowIfCancellationRequested before doing anything else, which incidentally re-raises a
+        // cancellation that already happened — but that is a property of those two methods, not a
+        // guarantee this catch block can rely on staying true.
+        //
+        // [warn-on-swallowed-exception]: the second catch's body used to discard `ex` outright —
+        // a real gap a reviewer raised, since a client-map.json override that issues more than one
+        // call (the first reaching the wire and captured, a later one failing before it does) left
+        // no trace anywhere that a second call ever ran, let alone threw. WarnSwallowedClientException
+        // reports it at Warn, not Note, so it reaches the operator even on a run that otherwise
+        // passes — see ApiTestCore.WarnSwallowedClientException's own doc for the full reasoning.
+        // The captured response is still the verdict: this call reports the discarded exception,
+        // it does not change what gets asserted below.
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            // [typed-path-parameters]: a path parameter here is converted to the type the
+            // configured client's own generated method actually declares (Guid.Parse(...)/
+            // int.Parse(...)/long.Parse(...) — TemplateRenderer.WrapForClientCall) before being
+            // spliced in. For a Kiota client this is what makes the call bind the typed,
+            // non-obsolete indexer overload rather than the [Obsolete]-marked this[string] one a
+            // bare FixtureParameter(...) splice used to reach — confirmed against real kiota
+            // 1.34.1 output (OrdersItemRequestBuilder.cs, CustomersItemRequestBuilder.cs both
+            // declare a this[Guid] and an [Obsolete]-marked this[string]); for an NSwag client
+            // ([nswag-needs-operationid]) the same conversion is what makes a strongly-typed
+            // parameter (e.g. GetOrderByIdAsync(System.Guid id, ...) — confirmed against real
+            // nswag 14.7.1 output) compile at all, since NSwag's generated methods carry no
+            // string overload to fall back on. See
+            // docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md's risk section
+            // and its `[nswag-needs-operationid]` finding for both measurements. No CS0618
+            // suppression pragma here for the Kiota case any more: nothing this template emits
+            // reaches the deprecated overload, so a future regression that did reach it would
+            // surface as a real, unsuppressed warning rather than being silently shielded by a
+            // suppression scoped to this statement.
+            await ApiClient<{{ tc.client_type_name }}>().{{ tc.client_call_expression }};
+        }
+        catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { WarnSwallowedClientException(ex); }
+        stopwatch.Stop();
+
+{{~ if tc.schema_key_literal ~}}
+        await ApiResponseAssertions.ShouldMatchCapturedContractAsync(
+            LastCapturedResponse, {{ tc.expected_status }}, "{{ tc.schema_key_literal }}", Schemas, TestId, stopwatch.Elapsed,
+            TestContext.CancellationToken);
+{{~ else ~}}
+        await ApiResponseAssertions.ShouldMatchCapturedStatusAsync(
+            LastCapturedResponse, {{ tc.expected_status }}, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+{{~ end ~}}
+{{~ else ~}}
         using var request = new HttpRequestMessage(
             HttpMethod.{{ tc.http_method_pascal }},
             InTestUrl.Build("{{ tc.path_template_literal }}"{{ tc.path_argument_list }}){{ tc.query_expression }});
@@ -53,6 +114,7 @@ public partial class {{ class_name }} : {{ base_class }}
 {{~ else ~}}
         await ApiResponseAssertions.ShouldMatchStatusAsync(
             response, {{ tc.expected_status }}, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+{{~ end ~}}
 {{~ end ~}}
     }
 {{~ end ~}}

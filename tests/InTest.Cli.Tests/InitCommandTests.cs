@@ -797,6 +797,225 @@ public class InitCommandTests
         config.RootElement.GetProperty("spec").GetProperty("source").GetString().ShouldBe(spec);
     }
 
+    // ---- [lockfile-recovery] (Task 5): --client-lockfile as an alternative to --spec ----------
+
+    private static string WriteKiotaLockfile(string root, string json)
+    {
+        var path = Path.Combine(root, "kiota-lock.json");
+        File.WriteAllText(path, json);
+        return path;
+    }
+
+    private const string RealKiotaLockfile = """
+        {
+          "descriptionHash": "EF763FFCF3F41D04D8109657EC4DB02E68539996122549984A7E7280B7BB3B2DE8DE944ED89FFED7F7441D5D6DFB456A7AE626DDA724986243D5BEBBC354A662",
+          "descriptionLocation": "D:/TestGen/samples/Orders.Api/Orders.Api.json",
+          "lockFileVersion": "1.0.0",
+          "kiotaVersion": "1.34.1",
+          "clientClassName": "OrdersApiClient",
+          "typeAccessModifier": "Public",
+          "clientNamespaceName": "Orders.ApiClient",
+          "language": "CSharp",
+          "usesBackingStore": false
+        }
+        """;
+
+    /// <summary>
+    /// The primary path: <c>--client-lockfile</c> alone recovers both <c>spec.source</c> and a
+    /// working <c>client</c> section, with no <c>--spec</c> given at all. Asserted through
+    /// <see cref="ConfigLoader"/>, not by scanning <c>intest.json</c>'s raw text — the same
+    /// strongest-test precedent <see cref="RoundTripsAHazardousSpecSourcePastConfigLoad"/> already
+    /// sets, and the one that actually exercises the DOUBLE-$ raw-string brace trap the task
+    /// called out: a malformed <c>client</c> section would fail <c>ConfigLoader.Load</c>'s JSON
+    /// parse, not merely look wrong in a text diff.
+    /// </summary>
+    [TestMethod]
+    public void ClientLockfileScaffoldsTheRecoveredSpecSourceAndClientSection()
+    {
+        var lockfilePath = WriteKiotaLockfile(_root, RealKiotaLockfile);
+
+        InitCommand.Run(_root, "Orders.ApiTests", specSource: "", lockfilePath).ShouldBe(ExitCode.Ok);
+
+        var config = ConfigLoader.Load(_root);
+        config.SpecSource.ShouldBe("D:/TestGen/samples/Orders.Api/Orders.Api.json");
+        config.Client.ShouldNotBeNull();
+        config.Client!.Kind.ShouldBe("kiota");
+        config.Client.TypeName.ShouldBe("Orders.ApiClient.OrdersApiClient");
+    }
+
+    /// <summary>
+    /// A lockfile naming no client identity (no <c>clientClassName</c>/<c>clientNamespaceName</c>)
+    /// still recovers <c>spec.source</c> alone and scaffolds no <c>client</c> section — the same
+    /// shape a plain <c>--spec</c> project gets.
+    /// </summary>
+    [TestMethod]
+    public void ClientLockfileWithNoClientIdentityScaffoldsOnlyTheSpecSource()
+    {
+        var lockfilePath = WriteKiotaLockfile(_root, """{ "descriptionLocation": "orders.json" }""");
+
+        InitCommand.Run(_root, "Orders.ApiTests", specSource: "", lockfilePath).ShouldBe(ExitCode.Ok);
+
+        var config = ConfigLoader.Load(_root);
+        config.SpecSource.ShouldBe("orders.json");
+        config.Client.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// Reproduced defect: a real run of <c>--client-lockfile</c> scaffolded
+    /// <c>"D:/TestGen/.claude/worktrees/intest-pregenerated-api-clients-168695/samples/Orders.Api/Orders.Api.json"</c>
+    /// verbatim into <c>intest.json</c>'s <c>spec.source</c> — the exact absolute path the dev box
+    /// it ran on happened to check the repo out to. A teammate cloning elsewhere, or CI, then fails
+    /// `generate` with "spec file not found" against a path that looks correct and explains
+    /// nothing. This proves the fix: when the recovered location is genuinely reachable from the
+    /// project root via a relative path, `init` scaffolds the relative form instead — portable
+    /// across machines regardless of where each one checked the repo out to, as long as the spec's
+    /// position relative to the project stays the same.
+    /// </summary>
+    [TestMethod]
+    public void ClientLockfileRelativizesAnAbsoluteSpecLocationReachableFromTheProjectRoot()
+    {
+        // A sibling of _root, not a descendant — proving relativization is not merely "strip a
+        // shared prefix" but a real Path.GetRelativePath computation, matching the real-world
+        // shape (spec.source and the scaffolded project both live under the same repo checkout,
+        // as siblings, not one nested inside the other).
+        var specDir = Path.Combine(Path.GetDirectoryName(_root)!, "orders-shared-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(specDir);
+        var absoluteSpecPath = Path.GetFullPath(Path.Combine(specDir, "Orders.Api.json"));
+
+        var lockfilePath = WriteKiotaLockfile(_root, $$"""{ "descriptionLocation": "{{absoluteSpecPath.Replace("\\", "/")}}" }""");
+
+        try
+        {
+            InitCommand.Run(_root, "Orders.ApiTests", specSource: "", lockfilePath).ShouldBe(ExitCode.Ok);
+
+            var config = ConfigLoader.Load(_root);
+            config.SpecSource.ShouldBe($"../{Path.GetFileName(specDir)}/Orders.Api.json");
+        }
+        finally
+        {
+            ForceDeleteDirectory(specDir);
+        }
+    }
+
+    /// <summary>
+    /// The "otherwise" half: when the recovered absolute location cannot be expressed relative to
+    /// the project root at all — no shared root, which on a real filesystem means distinct drive
+    /// letters on Windows (a POSIX filesystem has exactly one root, so any two absolute paths on it
+    /// can always be related through some number of "../" segments) — `init` leaves the recovered
+    /// value exactly as-is and prints a warning naming it, rather than silently shipping an
+    /// absolute path with nothing on record explaining why. `init` still succeeds: this is
+    /// recoverable by hand, not a reason to refuse the whole scaffold.
+    /// </summary>
+    [TestMethod]
+    public void ClientLockfileWarnsInsteadOfRelativizingWhenNoRelativePathExists()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Path.GetRelativePath can always express one POSIX absolute path relative to another
+            // — a single shared root ("/") is guaranteed by construction — so this branch is only
+            // reachable at all when two paths name distinct drive roots, a Windows-only concept.
+            Assert.Inconclusive(
+            "the 'cannot relativize' branch needs two distinct drive roots, which POSIX has no " +
+            "equivalent of — nothing to prove on this platform.");
+            return;
+        }
+
+        var rootDrive = Path.GetPathRoot(Path.GetFullPath(_root))!.TrimEnd('\\');
+        var otherDriveLetter = rootDrive.StartsWith("C", StringComparison.OrdinalIgnoreCase) ? "Z" : "C";
+        var absoluteSpecPath = $"{otherDriveLetter}:/Orders/Orders.Api.json";
+
+        var lockfilePath = WriteKiotaLockfile(_root, $$"""{ "descriptionLocation": "{{absoluteSpecPath}}" }""");
+
+        var originalOut = Console.Out;
+        var capturedOut = new StringWriter();
+        Console.SetOut(capturedOut);
+        int exitCode;
+        try
+        {
+            exitCode = InitCommand.Run(_root, "Orders.ApiTests", specSource: "", lockfilePath);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        exitCode.ShouldBe(ExitCode.Ok);
+        var config = ConfigLoader.Load(_root);
+        config.SpecSource.ShouldBe(absoluteSpecPath);
+
+        var output = capturedOut.ToString();
+        output.ShouldContain("Warning", Case.Sensitive);
+        output.ShouldContain(absoluteSpecPath, Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Giving both is a contradiction, not a preference — refused before either is acted on,
+    /// naming both values, with no silent priority pick.
+    /// </summary>
+    [TestMethod]
+    public void RefusesBothSpecAndClientLockfileNamingBoth()
+    {
+        var lockfilePath = WriteKiotaLockfile(_root, RealKiotaLockfile);
+
+        var (exitCode, error) = RunCapturingErrorWithLockfile(_root, "Orders.ApiTests", "orders.json", lockfilePath);
+
+        exitCode.ShouldBe(ExitCode.ToolError);
+        Directory.GetFileSystemEntries(_root)
+            .Where(f => !string.Equals(Path.GetFileName(f), "kiota-lock.json", StringComparison.Ordinal))
+            .ShouldBeEmpty("§5's exit 2 is \"nothing was written\"");
+        error.ShouldContain("--spec", Case.Sensitive);
+        error.ShouldContain("orders.json", Case.Sensitive);
+        error.ShouldContain("--client-lockfile", Case.Sensitive);
+        error.ShouldContain(lockfilePath, Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Neither given is refused exactly the way a blank <c>--spec</c> always has been — the same
+    /// shape <see cref="RefusesEveryBlankArgumentInTheSameShape"/> pins, not a new or different
+    /// sentence introduced by this feature.
+    /// </summary>
+    [TestMethod]
+    public void RefusesNeitherSpecNorClientLockfileTheSameWayABlankSpecAlwaysHasBeen()
+    {
+        var (exitCode, error) = RunCapturingErrorWithLockfile(_root, "Orders.ApiTests", "", "");
+
+        exitCode.ShouldBe(ExitCode.ToolError);
+        Directory.GetFileSystemEntries(_root).ShouldBeEmpty();
+        error.ShouldStartWith("--spec", Case.Sensitive);
+        error.ShouldContain("is empty");
+    }
+
+    [TestMethod]
+    public void RefusesAMissingLockfileNamingThePath()
+    {
+        var lockfilePath = Path.Combine(_root, "does-not-exist.json");
+
+        var (exitCode, error) = RunCapturingErrorWithLockfile(_root, "Orders.ApiTests", "", lockfilePath);
+
+        exitCode.ShouldBe(ExitCode.ToolError);
+        Directory.GetFileSystemEntries(_root).ShouldBeEmpty();
+        error.ShouldContain("--client-lockfile", Case.Sensitive);
+        error.ShouldContain(lockfilePath, Case.Sensitive);
+    }
+
+    /// <summary>Runs `init` with stderr captured and a --client-lockfile value, mirroring
+    /// <see cref="RunCapturingError"/>.</summary>
+    private static (int ExitCode, string Error) RunCapturingErrorWithLockfile(
+        string projectRoot, string name, string spec, string clientLockfilePath)
+    {
+        var originalError = Console.Error;
+        var capturedError = new StringWriter();
+        Console.SetError(capturedError);
+        try
+        {
+            return (InitCommand.Run(projectRoot, name, spec, clientLockfilePath), capturedError.ToString());
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+    }
+
     // ReportsAnUnanticipatedScaffoldFailureAsAToolErrorRatherThanAStackTrace moved to
     // InTest.Golden.Tests/CliExitCodeTests as CrashInACommandWithNoCatchOfItsOwnExitsToolError.
     // It asserted the catch-all inside InitCommand.Run, and that catch-all is now Program's, so a

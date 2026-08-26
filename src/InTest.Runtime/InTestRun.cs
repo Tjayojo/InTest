@@ -165,7 +165,24 @@ public static class InTestRun
         var audience = ResolveAudience(Configuration, baseUrl);
         services.AddTransient(sp => new AuthHandler(sp.GetService<ITestTokenProvider>(), audience));
 
-        RegisterInTestClients(services, baseUrl);
+        // ResponseCaptureHandler takes baseUrl by constructor injection, the same shape as
+        // AuthHandler's audience just above — see that handler's own doc for why it must not read
+        // IConfiguration itself. Registered unconditionally, exactly like AuthHandler: whether it
+        // actually ends up attached to InTestClients.Api is a decision RegisterInTestClients makes
+        // below, off the clientCaptureEnabled flag read from spec-paths.json, not a decision this
+        // registration makes.
+        services.AddTransient(_ => new ResponseCaptureHandler(baseUrl));
+
+        // Read once, here — before RegisterInTestClients needs ClientCaptureEnabled to decide
+        // whether ResponseCaptureHandler gets attached to InTestClients.Api, and reused again below
+        // for EnsureNoPrefixDuplication's OperationPathPrefix — rather than at the previous read
+        // site further down, which ran after RegisterInTestClients and so could never have supplied
+        // this value in time. Nothing between here and that original site depends on Root, Schemas,
+        // or any other state RegisterInTestClients itself does not need, so moving the read earlier
+        // changes nothing about what it can see.
+        var specPaths = ReadSpecPaths();
+
+        RegisterInTestClients(services, baseUrl, specPaths.ClientCaptureEnabled);
 
         ConfigureServices?.Invoke(services, Configuration);
         Root = services.BuildServiceProvider();
@@ -189,8 +206,9 @@ public static class InTestRun
         // Fail on a base URL that repeats a prefix the spec's paths already carry, before a
         // single request is sent. The alternative is every test returning 404 with no clue why.
         // Reuses the baseUrl computed above rather than re-normalizing Configuration["Api:BaseUrl"]
+        // a second time, and the specPaths tuple read earlier rather than opening spec-paths.json
         // a second time.
-        InTestUrl.EnsureNoPrefixDuplication(baseUrl, ReadOperationPathPrefix());
+        InTestUrl.EnsureNoPrefixDuplication(baseUrl, specPaths.OperationPathPrefix);
 
         var readiness = new ReadinessOptions();
         Configuration.GetSection("InTest:Readiness").Bind(readiness);
@@ -299,14 +317,32 @@ public static class InTestRun
     /// whole is still not given an in-process harness — see <c>TestHostTests</c>'s note on
     /// <c>TestContextDiagnostics</c> for why — but this narrower seam needs none of what makes
     /// that true: no <c>AppContext.BaseDirectory</c>, no real <c>TestContext</c>, no live HTTP.
-    /// Requires <see cref="RunIdHandler"/> and <see cref="AuthHandler"/> already registered in
-    /// <paramref name="services"/>; this method only wires the two named clients to them.
+    /// Requires <see cref="RunIdHandler"/>, <see cref="AuthHandler"/> and (when
+    /// <paramref name="captureEnabled"/> is true) <see cref="ResponseCaptureHandler"/> already
+    /// registered in <paramref name="services"/>; this method only wires the two named clients to
+    /// them.
     /// </summary>
-    internal static void RegisterInTestClients(IServiceCollection services, Uri baseUrl)
+    /// <param name="captureEnabled">
+    /// [capture-is-opt-in]: true only when the generated project's <c>spec-paths.json</c> carries
+    /// <c>clientCaptureEnabled: true</c> — written by <c>generate</c> when at least one case
+    /// resolved a client-routed call. When true, <see cref="ResponseCaptureHandler"/> is appended to
+    /// <see cref="InTestClients.Api"/>'s handler chain, after <see cref="AuthHandler"/> so it sits
+    /// closest to the wire. Never appended to <see cref="InTestClients.Readiness"/>, mirroring
+    /// <see cref="AuthHandler"/>'s own F10 exclusion just below: the readiness probe hits an
+    /// anonymous endpoint with no typed client anywhere near it, so there is nothing for
+    /// <see cref="ResponseCaptureHandler"/> to usefully capture there, only an unconditional
+    /// <see cref="HttpResponseMessage.Content"/> replacement to needlessly perform on every probe.
+    /// </param>
+    internal static void RegisterInTestClients(IServiceCollection services, Uri baseUrl, bool captureEnabled)
     {
-        services.AddHttpClient(InTestClients.Api, client => client.BaseAddress = baseUrl)
+        var apiClient = services.AddHttpClient(InTestClients.Api, client => client.BaseAddress = baseUrl)
             .AddHttpMessageHandler<RunIdHandler>()
             .AddHttpMessageHandler<AuthHandler>();
+
+        if (captureEnabled)
+        {
+            apiClient.AddHttpMessageHandler<ResponseCaptureHandler>();
+        }
 
         // Separate from Api so that the one attachment point the scaffold documents and adopters
         // actually use — InTestClients.Api, via ConfigureServices — cannot carry an auth handler
@@ -434,18 +470,92 @@ public static class InTestRun
         }
     }
 
-    private static string? ReadOperationPathPrefix()
+    /// <summary>
+    /// Reads the generator-owned <c>spec-paths.json</c> once and returns both values it carries —
+    /// rather than opening and re-parsing the file a second time for the second value — because
+    /// <see cref="InitializeAsync"/> now needs both: <see cref="OperationPathPrefix"/> for
+    /// <see cref="InTestUrl.EnsureNoPrefixDuplication"/> (unchanged from before this task) and
+    /// <see cref="ClientCaptureEnabled"/> for <see cref="RegisterInTestClients"/>'s
+    /// <c>captureEnabled</c> parameter ([capture-is-opt-in], new).
+    /// <para>
+    /// <see cref="ClientCaptureEnabled"/> defaults to false when the property is <em>absent</em> —
+    /// every suite generated before this task existed, and every suite whose <c>client</c> config
+    /// resolved no case to a client-routed call — matching this task's brief verbatim
+    /// ("absent → false") rather than treating a missing key as an error. A generated project's
+    /// spec-paths.json is rewritten wholesale by every <c>generate</c> run, so there is no drift for
+    /// an absent-vs-present value to guard against the way fixtures' own drift check exists for; a
+    /// stale absence simply cannot occur.
+    /// </para>
+    /// <para>
+    /// A <em>present but non-boolean</em> <c>clientCaptureEnabled</c> — a string <c>"true"</c>, a
+    /// number, an object — is deliberately not folded into that same "default to false" leniency,
+    /// even though an earlier version of this method did exactly that (read: ValueKind != True,
+    /// therefore false, no distinction from "absent"). <c>spec-paths.json</c> is generator-owned
+    /// (CLAUDE.md's ownership table: <c>Generated/</c> is "written by generate ... never touched by
+    /// humans"), so a present-and-malformed value can only mean the file was hand-edited or
+    /// corrupted — never a legitimate generate output — and reading it as false anyway produces a
+    /// misleading failure downstream: capture silently never attaches, and the eventual error an
+    /// adopter sees is <c>ApiTestCore.LastCapturedResponse</c>'s own [client-rides-the-api-pipeline]
+    /// message telling them to construct their client over
+    /// <c>IHttpClientFactory.CreateClient(InTestClients.Api)</c> — a remedy that does not fix this
+    /// cause, since that registration was already correct, and sends the adopter to re-check
+    /// something that was never wrong. So this shape throws instead, naming the file path, the
+    /// offending value, and the fact that the file is generator-owned and must not be hand-edited —
+    /// consistent with CLAUDE.md's "fail loudly" directive ("Missing fixture data becomes an
+    /// obvious TODO: sentinel and a red test. Never substitute plausible defaults that let a suite
+    /// pass while asserting nothing" — the same shape of mistake this silent-false default would
+    /// otherwise be).
+    /// </para>
+    /// </summary>
+    internal static (string? OperationPathPrefix, bool ClientCaptureEnabled) ReadSpecPaths()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "spec-paths.json");
         if (!File.Exists(path))
         {
-            return null;
+            return (null, false);
         }
 
-        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
-        return document.RootElement.TryGetProperty("operationPathPrefix", out var value)
-            ? value.GetString()
+        return ParseSpecPaths(path, File.ReadAllText(path));
+    }
+
+    /// <summary>
+    /// The parse itself, split out from <see cref="ReadSpecPaths"/> — the same "internal,
+    /// dependency-free seam" shape <see cref="ResolveAudience"/> and <see cref="RegisterInTestClients"/>
+    /// already use elsewhere in this class — so <c>InTest.Runtime.Tests</c> can exercise every
+    /// <c>clientCaptureEnabled</c> shape (absent, <c>true</c>, <c>false</c>, malformed) against
+    /// literal JSON text directly, rather than needing a real file under
+    /// <see cref="AppContext.BaseDirectory"/> to drive each case. <paramref name="path"/> is passed
+    /// through only for the malformed-value exception message below; it is never read from disk
+    /// here.
+    /// </summary>
+    internal static (string? OperationPathPrefix, bool ClientCaptureEnabled) ParseSpecPaths(string path, string json)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var operationPathPrefix = document.RootElement.TryGetProperty("operationPathPrefix", out var prefixValue)
+            ? prefixValue.GetString()
             : null;
+
+        // Absent property -> false (see ReadSpecPaths's own doc, "absent → false"). Present and
+        // JsonValueKind.True/False -> that literal boolean. Present and anything else (string,
+        // number, object, array, null) -> a hard error naming the file, the offending raw value, and
+        // the generator-ownership reason a human should never have been able to produce this shape
+        // in the first place (see ReadSpecPaths's own doc, second paragraph, for why silently
+        // defaulting to false here — as an earlier version of this method did — produces a
+        // misleading downstream failure instead of this one, correct-cause error).
+        var clientCaptureEnabled = document.RootElement.TryGetProperty("clientCaptureEnabled", out var captureValue)
+            ? captureValue.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                _ => throw new InvalidOperationException(
+                    $"InTest: '{path}' has a malformed 'clientCaptureEnabled' value: " +
+                    $"{captureValue.GetRawText()}. Expected a JSON boolean (true or false). " +
+                    "spec-paths.json is written by 'generate' and is generator-owned — it must not " +
+                    "be hand-edited. Re-run 'intest generate' to regenerate it."),
+            }
+            : false;
+
+        return (operationPathPrefix, clientCaptureEnabled);
     }
 
     /// <summary>

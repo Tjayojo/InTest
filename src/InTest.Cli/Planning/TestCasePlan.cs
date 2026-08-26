@@ -36,12 +36,49 @@ public sealed record TestCasePlan(
     // — FixtureComposer.HasJsonBodyToCompose is the sole authority on this (same reasoning as
     // NeedsFixture above), so this is set from that method directly rather than re-derived here.
     bool HasRequestBody = false,
-    // Parallel to PathParameterNames — same order, same length when set. TestPlanBuilder's
-    // declared-error and auth branches both populate this (the only roles that ever render an
-    // unmatchable value from it); every other call site, including every one that predates this
-    // field, is read as "kind unknown", which TemplateRenderer treats identically to String — the
-    // same GUID it always rendered, so no existing behaviour changes silently.
-    IReadOnlyList<PathParameterKind>? PathParameterKinds = null,
+    // Parallel to PathParameterNames — same order, same length when set. Originally populated only
+    // by TestPlanBuilder's declared-error and auth branches, to render an unmatchable-but-well-typed
+    // value (decision 6); [typed-path-parameters] widened this to the Success case too, because
+    // TemplateRenderer's client-routed branch needs the same per-parameter kind to convert a
+    // fixture's string value to the type Kiota's item-builder indexer declares, before splicing it
+    // into the indexer. Every call site that predates either use — including every hand-built
+    // TestCasePlan in a test that does not care about kinds — leaves this null, read as "kind
+    // unknown", which TemplateRenderer treats identically to String in both branches: the same GUID
+    // the declared-error/auth branch always rendered, and the same bare FixtureParameter(...) the
+    // client-routed branch always spliced, so no existing behaviour changes silently.
+    //
+    // Element type is PathParameterKind? , not PathParameterKind — a corrected finding, not the
+    // original shape (see PathParameterKind's own doc comment for the measured evidence):
+    // TestPlanBuilder.ResolvePathParameterKind can no longer force every schema into one of the
+    // enum's four members, because a real generator types some shapes (`number`, `date-time`, and
+    // others) more finely than those four distinguish, and misclassifying one of those into
+    // String/Integer used to silently bind a deprecated overload or produce a runtime
+    // FormatException. A null element means "this generator's client-side type for this parameter
+    // is outside what InTest can convert a fixture value into" — ClientCallPlanner.Resolve
+    // withholds convention entirely for a Success case with any null element (a note pointing at
+    // client-map.json, the same idiom as the query-parameter and request-body gates), while
+    // TemplateRenderer.UnmatchableValueFor keeps treating a null element exactly like String for
+    // the declared-error/auth branch, since that branch never splices a real fixture value and the
+    // fresh-GUID fallback was already well-typed for it regardless of the parameter's real shape.
+    IReadOnlyList<PathParameterKind?>? PathParameterKinds = null,
+    // [nswag-path-parameter-order]: the operation's `in: path` parameters, in the order the spec's
+    // own `parameters` array declares them — never the path-template order PathParameterNames
+    // carries. Exists solely to feed ClientCallPlanner.Resolve/BuildNSwagConvention: NSwag binds a
+    // generated method's positional arguments in *declared* order, not path-template order, and the
+    // two are only guaranteed to agree when an operation has at most one path parameter (every
+    // piece of evidence this convention originally shipped on). Measured directly against nswag
+    // 14.7.1: a path `/customers/{customerId}/orders/{orderId}` whose `parameters` array declares
+    // `orderId` before `customerId` generates `GetCustomerOrderAsync(System.Guid orderId,
+    // System.Guid customerId, ...)` — path order and declared order disagree, and both parameters
+    // share a type, so a wrong-order call still compiles and silently asserts against the wrong
+    // resource. TestPlanBuilder computes this once, from the same operation.Parameters read
+    // PathParameterKinds already uses, and it is the single source ClientCallPlanner.Resolve reads
+    // rather than re-deriving order from pathTemplate itself (CLAUDE.md: verdicts are carried, not
+    // re-derived downstream). Null for every call site that predates this field, and for every
+    // DeclaredError/Auth case ([success-only] — neither role ever resolves a client call), read as
+    // "no declared order known"; Kiota is unaffected regardless, since BuildKiotaConvention derives
+    // its indexer placeholders from the path template's own structure and never reads this field.
+    IReadOnlyList<string>? DeclaredPathParameterOrder = null,
     // Decision 7: which identity a CaseRole.Auth case authenticates as. Defaults to Default, the
     // no-override slot, so every call site that predates Task 5 — none of which had a slot to
     // state, including every Success and DeclaredError case — renders exactly as it always did:
@@ -68,7 +105,22 @@ public sealed record TestCasePlan(
     // against a status the API is correct to return, because it gets compared against every
     // requirement's scopes rather than just the one the identity actually satisfies. Every sample
     // spec today declares exactly one requirement, so this gap is real but untriggered, not safe.
-    IReadOnlyList<string>? RequiredScopes = null)
+    IReadOnlyList<string>? RequiredScopes = null,
+    // The verdict ClientCallPlanner.Resolve computed for this case, carried rather than
+    // re-derived downstream (CLAUDE.md's recurring-defect warning, same as every other carried
+    // verdict on this record) — stage 3's renderer splices this expression bare rather than
+    // re-consulting client-map.json or re-running the Kiota convention per render. Null in every
+    // case that predates this field (every existing call site, none of which had a client to
+    // resolve against) and in every case this plan ever withholds a client call for: every
+    // DeclaredError and Auth case unconditionally ([success-only] — TestPlanBuilder never even
+    // attempts a resolution for those roles, regardless of config), and any Success case that
+    // either declared no `client` config, matched no override, or failed one of
+    // ClientCallPlanner.Resolve's gates (Refit unconditionally; NSwag with no operationId or an
+    // underscored one; a query parameter or a request body for either Kiota or NSwag) —
+    // TestPlanBuilder emits a CoverageNote pointing at client-map.json in that last case rather
+    // than reporting the operation as unsupported, since its raw-HTTP Success case still generated
+    // and still runs.
+    string? ClientCallExpression = null)
 {
     // Collection-typed record parameters cannot default to a non-constant expression
     // (Array.Empty<string>() is not a compile-time constant) directly in the parameter list, so

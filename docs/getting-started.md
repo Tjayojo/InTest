@@ -273,6 +273,163 @@ not a misdiagnosis this time but a hard block. The samples model this: `Orders.A
 sample with auth at all — marks its `/health/ready` `.AllowAnonymous()` alongside every
 authorized endpoint it declares.
 
+### Typed client invocation (opt-in)
+
+If your team already owns a pre-generated API client for this API — Kiota, NSwag, or Refit — you
+can opt generated tests into calling it instead of building `HttpRequestMessage` by hand. Add a
+`client` section to `intest.json`:
+
+```json
+{
+  "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" }
+}
+```
+
+`kind` is `"kiota"`, `"nswag"` or `"refit"`; `typeName` is the client's fully-qualified C# type
+name, exactly as you would write it in code. Leave the section out entirely and nothing changes —
+every generated case keeps building its own `HttpRequestMessage`, byte-for-byte identical to a
+project with no `client` section at all.
+
+**Own a generated client but not the OpenAPI document it came from?** Kiota already recorded where
+it generated from, in `kiota-lock.json` — point `init` at it instead of hunting the document down
+by hand:
+
+```bash
+intest init --name Orders.ApiTests --client-lockfile ../Orders.ApiClient/kiota-lock.json
+```
+
+This recovers `spec.source` from the lockfile's `descriptionLocation` (a local path or a URL,
+either way) and, since it also names `clientClassName`/`clientNamespaceName`, scaffolds a working
+`client` section too — no hand-editing needed for the common case. `--spec` and
+`--client-lockfile` are mutually exclusive; give neither and `init` refuses exactly like a blank
+`--spec` always has. NSwag's own config (`nswag.json`) is not supported here — measured directly
+(NSwag 14.7.1's default `nswag new` output), its `className` is a naming *template*
+(`"{controller}Client"`) under NSwag's default generation mode, not the single concrete type name
+a `client.typeName` needs, so there is nothing safe to recover automatically.
+
+**The one thing that matters more than the config: register the client over InTest's own
+`HttpClient`, or it silently stops working.** `AuthHandler`, `RunIdHandler`, and the handler that
+lets a client-routed test still validate the raw response bytes are all attached to one named
+client, `InTestClients.Api` — the same one `Client` itself resolves from. A typed client built
+over any other `HttpClient` never passes through those handlers at all: no run-id header, no auth
+token, and (worse) no captured response for the assertion to check against, which fails loudly
+with a message naming the cause rather than passing against nothing — but only *after* you have
+spent time wondering why a "working" client fails every test. Construct it in
+`TestStartup.Register`, resolving the named client from `IHttpClientFactory` exactly the way
+`Client` itself is resolved:
+
+```csharp
+private static void Register(IServiceCollection services, IConfiguration configuration)
+{
+    // Kiota — HttpClientRequestAdapter needs no auth provider of its own; AuthHandler already
+    // sets the Authorization header on every request that passes through InTestClients.Api.
+    services.AddTransient(sp =>
+    {
+        var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api);
+        var adapter = new HttpClientRequestAdapter(new AnonymousAuthenticationProvider(), httpClient: httpClient)
+        {
+            BaseUrl = httpClient.BaseAddress!.ToString()   // must agree with Api:BaseUrl — see below
+        };
+        return new OrdersApiClient(adapter);
+    });
+}
+```
+
+```csharp
+// NSwag — most generated clients take (string baseUrl, HttpClient httpClient) directly.
+services.AddTransient(sp =>
+{
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api);
+    return new OrdersClient(httpClient.BaseAddress!.ToString(), httpClient);
+});
+```
+
+```csharp
+// Refit — RestService.For<T> reads BaseAddress off the HttpClient it is given, so nothing else
+// needs pointing anywhere.
+services.AddTransient(sp =>
+{
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api);
+    return RestService.For<IOrdersApi>(httpClient);
+});
+```
+
+**Why the base URL has to agree, and why a mismatch is a hard failure rather than a quiet one.**
+`HttpClient.BaseAddress` only resolves a *relative* request URI. Kiota's adapter (and some NSwag
+clients) build a fully-qualified, absolute URI from their own configured base URL instead — so if
+that base URL disagrees with `Api:BaseUrl`, `HttpClient.BaseAddress` is never even consulted, and
+the request goes wherever the client's own configuration points, silently ignoring the
+`appsettings.*.json` value you actually meant to hit. InTest cannot stop that request from being
+sent, but it does refuse to let it pass unnoticed: the handler that captures the response compares
+the outgoing request's authority against `Api:BaseUrl` and throws a message naming the exact
+cause the moment they disagree, rather than letting the test run against the wrong host and pass
+or fail for the wrong reason.
+
+**Which operations get routed through the client, and which need `client-map.json`.** Only
+`Success` cases ever route through a client — a 404 or a 401/403 case is testing what your *API*
+does with a bad request, not what your client does with one, so those always build
+`HttpRequestMessage` directly regardless of this section. Among `Success` cases, `generate`
+derives the call automatically for an operation with **no query parameters and no request
+body** — neither generator's convention has a fixture value InTest could safely splice into a
+query-binding shape or a typed request-body parameter. It also needs every path parameter's
+declared schema to be one of four shapes InTest can convert a fixture value through — a plain
+`string`, a `string` formatted `uuid`, an `integer`, or an `integer` formatted `int64` — so a
+`number`-, `date-time`-, `date`-, `boolean`-, or unrecognized-format-typed path parameter withholds
+convention too, for both generators alike (`[typed-path-parameters]`, same doc). For Kiota, that
+plus the query-parameter/request-body rule above is everything. For NSwag it additionally needs
+your spec to declare an `operationId` for the operation, with no `_` in it — `generate` derives
+`{PascalCase(operationId)}Async` directly on your configured client type (measured against a real
+nswag 14.7.1 client), but an operation with no `operationId` reduces to NSwag's own unpredictable,
+uncompilable synthesized naming, and an `operationId` containing `_` gets split by NSwag's default
+generation mode onto a *different* client class than the one you configured — measured the same
+way, see
+`docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s `[nswag-needs-operationid]`
+for both pieces of evidence. Refit gets no automatic convention at all, ever: a Refit interface's
+method names are either hand-written or generator-settings-dependent, so there is no spec-derived
+fact — an `operationId` included — that could make deriving one deterministic
+(`[refit-override-only]`, same doc). `coverage-report.json` (Phase 4) notes every operation this
+withholds convention for, and points at `client-map.json`.
+
+Add an entry there to route anything convention does not cover — a query-parameter operation, a
+POST, an NSwag operation with no `operationId` or an underscored one, or any Refit operation at
+all:
+
+```json
+{
+  "overrides": {
+    "getOrderById": "Api.Orders[{id}].GetAsync"
+  }
+}
+```
+
+Keyed by operation key, one entry per operation you want routed through the client. The value is
+a real C# expression — everything after `ApiClient<T>()`. `{param}` placeholders are replaced with
+the same per-operation fixture value the raw-HTTP path already resolves — converted through
+`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)` first when the parameter's declared schema is
+one of the three non-string typable shapes above, spliced bare otherwise (a plain `string`, or a
+shape InTest cannot classify at all — the adopter's own responsibility to type-correct at the next
+build in that last case).
+
+Your expression takes one of two shapes, and `generate` tells them apart only by whether the
+expression *already ends in a closing `)`* once every `{param}` placeholder has been substituted:
+
+- **A bare call chain with no argument list of its own** — the same shape `generate` derives for
+  you, e.g. `"getOrderById": "Api.Orders[{id}].GetAsync"`. `generate` appends the call's arguments
+  for you: `(cancellationToken: TestContext.CancellationToken)`.
+- **A self-closing expression that already spells out its own argument list**, ending in `)` —
+  the shape a query-parameter or request-body operation needs, since neither generator's
+  convention can guess those arguments for you: e.g. `"createOrder": "Api.Orders.PostAsync(new
+  CreateOrderRequest())"`. `generate` splices this verbatim and appends nothing further; pass
+  `cancellationToken: TestContext.CancellationToken` yourself, by name, if your call needs one.
+
+Getting this wrong the first way round — writing a self-closing expression but expecting `generate`
+to still append the cancellation token — used to produce `PostAsync(new
+CreateOrderRequest())(cancellationToken: …)`, which fails to compile (`CS0149`, "cannot invoke a
+non-delegate type twice") because a completed method call is not itself invocable a second time. A
+wrong expression of either shape fails your own next `dotnet build` at the generated line — the
+same way a typo in any other line of your test project would — rather than being silently
+accepted.
+
 ---
 
 ## Phase 4 — generate

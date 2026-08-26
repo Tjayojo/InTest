@@ -10,6 +10,54 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in invocation through a team's own pre-generated API client (Kiota, NSwag, or Refit): a new
+  `client` section in `intest.json` (`{ "kind": "kiota", "typeName": "..." }`) routes qualifying
+  generated `Success` cases through `ApiClient<TClient>()` instead of a hand-built
+  `HttpRequestMessage`, while raw-bytes schema validation, expected-status assertions and every
+  other case kind (declared-error, auth) work exactly as before — a `DelegatingHandler` buffers
+  and captures the response before the typed client deserializes it, so the client changes only
+  *how* a request is issued, never what a generated test asserts. Convention-derivation covers
+  Kiota unconditionally, and NSwag once the operation's `operationId` is present and contains no
+  `_` — both measured directly against real generator output, not assumed. `client-map.json` lets
+  an adopter override or supply the call expression for any operation convention-derivation does
+  not reach (query parameters, a request body, an NSwag operation whose `operationId` doesn't
+  qualify, or any Refit operation at all — Refit gets no convention, permanently, since its method
+  naming is never spec-derivable). This is entirely additive and opt-in: a project with no `client`
+  section produces byte-identical output to one built without
+  this feature at all. **Migration:** none required. See
+  `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md` for the design and
+  `docs/getting-started.md`'s "Typed client invocation (opt-in)" for the three concrete client
+  registrations, including the one requirement that matters most — construct the client over
+  `IHttpClientFactory.CreateClient(InTestClients.Api)`, or it silently loses capture, auth and the
+  run-id header.
+- `intest init --client-lockfile <path>`, mutually exclusive with `--spec`, for a team that owns a
+  generated client but not the OpenAPI document it came from: recovers `spec.source` from a Kiota
+  `kiota-lock.json`'s `descriptionLocation` (a local path or a URL), and — where the lockfile also
+  names `clientClassName`/`clientNamespaceName` — scaffolds a working `client` section too, so the
+  common case needs no hand-editing. A required field missing, renamed, blank or wrong-typed fails
+  loudly, naming the field, rather than silently scaffolding an empty `spec.source`. NSwag's own
+  config was measured (`nswag new`, NSwag 14.7.1) and deliberately not supported: its `className`
+  is a naming template under NSwag's default generation mode, not a concrete type name. See
+  `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s `[lockfile-recovery]` for
+  the measured detail and `docs/getting-started.md`'s "Typed client invocation (opt-in)" for the
+  worked example.
+- `ApiTestCore.BeginTest` gained a second, optional-in-effect `IRunDiagnostics` parameter
+  (`[warn-on-swallowed-exception]`): a client-routed case whose `client-map.json` override issues
+  more than one call, where an earlier call already captured a response and a later one throws,
+  now reports that discarded exception's type and message through `Warn` instead of losing it
+  silently — the exact gap a reviewer raised, since the captured response can still satisfy the
+  test's own assertion and the run otherwise exits 0. `ApiTestBase.ApiTestInitialize` already calls
+  the two-argument form with a real per-test sink, so every case this repository ships gets the
+  warning for free. This is additive, not a break, at the `InTest.Runtime` package boundary a
+  hypothetical third-party xUnit/NUnit adapter sits on: the pre-existing one-argument
+  `BeginTest(string?)` survives as a compatibility overload, so a caller built against
+  `0.1.0-preview.1` keeps compiling and keeps running with the exact old silent-discard behaviour,
+  unchanged, until it migrates to the two-argument form to start receiving the warning.
+  **Migration:** none required; call the two-argument overload with your own `IRunDiagnostics` to
+  start seeing a swallowed second-call exception reported.
+
 ### Changed
 
 - **Breaking:** `InTest.Runtime` split into two packages — the framework-neutral `InTest.Runtime`

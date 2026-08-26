@@ -34,6 +34,26 @@ public abstract class ApiTestCore
     /// </summary>
     private string? _testId;
 
+    /// <summary>
+    /// This test's own diagnostics sink, set by <see cref="BeginTest"/> and cleared by
+    /// <see cref="EndTest"/> — <c>[warn-on-swallowed-exception]</c>
+    /// (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md). Backing field for
+    /// <see cref="WarnSwallowedClientException"/>, the only reader.
+    /// <para>
+    /// Deliberately per-test, not the assembly-scoped sink <c>InTestRun.InitializeAsync</c> already
+    /// receives: that instance is wrapped around the <em>assembly</em>'s own <c>TestContext</c> and
+    /// is never retained anywhere <see cref="ApiTestCore"/> could reach it after
+    /// <c>InitializeAsync</c> returns, nor would reusing it be correct — MSTest hands out a fresh
+    /// <c>TestContext</c> per running test, and a message attached to the wrong one attributes to
+    /// the wrong result. <see cref="ApiTestBase.ApiTestInitialize"/> instead builds a fresh
+    /// <c>TestHost.TestContextDiagnostics</c> around <em>its own</em> per-test <c>TestContext</c> and
+    /// passes it here — the same <c>testDisplayName</c> seam <see cref="BeginTest"/> already uses,
+    /// extended to a second per-test fact this class needs from the framework without needing to
+    /// name it.
+    /// </para>
+    /// </summary>
+    private IRunDiagnostics? _diagnostics;
+
     protected IConfiguration Config => InTestRun.Configuration;
 
     protected IServiceProvider Services => _scope.ServiceProvider;
@@ -90,22 +110,133 @@ public abstract class ApiTestCore
     protected HttpClient Client { get; private set; } = null!;
 
     /// <summary>
-    /// Starts one test's scope: a fresh DI scope, the resolved <see cref="TestId"/>, the ambient
-    /// identity a request authenticates as by default, and the <see cref="Client"/> generated
-    /// request-sending methods use. The body of what used to be <c>ApiTestBase</c>'s
-    /// <c>[TestInitialize]</c>-attributed <c>ApiTestInitialize</c> before the neutral/adapter
-    /// split; <see cref="ApiTestBase.ApiTestInitialize"/> now carries the
+    /// A silent, do-nothing <see cref="IRunDiagnostics"/> — the private, internal-only implementation
+    /// <see cref="IRunDiagnostics"/>'s own doc says is deliberately absent from the shipped surface
+    /// ("Deliberately no <c>RunDiagnostics.Null</c> or other shipped convenience implementation
+    /// here... a test-local double is enough until a real caller needs otherwise"). This one is not
+    /// that shipped convenience: it is never public, never returned, never exposed anywhere outside
+    /// this class, and exists solely so <see cref="BeginTest(string?)"/> — the one-argument
+    /// compatibility overload below — has something non-null to hand the two-argument
+    /// <see cref="BeginTest(string?, IRunDiagnostics)"/> without changing what a caller supplying no
+    /// diagnostics sink actually observes. See <see cref="BeginTest(string?)"/>'s own doc for why a
+    /// null object is the right shape here rather than an optional parameter.
+    /// <para>
+    /// This overload's arrival is exactly the "real caller" <see cref="IRunDiagnostics"/>'s own doc
+    /// contemplates as the condition for eventually shipping a convenience null implementation — but
+    /// arriving does not by itself change the answer. This type still has no reason to expose itself
+    /// as public API: nothing outside <see cref="BeginTest(string?)"/> constructs or references it, so
+    /// it stays private here rather than being promoted onto <see cref="IRunDiagnostics"/> as a
+    /// shipped <c>.Null</c> member. A second real caller wanting the same no-op would be the actual
+    /// trigger for that promotion; one does not exist yet.
+    /// </para>
+    /// </summary>
+    private sealed class NullDiagnostics : IRunDiagnostics
+    {
+        /// <summary>The only instance this type is ever constructed as — one shared, stateless
+        /// no-op is all any caller could ever need from it.</summary>
+        public static readonly NullDiagnostics Instance = new();
+
+        public void Note(string message)
+        {
+            // Deliberately empty: this is the discard behaviour the old one-argument BeginTest
+            // already had by construction, before diagnostics existed as a concept at all — there
+            // was no sink to write routine progress to, so there is still none now.
+        }
+
+        public void Warn(string message)
+        {
+            // Deliberately empty: this is what makes BeginTest(string?) reproduce the old
+            // one-argument BeginTest's observable behaviour exactly. Before [warn-on-swallowed-exception]
+            // introduced WarnSwallowedClientException, a swallowed client exception left no trace at
+            // all — _diagnostics was simply null, and WarnSwallowedClientException's own `_diagnostics?.Warn(...)`
+            // already treats a null sink as a silent no-op. Routing Warn through this empty method
+            // instead of leaving _diagnostics null reproduces that exact silence while still letting
+            // the two-argument BeginTest's non-null guard (ArgumentNullException.ThrowIfNull) pass.
+        }
+    }
+
+    /// <summary>
+    /// Compatibility overload: exists only so that code compiled against the pre-<c>[warn-on-swallowed-exception]</c>
+    /// one-argument <c>BeginTest(string?)</c> signature — a hypothetical third-party xUnit/NUnit
+    /// adapter, or any other caller outside this repository that already built against
+    /// <c>InTest.Runtime</c> before <see cref="BeginTest(string?, IRunDiagnostics)"/> gained its
+    /// second parameter — keeps compiling and keeps running, unchanged, against the version of
+    /// <c>InTest.Runtime</c> that ships this file. <c>InTest.Runtime</c>
+    /// <c>0.1.0-preview.1</c> is already published to nuget.org (CLAUDE.md's "What this is"), so
+    /// adding a required parameter to an existing public method is a source break at that package
+    /// boundary; this overload is the fix.
+    /// <para>
+    /// <b>Not the preferred call for new code inside this repository.</b>
+    /// <see cref="ApiTestBase.ApiTestInitialize"/> keeps calling the two-argument
+    /// <see cref="BeginTest(string?, IRunDiagnostics)"/> with a real
+    /// <c>TestHost.TestContextDiagnostics</c> sink, unchanged by this overload's existence — every
+    /// caller this repository controls already has a live per-test diagnostics sink to supply and
+    /// should keep supplying it, so <c>[warn-on-swallowed-exception]</c> reaches the operator on
+    /// every path this repository ships. This overload exists purely for callers this repository
+    /// does <em>not</em> control, who compiled before that sink existed to supply.
+    /// </para>
+    /// <para>
+    /// <b>Why a private null-object <see cref="IRunDiagnostics"/> rather than making
+    /// <c>diagnostics</c> an optional parameter with a default value on the existing method.</b> An
+    /// optional parameter is a source-compatible change, not a binary-compatible one: the default
+    /// value is substituted by the <em>caller's compiler</em> at the call site, baked into that
+    /// caller's own IL at compile time — it is not part of the callee's method signature at all.
+    /// An already-compiled caller's IL already contains a direct call instruction to a one-argument
+    /// <c>BeginTest(string)</c> method token; IL call-site resolution matches that token against the
+    /// callee assembly's actual set of declared overloads at load time, and a two-argument method
+    /// with a default value on its second parameter is still, in IL, a single method that requires
+    /// two arguments — no one-argument overload exists for that call site to bind to, so the
+    /// existing caller fails to load (a <see cref="MissingMethodException"/>) rather than silently
+    /// picking up the default. Only a genuinely separate, declared one-argument overload — this
+    /// method — creates the second IL method token an old caller's call site can still resolve
+    /// against. Restoring the exact old <em>observable behaviour</em> through that overload, via
+    /// <see cref="NullDiagnostics"/>, rather than reasoning about what a default argument value
+    /// would have produced, is what makes this method more than "compiles": see this method's own
+    /// body and <see cref="NullDiagnostics"/> for how.
+    /// </para>
+    /// </summary>
+    /// <param name="testDisplayName">Forwarded unchanged to <see cref="BeginTest(string?, IRunDiagnostics)"/>
+    /// — see that overload's own parameter doc.</param>
+    protected void BeginTest(string? testDisplayName) => BeginTest(testDisplayName, NullDiagnostics.Instance);
+
+    /// <summary>
+    /// Starts one test's scope: a fresh DI scope, the resolved <see cref="TestId"/>, this test's
+    /// own diagnostics sink, the ambient identity a request authenticates as by default, and the
+    /// <see cref="Client"/> generated request-sending methods use. The body of what used to be
+    /// <c>ApiTestBase</c>'s <c>[TestInitialize]</c>-attributed <c>ApiTestInitialize</c> before the
+    /// neutral/adapter split; <see cref="ApiTestBase.ApiTestInitialize"/> now carries the
     /// <c>[TestInitialize]</c> attribute itself and simply calls this method, passing MSTest's
-    /// <c>TestContext.TestDisplayName</c> through as <paramref name="testDisplayName"/>.
+    /// <c>TestContext.TestDisplayName</c> through as <paramref name="testDisplayName"/> and a
+    /// fresh <c>TestHost.TestContextDiagnostics</c> wrapping its own per-test <c>TestContext</c>
+    /// through as <paramref name="diagnostics"/>.
     /// </summary>
     /// <param name="testDisplayName">The framework's resolved display name for the running test,
     /// or null if the framework has none to offer. <see cref="InTestId.ForTest"/> already accepts
     /// and handles a null display name, so this method applies no null-guard of its own.</param>
-    protected void BeginTest(string? testDisplayName)
+    /// <param name="diagnostics">This test's own diagnostics sink — <c>[warn-on-swallowed-exception]</c>,
+    /// the same <c>testDisplayName</c> seam extended to a second per-test fact
+    /// <see cref="ApiTestCore"/> needs without naming the framework that supplies it. Required,
+    /// not optional: unlike <paramref name="testDisplayName"/>, there is no meaningful "none to
+    /// offer" case — <see cref="ApiTestBase.ApiTestInitialize"/> always has a live per-test
+    /// <c>TestContext</c> to wrap by the time this runs, so a null here would only ever mean a
+    /// caller forgot to wire one up, which should fail loudly rather than silently disable
+    /// <see cref="WarnSwallowedClientException"/>.</param>
+    protected void BeginTest(string? testDisplayName, IRunDiagnostics diagnostics)
     {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
         _scope = InTestRun.Root.CreateScope();
         _testId = InTestId.ForTest(InTestRun.RunIdValue, testDisplayName);
         InTestAmbient.TestId.Value = _testId;
+        _diagnostics = diagnostics;
+
+        // A fresh CapturedResponseSlot, not merely a clear — see InTestAmbient.LastCapturedResponse's
+        // own doc for why this field carries a mutable cell rather than a CapturedResponse directly
+        // (confirmed by direct experiment: a plain AsyncLocal reassignment made deep inside
+        // ResponseCaptureHandler's awaited call does not survive back up to this test method, so
+        // the handler mutates a cell instead — and that cell must be this test's own, never a
+        // previous test's, which a brand-new object guarantees purely by holding nothing yet).
+        InTestAmbient.LastCapturedResponse.Value = new CapturedResponseSlot();
 
         // The Default slot, resolved (v1-c decision 7): every test authenticates as this unless
         // a generated auth case overrides it before sending its request. Resolved here, once per
@@ -134,8 +265,117 @@ public abstract class ApiTestCore
     {
         InTestAmbient.TestId.Value = null;
         InTestAmbient.Identity.Value = null;
+        InTestAmbient.LastCapturedResponse.Value = null;
         _testId = null;
+        _diagnostics = null;
         _scope.Dispose();
+    }
+
+    /// <summary>
+    /// [neutral-helper]: resolves an adopter's own typed client (Kiota, NSwag, Refit) from
+    /// <see cref="Services"/> — the same scope <see cref="Client"/> itself is resolved from — for a
+    /// generated client-routed test case to call directly. Placed here on <see cref="ApiTestCore"/>
+    /// rather than the MSTest-specific <c>ApiTestBase</c> so it is available to every future
+    /// framework adapter for free, the same reasoning that already applies to
+    /// <see cref="RequireFixture"/> and the rest of this class.
+    /// <para>
+    /// Resolution failure (nothing registered for <typeparamref name="TClient"/>) is deliberately
+    /// left to <c>GetRequiredService</c>'s own exception rather than wrapped: an adopter who forgets
+    /// to register their client in <c>ConfigureServices</c> gets a standard, well-understood DI
+    /// error naming the missing type, not a bespoke InTest message duplicating what
+    /// <c>Microsoft.Extensions.DependencyInjection</c> already says clearly.
+    /// </para>
+    /// </summary>
+    protected TClient ApiClient<TClient>() where TClient : class =>
+        Services.GetRequiredService<TClient>();
+
+    /// <summary>
+    /// The most recent response <see cref="ResponseCaptureHandler"/> observed for the currently
+    /// running test — [neutral-helper], the read-side counterpart of <see cref="ApiClient{TClient}"/>.
+    /// A generated client-routed Success case calls this, after its typed-client call returns
+    /// normally, to run <c>ApiResponseAssertions.ShouldMatchCapturedContractAsync</c> against the
+    /// same raw bytes the API actually sent, exactly as a raw-HTTP case would against its own
+    /// <see cref="HttpResponseMessage"/>.
+    /// <para>
+    /// Throws — never returns <c>default</c> — when nothing was captured, naming
+    /// <c>[client-rides-the-api-pipeline]</c> and telling the adopter to construct their client over
+    /// <c>IHttpClientFactory.CreateClient(InTestClients.Api)</c>. A silent <c>default</c> here would
+    /// make a misconfigured client's test pass against status 0 and an empty body — the exact
+    /// "passes while asserting almost nothing" outcome CLAUDE.md's fail-loudly rule forbids, and a
+    /// far worse failure mode than a clear, immediate exception naming the actual cause: no
+    /// response ever reached <see cref="InTestAmbient.LastCapturedResponse"/> because
+    /// <see cref="ResponseCaptureHandler"/> never ran on this request at all, most likely because
+    /// the client was built over a bare <see cref="HttpClient"/> rather than
+    /// <c>InTestClients.Api</c>.
+    /// </para>
+    /// <para>
+    /// Reads <see cref="InTestAmbient.LastCapturedResponse"/> directly rather than exposing any
+    /// caching or memoization of its own — this property and that ambient slot are deliberately the
+    /// same value at every read, so a generated case calling this more than once (unusual, but nothing
+    /// here forbids it) always sees whatever the most recent client-routed call actually produced.
+    /// </para>
+    /// </summary>
+    protected static CapturedResponse LastCapturedResponse =>
+        InTestAmbient.LastCapturedResponse.Value?.Value
+        ?? throw new InvalidOperationException(
+            "[client-rides-the-api-pipeline]: no response has been captured for this test. " +
+            "ResponseCaptureHandler only runs on requests sent through InTestClients.Api — " +
+            "construct your typed client over IHttpClientFactory.CreateClient(InTestClients.Api) " +
+            "rather than a bare HttpClient, so it rides the same handler pipeline as everything " +
+            "else InTest sends.");
+
+    /// <summary>
+    /// <c>[warn-on-swallowed-exception]</c>
+    /// (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md): a generated
+    /// client-routed Success case's second catch calls this instead of discarding
+    /// <paramref name="exception"/> outright. <c>[captured-response-is-the-verdict]</c>'s own
+    /// reasoning for that catch existing at all still holds — a response was already captured, so
+    /// the client's own generator-specific exception is the wrong verdict to report — but silently
+    /// dropping the exception hid a real failure mode a reviewer raised: a <c>client-map.json</c>
+    /// override that issues more than one call, where the first reaches the wire and is captured
+    /// and a later one fails before reaching it at all (a serialization error, a null argument, an
+    /// adapter misconfiguration). Without this, that second failure leaves no trace anywhere — the
+    /// case reports whatever the first call's captured response was, and an operator has no way to
+    /// learn a second call ever ran, let alone that it threw.
+    /// <para>
+    /// <b>Warn, not Note</b> — <see cref="IRunDiagnostics.Warn"/>'s own doc is exactly the
+    /// contract this needs: it must reach the operator even on a run that otherwise passes and
+    /// exits 0, which is precisely the shape this defect takes (the captured response can easily
+    /// still satisfy the test's own assertion). A <see cref="IRunDiagnostics.Note"/> here would be
+    /// exactly the "fixture silently not running" trap that doc comment names, transplanted to
+    /// this call site.
+    /// </para>
+    /// <para>
+    /// Names <paramref name="exception"/>'s runtime type and message directly, and states outright
+    /// that it was discarded because a captured response already stood as the verdict — an
+    /// operator reading this in isolation, with no other context, must be able to tell both "an
+    /// exception happened" and "why it did not fail the test."
+    /// </para>
+    /// <para>
+    /// <c>_diagnostics</c> is read with <c>?.</c> rather than the throwing pattern
+    /// <see cref="TestId"/> and <see cref="LastCapturedResponse"/> both use: those two guard a
+    /// programming error a generated case would hit on every single call if the guarded state were
+    /// ever missing (reading <see cref="TestId"/> before <see cref="BeginTest"/>, or
+    /// <see cref="LastCapturedResponse"/> with nothing captured), so failing loudly is the more
+    /// useful behaviour. A missing <c>_diagnostics</c> here would only ever mean
+    /// <see cref="BeginTest"/> itself was never called with one — impossible through
+    /// <see cref="ApiTestBase.ApiTestInitialize"/>, which this class does not control but every
+    /// shipped adapter goes through — and this method already runs from inside a <c>catch</c> block
+    /// already handling one swallowed exception; turning a missing diagnostics sink into a second,
+    /// unrelated throw from there would replace the original exception's own message with a far
+    /// less useful one about plumbing this class already guarantees in every real path.
+    /// </para>
+    /// </summary>
+    protected void WarnSwallowedClientException(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        _diagnostics?.Warn(
+            $"[captured-response-is-the-verdict]: a {exception.GetType().FullName} was thrown " +
+            "after this test's client-routed call had already captured a response, and was " +
+            $"discarded — the captured response is being used as the test's verdict instead. " +
+            $"Discarded exception message: \"{exception.Message}\". If this is unexpected, check " +
+            "whether this operation's client-map.json override issues more than one call.");
     }
 
     /// <summary>

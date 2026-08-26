@@ -58,8 +58,9 @@ public class InTestClientsTests
         services.AddTransient(_ => new RunIdHandler(() => "run-1"));
 
         // The exact registration InTestRun.InitializeAsync performs, via the seam it calls — not
-        // a hand-duplicated copy of it.
-        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"));
+        // a hand-duplicated copy of it. captureEnabled: false — this test is about AuthHandler's
+        // F10 exclusion, not ResponseCaptureHandler's.
+        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"), captureEnabled: false);
 
         // Stand in for the live probe so this test sends no real network traffic. Additive to
         // whatever RegisterInTestClients already configured for this name (named-HttpClient
@@ -100,7 +101,8 @@ public class InTestClientsTests
         services.AddTransient(sp => new AuthHandler(sp.GetService<ITestTokenProvider>(), "api://orders"));
 
         // The exact registration InTestRun.InitializeAsync performs, via the seam it calls.
-        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"));
+        // captureEnabled: false — Task 2's AuthHandler wiring, unrelated to ResponseCaptureHandler.
+        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"), captureEnabled: false);
 
         services.AddHttpClient(InTestClients.Api).ConfigurePrimaryHttpMessageHandler(() => apiInner);
         services.AddHttpClient(InTestClients.Readiness).ConfigurePrimaryHttpMessageHandler(() => readinessInner);
@@ -124,5 +126,95 @@ public class InTestClientsTests
         "AuthHandler must be attached to InTestClients.Api — this is F8's whole point");
         readinessInner.SeenRequest!.Headers.Authorization.ShouldBeNull(
         "AuthHandler must never reach the anonymous readiness probe (F10, decision 1)");
+    }
+
+    /// <summary>
+    /// [capture-is-opt-in]: proven the same way the two tests above are, through
+    /// <see cref="InTestRun.RegisterInTestClients"/> itself rather than a hand-duplicated copy of
+    /// its registrations. Exercises both halves of the new <c>captureEnabled</c> parameter in one
+    /// test — attached to <see cref="InTestClients.Api"/>, never to
+    /// <see cref="InTestClients.Readiness"/> (the same F10 exclusion <see cref="AuthHandler"/>
+    /// already observes) — by asserting on whether <see cref="InTestAmbient.LastCapturedResponse"/>
+    /// actually gets populated by a round-trip through each named client, since that ambient slot
+    /// is the one externally observable effect <see cref="ResponseCaptureHandler"/> has.
+    /// </summary>
+    [TestMethod]
+    public async Task ApiClientCarriesResponseCaptureHandlerWhenEnabledButReadinessNever()
+    {
+        var apiInner = new TestSupport.CapturingHandler();
+        var readinessInner = new TestSupport.CapturingHandler();
+
+        var services = new ServiceCollection();
+        services.AddTransient(_ => new RunIdHandler(() => "run-1"));
+        services.AddTransient(sp => new AuthHandler(sp.GetService<ITestTokenProvider>(), "api://orders"));
+        services.AddTransient(_ => new ResponseCaptureHandler(new Uri("https://h.invalid/api/")));
+
+        // The exact registration InTestRun.InitializeAsync performs, via the seam it calls.
+        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"), captureEnabled: true);
+
+        services.AddHttpClient(InTestClients.Api).ConfigurePrimaryHttpMessageHandler(() => apiInner);
+        services.AddHttpClient(InTestClients.Readiness).ConfigurePrimaryHttpMessageHandler(() => readinessInner);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+
+        // A fresh CapturedResponseSlot per round-trip, standing in for ApiTestCore.BeginTest — see
+        // InTestAmbient.LastCapturedResponse's own doc for why this must be a mutable cell flowed
+        // downward and read back from the SAME reference, rather than a value read straight off
+        // the AsyncLocal after the awaited call returns (confirmed by direct experiment not to
+        // survive that boundary).
+        try
+        {
+            var apiSlot = new CapturedResponseSlot();
+            InTestAmbient.LastCapturedResponse.Value = apiSlot;
+            await factory.CreateClient(InTestClients.Api).GetAsync("https://h.invalid/api/orders");
+
+            var readinessSlot = new CapturedResponseSlot();
+            InTestAmbient.LastCapturedResponse.Value = readinessSlot;
+            await factory.CreateClient(InTestClients.Readiness).GetAsync("https://h.invalid/api/health/ready");
+
+            apiSlot.Value.ShouldNotBeNull(
+            "ResponseCaptureHandler must be attached to InTestClients.Api when captureEnabled is true");
+            readinessSlot.Value.ShouldBeNull(
+            "ResponseCaptureHandler must never reach the anonymous readiness probe (F10's own exclusion)");
+        }
+        finally
+        {
+            InTestAmbient.LastCapturedResponse.Value = null;
+        }
+    }
+
+    [TestMethod]
+    public async Task NeitherClientCarriesResponseCaptureHandlerWhenDisabled()
+    {
+        var apiInner = new TestSupport.CapturingHandler();
+
+        var services = new ServiceCollection();
+        services.AddTransient(_ => new RunIdHandler(() => "run-1"));
+        services.AddTransient(sp => new AuthHandler(sp.GetService<ITestTokenProvider>(), "api://orders"));
+        services.AddTransient(_ => new ResponseCaptureHandler(new Uri("https://h.invalid/api/")));
+
+        InTestRun.RegisterInTestClients(services, new Uri("https://h.invalid/api/"), captureEnabled: false);
+
+        services.AddHttpClient(InTestClients.Api).ConfigurePrimaryHttpMessageHandler(() => apiInner);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+
+        try
+        {
+            var apiSlot = new CapturedResponseSlot();
+            InTestAmbient.LastCapturedResponse.Value = apiSlot;
+            await factory.CreateClient(InTestClients.Api).GetAsync("https://h.invalid/api/orders");
+
+            apiSlot.Value.ShouldBeNull(
+            "ResponseCaptureHandler must never run at all when captureEnabled is false");
+        }
+        finally
+        {
+            InTestAmbient.LastCapturedResponse.Value = null;
+        }
     }
 }

@@ -25,16 +25,27 @@ public abstract class ApiTestBase : ApiTestCore
 
     /// <summary>
     /// Delegates to <see cref="ApiTestCore.BeginTest"/>, supplying MSTest's own resolved display
-    /// name. Derived from <c>TestContext.TestDisplayName</c>, never <c>TestContext.TestName</c>:
-    /// <c>TestName</c> returns the bare method name for every <c>[DataRow]</c> row, so all
-    /// variations of one operation would share one <see cref="ApiTestCore.TestId"/> instead of
-    /// each getting its own — the reason this call site, not <see cref="ApiTestCore"/> itself,
-    /// gets to make this choice at all is that <c>TestDisplayName</c> is an MSTest concept with no
-    /// neutral equivalent; a different adapter reads whatever its own framework calls the
-    /// per-data-row display name.
+    /// name and this test's own diagnostics sink. Derived from <c>TestContext.TestDisplayName</c>,
+    /// never <c>TestContext.TestName</c>: <c>TestName</c> returns the bare method name for every
+    /// <c>[DataRow]</c> row, so all variations of one operation would share one
+    /// <see cref="ApiTestCore.TestId"/> instead of each getting its own — the reason this call
+    /// site, not <see cref="ApiTestCore"/> itself, gets to make this choice at all is that
+    /// <c>TestDisplayName</c> is an MSTest concept with no neutral equivalent; a different adapter
+    /// reads whatever its own framework calls the per-data-row display name.
+    /// <para>
+    /// <c>[warn-on-swallowed-exception]</c>: <c>TestHost.TestContextDiagnostics</c> already exists
+    /// to forward <see cref="IRunDiagnostics"/> to a <see cref="TestContext"/> —
+    /// <c>TestHost.InitializeAsync</c> builds one around the <em>assembly's</em> own
+    /// <c>TestContext</c> for <c>InTestRun.InitializeAsync</c>; this call site builds a second one
+    /// around <em>this test's own</em> per-test <see cref="TestContext"/> (the property above,
+    /// set fresh by MSTest before every <c>[TestInitialize]</c> runs), reusing the exact same
+    /// adapter class rather than inventing a second forwarding mechanism. The two instances differ
+    /// only in which <see cref="TestContext"/> each wraps.
+    /// </para>
     /// </summary>
     [TestInitialize]
-    public void ApiTestInitialize() => BeginTest(TestContext.TestDisplayName);
+    public void ApiTestInitialize() =>
+        BeginTest(TestContext.TestDisplayName, new TestHost.TestContextDiagnostics(TestContext));
 
     [TestCleanup]
     public void ApiTestCleanup() => EndTest();

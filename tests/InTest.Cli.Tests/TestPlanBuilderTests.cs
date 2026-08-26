@@ -1,4 +1,5 @@
 using InTest.Cli.Planning;
+using InTest.Cli.Rendering;
 using InTest.Cli.Spec;
 using Shouldly;
 
@@ -346,6 +347,110 @@ public class TestPlanBuilderTests
 
         notFound.PathParameterKinds.ShouldBe([PathParameterKind.Integer]);
     }
+
+    // --- [typed-path-parameters]: ResolvePathParameterKinds is format-aware, not type-alone.
+    // Each test below builds a plan from a real schema shape and reads the kind back off the
+    // Success case rather than the declared-error one — Success is the new call site this task
+    // added (TemplateRenderer.BuildClientCallExpression's per-kind conversion needs it there), so
+    // asserting against it is the one that would actually catch a regression in that wiring,
+    // not just in ResolvePathParameterKind's own mapping. ---
+
+    private static async Task<PathParameterKind?> ResolvedKindAsync(string schemaJson)
+    {
+        var spec = $$"""
+        {
+          "openapi": "3.0.3",
+          "info": { "title": "Orders", "version": "1.0" },
+          "paths": {
+            "/orders/{id}": {
+              "get": {
+                "operationId": "getOrderById",
+                "tags": ["Orders"],
+                "parameters": [
+                  { "name": "id", "in": "path", "required": true, "schema": {{schemaJson}} }
+                ],
+                "responses": {
+                  "200": { "description": "ok", "content": { "application/json": {
+                    "schema": { "$ref": "#/components/schemas/Order" } } } }
+                }
+              }
+            }
+          },
+          "components": { "schemas": { "Order": { "type": "object" } } }
+        }
+        """;
+
+        var plan = await BuildAsync(spec);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.Role == CaseRole.Success);
+
+        return success.PathParameterKinds.ShouldHaveSingleItem();
+    }
+
+    [TestMethod]
+    public async Task APlainStringPathParameterResolvesToStringKind()
+        => (await ResolvedKindAsync("""{ "type": "string" }""")).ShouldBe(PathParameterKind.String);
+
+    [TestMethod]
+    public async Task AUuidFormattedStringPathParameterResolvesToGuidKind()
+        // The measured shape a real kiota 1.34.1 client's this[Guid] indexer overload expects
+        // (typed-client-invocation plan's measurement table) — previously indistinguishable from
+        // a plain string, since only "numeric or not" mattered before the client-routed branch's
+        // per-kind conversion existed.
+        => (await ResolvedKindAsync("""{ "type": "string", "format": "uuid" }""")).ShouldBe(PathParameterKind.Guid);
+
+    /// <summary>
+    /// Corrected finding — this test used to assert <see cref="PathParameterKind.String"/> here,
+    /// reasoning (in its own comment, verbatim) that "ClientCallPlanner.Resolve's own doc comment
+    /// relies on ResolvePathParameterKind being exhaustive over every schema shape it can see, with
+    /// String as the catch-all." That reasoning was wrong, not merely imprecise: measured directly
+    /// against a real kiota 1.34.1 client, a <c>date-time</c>-formatted string path parameter
+    /// generates a <c>this[DateTimeOffset]</c> item-builder indexer, not <c>this[string]</c> — so
+    /// classifying it as <see cref="PathParameterKind.String"/> and splicing a bare
+    /// <c>FixtureParameter(...)</c> call into that indexer bound the deprecated
+    /// <c>this[string]</c> overload every time, silently. <see langword="null"/> ("untypable") is
+    /// the correct verdict, and <see cref="ClientCallPlanner.Resolve"/> now withholds the whole
+    /// convention for it rather than TemplateRenderer ever splicing an unconverted value in — see
+    /// <see cref="TestPlanBuilderTests.AnUntypablePathParameterKindWithholdsTheClientConventionForNSwag"/>
+    /// below for the end-to-end proof.
+    /// </summary>
+    [TestMethod]
+    public async Task ANonUuidFormattedStringPathParameterResolvesToNoTypableKind()
+        => (await ResolvedKindAsync("""{ "type": "string", "format": "date-time" }""")).ShouldBeNull();
+
+    [TestMethod]
+    public async Task ABareIntegerPathParameterWithNoFormatResolvesToIntegerKind()
+        => (await ResolvedKindAsync("""{ "type": "integer" }""")).ShouldBe(PathParameterKind.Integer);
+
+    [TestMethod]
+    public async Task AnInt32FormattedIntegerPathParameterResolvesToIntegerKind()
+        => (await ResolvedKindAsync("""{ "type": "integer", "format": "int32" }""")).ShouldBe(PathParameterKind.Integer);
+
+    [TestMethod]
+    public async Task AnInt64FormattedIntegerPathParameterResolvesToLongKind()
+        => (await ResolvedKindAsync("""{ "type": "integer", "format": "int64" }""")).ShouldBe(PathParameterKind.Long);
+
+    /// <summary>
+    /// <c>[typed-path-parameters]</c>, corrected: <c>type: number</c> used to be misclassified as
+    /// <see cref="PathParameterKind.Integer"/> by the old <c>IsNumericType</c> helper, which
+    /// matched <c>integer</c> and <c>number</c> together for "numeric at all" before picking a
+    /// sub-kind from <c>format</c>. Measured directly against real kiota 1.34.1 output: a
+    /// <c>type: number, format: double</c> path parameter generates a <c>this[double]</c> indexer,
+    /// not <c>this[int]</c> — splicing that same fixture value through the old
+    /// <c>int.Parse(...)</c> conversion compiles (an implicit <c>int</c>-to-<c>double</c>
+    /// conversion at the call site) but throws <see cref="FormatException"/> at runtime for any
+    /// non-integral fixture value, e.g. <c>"1.5"</c>.
+    /// </summary>
+    [TestMethod]
+    public async Task ANumberPathParameterResolvesToNoTypableKind()
+        => (await ResolvedKindAsync("""{ "type": "number" }""")).ShouldBeNull();
+
+    [TestMethod]
+    public async Task ADoubleFormattedNumberPathParameterResolvesToNoTypableKind()
+        => (await ResolvedKindAsync("""{ "type": "number", "format": "double" }""")).ShouldBeNull();
+
+    [TestMethod]
+    public async Task ABooleanPathParameterResolvesToNoTypableKind()
+        => (await ResolvedKindAsync("""{ "type": "boolean" }""")).ShouldBeNull();
 
     [TestMethod]
     public async Task TheSuccessCaseIsUnaffectedByTheDeclaredErrorCaseItGainsANeighbour()
@@ -1217,5 +1322,652 @@ public class TestPlanBuilderTests
 
         mutated.RequiredScopes.ShouldNotBeNull();
         mutated.RequiredScopes.ShouldBeEmpty();
+    }
+
+    // --- ClientCallExpression wiring (typed-client-invocation plan, [convention-and-config]). ---
+    // TestPlanBuilder.Build's client parameter is optional and defaults to null, so every test
+    // above this region already covers "absent client leaves everything unchanged" implicitly —
+    // none of them pass one. These pass a ClientPlanningConfig explicitly.
+
+    private static readonly IReadOnlyDictionary<string, string> NoOverrides =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    private static readonly ClientPlanningConfig KiotaClient =
+        new(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+    private const string SpecWithAQueryParameter = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders": {
+          "get": {
+            "operationId": "listOrders",
+            "tags": ["Orders"],
+            "parameters": [{ "name": "status", "in": "query", "required": false, "schema": { "type": "string" } }],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    private const string SpecWithARequestBody = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders": {
+          "post": {
+            "operationId": "createOrder",
+            "tags": ["Orders"],
+            "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } },
+            "responses": { "201": { "description": "created", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    // [nswag-needs-operationid]: measured against a real nswag 14.7.1 client generated from an
+    // operationId shaped exactly like this one — "Orders_GetById" produces a separate
+    // "OrdersClient.GetByIdAsync" partial class, never a method on the single configured
+    // client.typeName. No query parameter and no request body, so the only thing withholding
+    // convention here is the underscore itself.
+    private const string SpecWithUnderscoreOperationId = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "get": {
+            "operationId": "Orders_GetById",
+            "tags": ["Orders"],
+            "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithNoClientConfigured()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsSetForAQualifyingSuccessCase()
+    {
+        // getOrderById: GET /orders/{id} — Success, no query parameters, no request body.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBe("Orders[{id}].GetAsync");
+        plan.Notes.ShouldBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullForADeclaredErrorCaseRegardlessOfConfig()
+    {
+        // [success-only]: TryPlanDeclaredNotFound never even attempts a resolution — it must stay
+        // null with a client configured, exactly as it already is with none.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecDeclaring404)).Document, KiotaClient);
+        var notFound = plan.Classes.SelectMany(c => c.Cases).Single(c => c.Role == CaseRole.DeclaredError);
+
+        notFound.ClientCallExpression.ShouldBeNull();
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullForAuthCasesRegardlessOfConfig()
+    {
+        // [success-only]: PlanAuthCases never even attempts a resolution either.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecDeclaringSecurity)).Document, KiotaClient);
+        var authCases = plan.Classes.SelectMany(c => c.Cases).Where(c => c.Role == CaseRole.Auth).ToList();
+
+        authCases.ShouldNotBeEmpty();
+        authCases.ShouldAllBe(c => c.ClientCallExpression == null);
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForAQueryParameterSuccessCase()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithAQueryParameter)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "listOrders");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "listOrders" &&
+            n.Reason.Contains("query parameters") && n.Reason.Contains("client-map.json", StringComparison.Ordinal),
+            "a withheld convention must point the adopter at the override map, not report the operation as unsupported");
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForARequestBodySuccessCase()
+    {
+        // Measured finding: Kiota's PostAsync takes a typed model object, not a JSON string.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithARequestBody)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "createOrder");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "createOrder" &&
+            n.Reason.Contains("request body") && n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForRefit()
+    {
+        // [refit-override-only]: permanent, unconditional — unlike NSwag below, nothing about
+        // this operation's shape (it has an operationId, no query parameters, no request body)
+        // could ever change the verdict for Refit.
+        var client = new ClientPlanningConfig(ClientKind.Refit, "Orders.ApiClient.IOrdersApi", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" && n.Reason.Contains("Refit", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionAppliesTheNSwagConventionWhenTheOperationIdQualifies()
+    {
+        // [nswag-needs-operationid]: getOrderById has an operationId with no '_', no query
+        // parameters and no request body, so NSwag's convention now applies — measured against a
+        // real nswag 14.7.1 client (ClientCallPlanner's own doc comment carries the evidence).
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForNSwagWhenNoOperationIdIsDeclared()
+    {
+        // "/health" declares no operationId, no query parameters and no request body — otherwise
+        // exactly the shape that would qualify. OperationKey.Resolve synthesizes "get_health" for
+        // it, which TestPlanBuilder must not mistake for a real, present operationId.
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "get_health");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "get_health" && n.Reason.Contains("operationId", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForNSwagWhenTheOperationIdContainsAnUnderscore()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithUnderscoreOperationId)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "Orders_GetById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "Orders_GetById" && n.Reason.Contains("'_'", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task AnOverrideBypassesTheQueryParameterGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["listOrders"] = "Orders.GetAsync(rc => rc.QueryParameters.Status = status)"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithAQueryParameter)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "listOrders");
+
+        success.ClientCallExpression.ShouldBe("Orders.GetAsync(rc => rc.QueryParameters.Status = status)");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "listOrders");
+    }
+
+    [TestMethod]
+    public async Task AnOverrideBypassesTheRequestBodyGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["createOrder"] = "Orders.PostAsync(new CreateOrderRequest())"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithARequestBody)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "createOrder");
+
+        success.ClientCallExpression.ShouldBe("Orders.PostAsync(new CreateOrderRequest())");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "createOrder");
+    }
+
+    [TestMethod]
+    public async Task AnOverrideBypassesTheNonKiotaKindGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["getOrderById"] = "OrdersGETAsync(Guid.Parse(FixtureParameter(\"getOrderById\", \"id\")))"
+        };
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBe("OrdersGETAsync(Guid.Parse(FixtureParameter(\"getOrderById\", \"id\")))");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
+    }
+
+    [TestMethod]
+    public async Task AStaleOverrideKeyYieldsANote()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["noSuchOperation"] = "Foo.GetAsync()"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+
+        plan.Notes.ShouldContain(n => n.OperationKey == "noSuchOperation" && n.Reason.Contains("stale"));
+    }
+
+    [TestMethod]
+    public async Task AnOverrideThatMatchesARealOperationIsNotReportedAsStale()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["getOrderById"] = "Orders[{id}].GetAsync"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+
+        plan.Notes.ShouldNotContain(n => n.Reason.Contains("stale"));
+    }
+
+    // ---- Reproduced crash: a HEAD/OPTIONS/TRACE operation with a `client` section configured --
+
+    private const string SpecWithAHeadOperation = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/api/ping": {
+          "head": {
+            "operationId": "ping",
+            "tags": ["Status"],
+            "responses": { "200": { "description": "ok" } }
+          }
+        }
+      }
+    }
+    """;
+
+    /// <summary>
+    /// The reproduced defect this task exists to fix, at the layer that actually crashed:
+    /// <c>ClientCallPlanner.Resolve</c> used to call <c>BuildKiotaConvention</c> unconditionally
+    /// once the query-parameter and request-body gates both passed — neither of which a bodiless
+    /// HEAD operation ever trips — and that method throws for any verb outside
+    /// GET/POST/PUT/PATCH/DELETE. Confirmed by direct reproduction before this fix: `generate`
+    /// against a spec with <c>head: { responses: { "200": … } }</c> on <c>/api/ping</c> generated
+    /// cleanly with no <c>client</c> section configured, then crashed with
+    /// <c>intest: unexpected failure: ArgumentException: 'HEAD' has no known Kiota verb-method
+    /// convention</c>, exit 2, the moment one was added — this test is the
+    /// <see cref="TestPlanBuilder"/>-level half of that reproduction (<c>ClientCallPlannerTests</c>
+    /// pins the same fix one layer down, directly against <c>Resolve</c>). Must not throw, and must
+    /// still generate the HEAD operation's Success case over raw HTTP with a
+    /// <see cref="CoverageNote"/> pointing at <c>client-map.json</c> — the same "note, not a crash"
+    /// treatment every other withheld-convention reason on this plan already gets.
+    /// </summary>
+    [TestMethod]
+    public async Task AHeadOperationWithAClientConfiguredGeneratesInsteadOfCrashing()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithAHeadOperation)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "ping");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "ping" &&
+            n.Reason.Contains("HEAD", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    // ---- [nswag-path-parameter-order]: NSwag binds a generated method's positional path
+    // parameters in the spec's *declared* order, not path-template order — reproduced end to end
+    // through TestPlanBuilder.Build, not only against ClientCallPlanner.Resolve directly
+    // (ClientCallPlannerTests pins the same fix one layer down). ---------------------------------
+
+    // parameters array declares orderId before customerId — the reverse of the path template's
+    // own /customers/{customerId}/orders/{orderId} order, exactly the measured nswag 14.7.1 shape
+    // ClientCallPlanner.BuildNSwagConvention's own doc comment documents.
+    private const string SpecWithPathParametersDeclaredOutOfPathOrder = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/customers/{customerId}/orders/{orderId}": {
+          "get": {
+            "operationId": "getCustomerOrder",
+            "tags": ["Orders"],
+            "parameters": [
+              { "name": "orderId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+              { "name": "customerId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+            ],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// The end-to-end proof of the corrected finding: before the fix, this generated
+    /// <c>GetCustomerOrderAsync({customerId}, {orderId}, ...)</c> — path-template order — which
+    /// disagrees with the declared order nswag 14.7.1 actually binds arguments in
+    /// (<c>orderId</c> first). Both parameters are <c>Guid</c>-typed, so the wrong order compiled
+    /// and would have silently asserted against the wrong resource on every run.
+    /// </summary>
+    [TestMethod]
+    public async Task ClientCallExpressionAppliesTheNSwagConventionInDeclaredOrderNotPathTemplateOrder()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithPathParametersDeclaredOutOfPathOrder)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getCustomerOrder");
+
+        success.ClientCallExpression.ShouldBe(
+            "GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: TestContext.CancellationToken)");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getCustomerOrder");
+    }
+
+    /// <summary>Kiota is unaffected by the same spec — <c>BuildKiotaConvention</c> derives its
+    /// indexer placeholders from the path template's own structure, never from declared parameter
+    /// order.</summary>
+    [TestMethod]
+    public async Task ClientCallExpressionAppliesTheKiotaConventionInPathTemplateOrderRegardlessOfDeclaredOrder()
+    {
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithPathParametersDeclaredOutOfPathOrder)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getCustomerOrder");
+
+        success.ClientCallExpression.ShouldBe("Customers[{customerId}].Orders[{orderId}].GetAsync");
+    }
+
+    // ---- [typed-path-parameters], corrected: a path parameter this classification cannot type
+    // withholds the client convention entirely rather than silently misclassifying it. ------------
+
+    private const string SpecWithADateTimePathParameter = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/events/{occurredAt}": {
+          "get": {
+            "operationId": "getEventByTimestamp",
+            "tags": ["Events"],
+            "parameters": [
+              { "name": "occurredAt", "in": "path", "required": true, "schema": { "type": "string", "format": "date-time" } }
+            ],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// Measured against real kiota 1.34.1 output: a <c>date-time</c>-formatted path parameter
+    /// generates a <c>this[DateTimeOffset]</c> indexer, not <c>this[string]</c>. Before the
+    /// correction, this resolved to <see cref="PathParameterKind.String"/> and the client-routed
+    /// branch spliced a bare <c>FixtureParameter(...)</c> call, silently binding the deprecated
+    /// <c>this[string]</c> overload every time — with the pragma already removed, that would
+    /// surface as an unsuppressed <c>CS0618</c>, not a silent pass. Now it withholds the whole
+    /// convention with a note instead.
+    /// </summary>
+    [TestMethod]
+    public async Task AnUntypablePathParameterKindWithholdsTheClientConventionForKiota()
+    {
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithADateTimePathParameter)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getEventByTimestamp");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getEventByTimestamp" &&
+            n.Reason.Contains("client-side type", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    /// <summary>The same gate applies to NSwag — TemplateRenderer.WrapForClientCall's per-kind
+    /// conversion is generator-agnostic, so an untypable path parameter is exactly as unsafe to
+    /// splice into NSwag's own strongly-typed method parameter as into Kiota's indexer.</summary>
+    [TestMethod]
+    public async Task AnUntypablePathParameterKindWithholdsTheClientConventionForNSwag()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithADateTimePathParameter)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getEventByTimestamp");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getEventByTimestamp" &&
+            n.Reason.Contains("client-side type", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    /// <summary>An override still bypasses the untypable-kind gate outright — the adopter's own
+    /// hand-written expression is not re-validated against a kind this planner could not
+    /// classify.</summary>
+    [TestMethod]
+    public async Task AnOverrideBypassesTheUntypablePathParameterKindGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["getEventByTimestamp"] = "Events[DateTimeOffset.Parse(FixtureParameter(\"getEventByTimestamp\", \"occurredAt\"))].GetAsync"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithADateTimePathParameter)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getEventByTimestamp");
+
+        success.ClientCallExpression.ShouldBe(
+            "Events[DateTimeOffset.Parse(FixtureParameter(\"getEventByTimestamp\", \"occurredAt\"))].GetAsync");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getEventByTimestamp");
+    }
+
+    // ---- [path-item-parameters]: OpenAPI 3.x also lets a path parameter be declared once at the
+    // path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every operation
+    // beneath it. Nothing in this codebase reads pathItem.Parameters — ResolvePathParameterKinds
+    // must fail such a parameter closed (null, "untypable") rather than assume
+    // PathParameterKind.String, or the client-routed branch would splice a bare fixture string
+    // into a strongly-typed indexer exactly like the corrected [typed-path-parameters] finding
+    // above, by a different mechanism (a missing declaration rather than an unsupported one).
+    // Merging pathItem.Parameters is deliberately out of scope for this gate — see
+    // ClientCallPlanner.Resolve's own [path-item-parameters] doc comment for why. ------------------
+
+    private const string SpecWithAUuidPathParameterDeclaredAtThePathItemLevel = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "parameters": [
+            { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          ],
+          "get": {
+            "operationId": "getOrderById",
+            "tags": ["Orders"],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    // Same operation, same schema, moved down onto the operation itself — the control this whole
+    // gate exists to be compared against.
+    private const string SpecWithTheSameUuidPathParameterDeclaredOnTheOperation = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "get": {
+            "operationId": "getOrderById",
+            "tags": ["Orders"],
+            "parameters": [
+              { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+            ],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// Reproduces the finding directly: before this fix, a name absent from
+    /// <c>operation.Parameters</c> fell through to <see cref="PathParameterKind.String"/> — an
+    /// assumption, not a measurement — so a path-item-level <c>id</c> was treated exactly like a
+    /// plain, untyped string and the client-routed branch spliced a bare
+    /// <c>FixtureParameter(...)</c> into what a real kiota client actually declares as
+    /// <c>this[Guid]</c>. <see langword="null"/> is now the verdict, matching the corrected
+    /// <c>[typed-path-parameters]</c> null for an unsupported type — see the paired test below for
+    /// the proof that the same schema resolves normally once it is where this method actually
+    /// looks.
+    /// </summary>
+    [TestMethod]
+    public async Task APathParameterDeclaredOnlyAtThePathItemLevelResolvesToNoTypableKind()
+    {
+        var plan = await BuildAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.PathParameterKinds.ShouldBe([null]);
+    }
+
+    [TestMethod]
+    public async Task TheSameUuidPathParameterDeclaredOnTheOperationStillResolvesToGuidKind()
+    {
+        var plan = await BuildAsync(SpecWithTheSameUuidPathParameterDeclaredOnTheOperation);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.PathParameterKinds.ShouldBe([PathParameterKind.Guid]);
+    }
+
+    /// <summary>
+    /// The end-to-end proof for Kiota: convention is withheld, and the note names the real cause
+    /// ("declared at the path-item level ... which intest does not yet read") rather than the
+    /// generic "no client-side type conversion" text an unsupported-*type* case gets
+    /// (<see cref="AnUntypablePathParameterKindWithholdsTheClientConventionForKiota"/> above) —
+    /// the two call for different remedies and must not read as the same defect.
+    /// </summary>
+    [TestMethod]
+    public async Task APathItemLevelPathParameterWithholdsTheClientConventionForKiotaWithADistinguishingNote()
+    {
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" &&
+            n.Reason.Contains("path-item level", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// NSwag withholds too, but through its own pre-existing <c>[nswag-path-parameter-order]</c>
+    /// gate — a path-template placeholder with no matching declared entry is exactly the shape
+    /// that gate already refuses to guess an argument order for, and it runs before the shared
+    /// untypable-path-parameter gate reaches this operation at all. Convention is withheld either
+    /// way; only the note text differs, which is the correct outcome given the two mechanisms.
+    /// </summary>
+    [TestMethod]
+    public async Task APathItemLevelPathParameterWithholdsTheClientConventionForNSwagToo()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" &&
+            n.Reason.Contains("'id'", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    private const string SpecDeclaring404WithAPathItemLevelPathParameter = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "parameters": [
+            { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          ],
+          "get": {
+            "operationId": "getOrderById",
+            "tags": ["Orders"],
+            "responses": {
+              "200": { "description": "ok", "content": { "application/json": {
+                "schema": { "$ref": "#/components/schemas/Order" } } } },
+              "404": { "description": "not found" }
+            }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// Pins the raw-HTTP side against a regression the fail-closed mapping above could cause:
+    /// <c>TryPlanDeclaredNotFound</c> feeds the same <c>ResolvePathParameterKinds</c> output into
+    /// <c>TemplateRenderer.UnmatchableValueFor</c>, which already treats <see langword="null"/>
+    /// exactly like <see cref="PathParameterKind.String"/> — a fresh, well-typed-but-unmatchable
+    /// GUID — so a spec like this one (no <c>client</c> section, declared-error case included)
+    /// must render byte-for-byte the same as it did on <c>main</c>, where the same parameter fell
+    /// through to <see cref="PathParameterKind.String"/> instead of <see langword="null"/>. Both
+    /// map to the same rendered literal, so this is the actual guarantee, not an assumption from
+    /// reading the switch.
+    /// </summary>
+    [TestMethod]
+    public async Task APathItemLevelPathParameterDoesNotChangeTheDeclaredErrorCaseRawHttpRendering()
+    {
+        var plan = await BuildAsync(SpecDeclaring404WithAPathItemLevelPathParameter);
+        var orders = plan.Classes.Single(c => c.ClassName == "OrdersTests");
+        var notFound = orders.Cases.Single(c => c.Role == CaseRole.DeclaredError);
+
+        notFound.PathParameterKinds.ShouldBe([null]);
+
+        var rendered = new TemplateRenderer().RenderClass(orders, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+
+        // The DeclaredError case's own unmatchable-id splice — not the Success case's, which
+        // legitimately uses FixtureParameter("getOrderById", "id") regardless of kind and is
+        // untouched by this fix either way.
+        rendered.ShouldContain("Guid.NewGuid().ToString()");
     }
 }

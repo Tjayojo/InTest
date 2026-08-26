@@ -77,6 +77,8 @@ public class TemplateEscapingGuardTests
         "identity_needs_guard",    // boolean, `if` condition only
         "emits_fixture_lookup",    // boolean, `if` condition only
         "has_body",                // boolean, `if` condition only
+        "client_type_name",        // bare reference-position type argument: ApiClient<T>() — validated by CSharpIdentifier.TryValidateDottedName, not CSharpLiteral, at config-load time
+        "client_call_expression",  // TemplateRenderer.BuildClientCallExpression already quotes+escapes internally; also an `if` condition
     };
 
     /// <summary>

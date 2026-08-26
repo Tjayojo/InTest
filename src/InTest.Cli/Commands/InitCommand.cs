@@ -26,7 +26,9 @@ public static class InitCommand
     private const string SpecRemedy =
         "Pass the path to the OpenAPI document to `intest init --spec` — for example " +
         "\"../Orders/bin/Debug/net10.0/orders.json\" — or the URL it is served from, for example " +
-        "\"https://orders-staging.example.com/swagger/v1/swagger.json\".";
+        "\"https://orders-staging.example.com/swagger/v1/swagger.json\". If you own a generated " +
+        "client but not the document, `intest init --client-lockfile <path-to-kiota-lock.json>` " +
+        "recovers it from what the generator recorded.";
 
     /// <summary>
     /// The exact bytes `init` scaffolds at <c>.gitattributes</c> — hoisted to a named constant,
@@ -112,13 +114,37 @@ public static class InitCommand
                                                                        """;
 
     /// <summary>
+    /// The remedy for giving both source arguments at once. Named once, because the refusal below
+    /// and <c>InitCommandTests</c> must not answer "which one wins" in two voices — neither does:
+    /// there is no silent priority pick, per Task 5 (<c>[lockfile-recovery]</c>).
+    /// </summary>
+    private const string MutuallyExclusiveSourceRemedy =
+        "Pass --spec to name the OpenAPI document directly, or --client-lockfile to recover it " +
+        "from a client generator's own lockfile (kiota-lock.json) — not both.";
+
+    /// <summary>
     /// Every refusal below runs before the first write, and none of them catches: an exception
     /// this command does not anticipate is §5's exit 2 by way of <c>Program</c>'s crash floor,
     /// which covers every command rather than only the three that remembered to catch. This was
     /// a <c>Run</c>/<c>Scaffold</c> pair until that floor moved up; the wrapper existed only to
     /// hold the catch-all, so it went with it.
+    /// <para>
+    /// <paramref name="clientLockfilePath"/> is Task 5's <c>[lockfile-recovery]</c> addition — a
+    /// team that owns a generated client but not the OpenAPI document it came from can point
+    /// <c>--client-lockfile</c> at the client generator's own lockfile (<c>kiota-lock.json</c>)
+    /// instead of <c>--spec</c>. <see cref="ClientLockfile.Recover"/> reads the spec location the
+    /// generator itself recorded, and — where the lockfile names a client — the
+    /// <c>client.kind</c>/<c>client.typeName</c> pair too, both of which get scaffolded into
+    /// <c>intest.json</c> alongside <c>spec</c>. Mutually exclusive with <paramref name="specSource"/>:
+    /// giving both is refused, naming both, with no silent priority pick — see
+    /// <see cref="MutuallyExclusiveSourceRemedy"/>. Defaults to <c>""</c> rather than
+    /// <see langword="null"/>, matching <paramref name="specSource"/>'s own convention on this
+    /// surface (blank, not absent, is what "not given" means here — see
+    /// <see cref="CommandArguments.TryRequireValue"/>), and keeping every pre-existing 3-argument
+    /// call site — production and test alike — compiling unchanged.
+    /// </para>
     /// </summary>
-    public static int Run(string projectRoot, string projectName, string specSource)
+    public static int Run(string projectRoot, string projectName, string specSource, string clientLockfilePath = "")
     {
         // Every argument, refused the same way, before the first write — §5's exit 2 is "Nothing
         // was written", and an argument is the one thing that can be judged with nothing on disk
@@ -130,19 +156,6 @@ public static class InitCommand
             Console.Error.WriteLine(projectReason);
             return ExitCode.ToolError;
         }
-
-        // Normalised once, before either escaping step. For a path source it is reused at both
-        // sites below — the intest.json JSON string and the csproj's <InTestSpecSource> element
-        // must agree on the same slash-normalised value, or ConfigLoader.Load and the built
-        // project would disagree on what "the spec" is. For a URL source only intest.json carries
-        // it, because the csproj names the snapshot instead (see buildTimeSpecPath below); the
-        // two still agree, they just agree that the URL is the source and spec.json is where the
-        // build finds it.
-        //
-        // Harmless on a URL, not merely tolerable: a backslash is not valid unescaped in a URL
-        // path, so a well-formed URL contains none for this to rewrite. Pinned rather than
-        // assumed — InitCommandTests asserts a URL reaches intest.json byte-for-byte as typed.
-        var normalizedSpecSource = specSource.Replace("\\", "/");
 
         // projectName seeds project.rootNamespace, project.testBaseClass, baseClassName, and the
         // `namespace` declaration of two scaffolded files (TestStartup.cs and
@@ -159,12 +172,139 @@ public static class InitCommand
             return ExitCode.ToolError;
         }
 
+        // [lockfile-recovery]: --spec and --client-lockfile name the same thing two different
+        // ways, so giving both is a contradiction, not a preference — refused before either is
+        // acted on, naming both values, rather than one silently winning. Checked ahead of every
+        // remaining --spec guard: a blank check, a URL check or the escaping check below could
+        // all pass for whichever value happened to be inspected first, silently discarding the
+        // other, which is exactly the ambiguity this guard exists to close.
+        if (!string.IsNullOrWhiteSpace(specSource) && !string.IsNullOrWhiteSpace(clientLockfilePath))
+        {
+            Console.Error.WriteLine(
+            $"--spec ('{specSource}') and --client-lockfile ('{clientLockfilePath}') cannot " +
+            $"both be given. {MutuallyExclusiveSourceRemedy}");
+            return ExitCode.ToolError;
+        }
+
+        // The recovered client identity, if the lockfile named one — carried past the blank/URL/
+        // escaping guards below (which judge specSource, now possibly overwritten from the
+        // lockfile) and read again just before the intest.json write.
+        string? recoveredClientKind = null;
+        string? recoveredClientTypeName = null;
+
+        if (!string.IsNullOrWhiteSpace(clientLockfilePath))
+        {
+            // ClientLockfile.Recover fails loudly (ClientLockfileException) rather than handing
+            // back a null or blank spec source — see that type's own doc comment for why a silent
+            // null would resurface, far from here, as ConfigLoader's "spec.source is empty"
+            // refusal. Caught the same way GenerateCommand already catches SpecLoadException and
+            // ConfigLoadException: print the message bare, exit 2, rather than Program's crash-
+            // floor phrasing.
+            try
+            {
+                var recovered = ClientLockfile.Recover(clientLockfilePath);
+                specSource = recovered.SpecSource;
+                recoveredClientKind = recovered.ClientKind;
+                recoveredClientTypeName = recovered.ClientTypeName;
+            }
+            catch (ClientLockfileException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return ExitCode.ToolError;
+            }
+
+            // recoveredClientTypeName reaches mstest-class.scriban in reference position
+            // (ApiClient<Orders.ApiClient.OrdersApiClient>()), exactly like intest.json's
+            // hand-written client.typeName — the same reasoning ConfigLoader.ReadOptionalClientConfig
+            // already applies, and the same guard, checked here (before any write) because a
+            // lockfile is adopter-controlled input like any other, not InTest's own output.
+            if (recoveredClientTypeName is not null &&
+                !CSharpIdentifier.TryValidateDottedName(recoveredClientTypeName, "the client type recovered from --client-lockfile", out var typeNameReason))
+            {
+                Console.Error.WriteLine(
+                $"{typeNameReason} --client-lockfile '{clientLockfilePath}' named a client type " +
+                "intest cannot scaffold. Fix the lockfile, or omit --client-lockfile and add a " +
+                "\"client\" section to intest.json by hand afterward.");
+                return ExitCode.ToolError;
+            }
+
+            // Reproduced defect: kiota's own `descriptionLocation` is measured (ClientLockfile's
+            // own doc comment) to be an absolute local path with forward slashes when the source
+            // was one — confirmed against a real fixture: a real run scaffolded
+            // "D:/TestGen/.claude/worktrees/intest-pregenerated-api-clients-168695/samples/Orders.Api/Orders.Api.json"
+            // verbatim into intest.json's spec.source. That is exactly the value the dev box it was
+            // generated on happened to check the repo out to — a teammate cloning elsewhere, or CI,
+            // then fails `generate` with "spec file not found" against a path that looks correct
+            // and names nothing about why. A plain, hand-typed `--spec` is not touched by this:
+            // that value is the adopter's own explicit choice, made looking at intest.json as they
+            // write it, unlike a lockfile-recovered one nobody reviewed for portability.
+            //
+            // Only attempted for a rooted (i.e. genuinely absolute) local path, never a URL —
+            // ClientLockfile.Recover treats descriptionLocation as an opaque string regardless of
+            // shape, so this is the first point that distinguishes them, the same way the
+            // specSourceIsUrl guard below does for a hand-typed --spec. A relative
+            // descriptionLocation (kiota was invoked with a relative --openapi) is left exactly as
+            // recovered — it is already expressed relative to *something*, and rewriting it
+            // relative to a different base (the project root) without knowing what that something
+            // was would silently change what it points at rather than merely reformat it.
+            if (!SpecLoader.IsUrl(specSource) && Path.IsPathRooted(specSource))
+            {
+                var fullProjectRoot = Path.GetFullPath(projectRoot);
+                var relativized = Path.GetRelativePath(fullProjectRoot, specSource).Replace('\\', '/');
+
+                // Path.GetRelativePath hands back `specSource` itself (still rooted) exactly when
+                // it cannot express one path relative to the other at all — different drive roots
+                // on Windows, chiefly, since a POSIX filesystem has exactly one root and can always
+                // relate two absolute paths through some number of "../" segments. Nothing to
+                // rewrite in that case; warn instead, loudly enough to read even though `init`
+                // still succeeds and exits 0 (CLAUDE.md's "fail loudly" is about silence, not
+                // severity — this is recoverable by hand, not a reason to refuse the whole
+                // scaffold), so the absolute path does not silently ship into a committed
+                // intest.json with nothing on record explaining why it looks the way it does.
+                if (Path.IsPathRooted(relativized))
+                {
+                    Console.WriteLine(
+                    $"Warning: --client-lockfile recovered an absolute spec location " +
+                    $"('{specSource}') that intest could not express as a path relative to the " +
+                    $"project root ('{fullProjectRoot}') — scaffolding it as-is. Anyone who checks " +
+                    "this project out somewhere else (a teammate, CI) will get \"spec file not " +
+                    "found\" from `generate` until spec.source is repointed by hand, or by editing " +
+                    "intest.json directly.");
+                }
+                else
+                {
+                    specSource = relativized;
+                }
+            }
+        }
+
+        // Normalised once, before either escaping step, and — [lockfile-recovery] — after
+        // specSource may have been overwritten from a recovered lockfile above, never before: this
+        // must normalise whatever `specSource` actually ends up meaning, or a lockfile-recovered
+        // source would be normalised from its stale pre-recovery value (empty, when only
+        // --client-lockfile was given) instead of the value that was actually recovered. For a
+        // path source it is reused at both sites below — the intest.json JSON string and the
+        // csproj's <InTestSpecSource> element must agree on the same slash-normalised value, or
+        // ConfigLoader.Load and the built project would disagree on what "the spec" is. For a URL
+        // source only intest.json carries it, because the csproj names the snapshot instead (see
+        // buildTimeSpecPath below); the two still agree, they just agree that the URL is the
+        // source and spec.json is where the build finds it.
+        //
+        // Harmless on a URL, not merely tolerable: a backslash is not valid unescaped in a URL
+        // path, so a well-formed URL contains none for this to rewrite. Pinned rather than
+        // assumed — InitCommandTests asserts a URL reaches intest.json byte-for-byte as typed.
+        var normalizedSpecSource = specSource.Replace("\\", "/");
+
         // Two questions about --spec, asked in the order that makes the second one meaningful:
         // is there a value at all, and can XML 1.0 represent the value there is. A blank --spec
         // is not an escaping problem — MSBuildPropertyValue would escape "" perfectly happily and
         // hand back "", which then reaches ConfigLoader.Load as an empty spec.source: a state
         // that command already has to refuse separately. Refusing it here means `init` never
-        // writes a config it knows `generate` will reject.
+        // writes a config it knows `generate` will reject. Unchanged by [lockfile-recovery]: a
+        // recovered lockfile's specSource has already replaced the parameter above, so this guard
+        // sees exactly the same kind of value either way — "--spec" is still the right name for
+        // it, because a lockfile-recovered spec.source is written into intest.json's "spec"
+        // section exactly like a directly-typed one, through the same variable.
         if (!CommandArguments.TryRequireValue(specSource, "--spec", SpecRemedy, out var blankSpecReason))
         {
             Console.Error.WriteLine(blankSpecReason);
@@ -251,6 +391,22 @@ public static class InitCommand
         var baseClassName = projectName.Split('.')[0] + "TestBase";
         Directory.CreateDirectory(Path.Combine(projectRoot, ".config"));
 
+        // Present only when --client-lockfile named a client (recoveredClientTypeName already
+        // validated as a dotted C# name above). Built as a standalone C# string rather than
+        // inline in the raw-string template below because the template is a DOUBLE-$ raw string
+        // ($$""") — {{ }} is its interpolation hole and a bare { or } is literal text, the
+        // opposite of the SINGLE-$ raw string the scaffolded .csproj uses further down. Composing
+        // this fragment out here means it is spliced in as one {{clientSection}} hole, with no
+        // risk of its own braces being misread as more interpolation holes by the outer template.
+        // recoveredClientKind is always "kiota" whenever recoveredClientTypeName is non-null —
+        // ClientLockfile.Recover's only supported shape — so no further validation of kind is
+        // needed here; ConfigLoader.ReadOptionalClientConfig re-validates it as any other
+        // hand-edited intest.json would be, the same one-loader-validates-everything discipline
+        // every other scaffolded setting on this surface already gets.
+        var clientSection = recoveredClientTypeName is not null
+            ? $",\n  \"client\": {{ \"kind\": \"{recoveredClientKind}\", \"typeName\": \"{recoveredClientTypeName}\" }}"
+            : string.Empty;
+
         Write(projectRoot, "intest.json", $$"""
                                             {
                                               "schemaVersion": {{ConfigLoader.SupportedSchemaVersion}},
@@ -262,7 +418,7 @@ public static class InitCommand
                                                 "framework": "mstest",
                                                 "assertions": ["shouldly"],
                                                 "testBaseClass": "{{projectName}}.{{baseClassName}}"
-                                              }
+                                              }{{clientSection}}
                                             }
                                             """);
 
