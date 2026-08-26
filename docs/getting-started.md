@@ -369,16 +369,25 @@ or fail for the wrong reason.
 `Success` cases ever route through a client — a 404 or a 401/403 case is testing what your *API*
 does with a bad request, not what your client does with one, so those always build
 `HttpRequestMessage` directly regardless of this section. Among `Success` cases, `generate`
-derives the call automatically today only for Kiota, and only for an operation with **no query
-parameters and no request body** — Kiota binds query parameters through a
-`RequestConfiguration` lambda and takes a typed model object for a request body, and there is no
-fixture value InTest could safely splice into either shape. `coverage-report.json` (Phase 4) notes
-every operation this withholds convention for, and points at `client-map.json`.
+derives the call automatically for an operation with **no query parameters and no request
+body** — neither generator's convention has a fixture value InTest could safely splice into a
+query-binding shape or a typed request-body parameter. For Kiota that is the only condition. For
+NSwag it additionally needs your spec to declare an `operationId` for the operation, with no `_`
+in it — `generate` derives `{PascalCase(operationId)}Async` directly on your configured client
+type (measured against a real nswag 14.7.1 client), but an operation with no `operationId` reduces
+to NSwag's own unpredictable, uncompilable synthesized naming, and an `operationId` containing `_`
+gets split by NSwag's default generation mode onto a *different* client class than the one you
+configured — measured the same way, see
+`docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s `[nswag-needs-operationid]`
+for both pieces of evidence. Refit gets no automatic convention at all, ever: a Refit interface's
+method names are either hand-written or generator-settings-dependent, so there is no spec-derived
+fact — an `operationId` included — that could make deriving one deterministic
+(`[refit-override-only]`, same doc). `coverage-report.json` (Phase 4) notes every operation this
+withholds convention for, and points at `client-map.json`.
 
 Add an entry there to route anything convention does not cover — a query-parameter operation, a
-POST, or any NSwag/Refit operation at all (neither gets an automatic convention in v1; see
-`docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md` for the measured reason
-NSwag's generated methods cannot be spliced into safely):
+POST, an NSwag operation with no `operationId` or an underscored one, or any Refit operation at
+all:
 
 ```json
 {

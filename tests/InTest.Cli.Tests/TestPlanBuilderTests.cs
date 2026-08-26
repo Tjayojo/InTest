@@ -1338,6 +1338,30 @@ public class TestPlanBuilderTests
     }
     """;
 
+    // [nswag-needs-operationid]: measured against a real nswag 14.7.1 client generated from an
+    // operationId shaped exactly like this one — "Orders_GetById" produces a separate
+    // "OrdersClient.GetByIdAsync" partial class, never a method on the single configured
+    // client.typeName. No query parameter and no request body, so the only thing withholding
+    // convention here is the underscore itself.
+    private const string SpecWithUnderscoreOperationId = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "get": {
+            "operationId": "Orders_GetById",
+            "tags": ["Orders"],
+            "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
     [TestMethod]
     public async Task ClientCallExpressionIsNullWithNoClientConfigured()
     {
@@ -1406,15 +1430,60 @@ public class TestPlanBuilderTests
     }
 
     [TestMethod]
-    public async Task ClientCallExpressionIsNullWithANoteForANonKiotaKind()
+    public async Task ClientCallExpressionIsNullWithANoteForRefit()
     {
-        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+        // [refit-override-only]: permanent, unconditional — unlike NSwag below, nothing about
+        // this operation's shape (it has an operationId, no query parameters, no request body)
+        // could ever change the verdict for Refit.
+        var client = new ClientPlanningConfig(ClientKind.Refit, "Orders.ApiClient.IOrdersApi", NoOverrides);
 
         var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
 
         success.ClientCallExpression.ShouldBeNull();
-        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" && n.Reason.Contains("NSwag", StringComparison.Ordinal));
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" && n.Reason.Contains("Refit", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionAppliesTheNSwagConventionWhenTheOperationIdQualifies()
+    {
+        // [nswag-needs-operationid]: getOrderById has an operationId with no '_', no query
+        // parameters and no request body, so NSwag's convention now applies — measured against a
+        // real nswag 14.7.1 client (ClientCallPlanner's own doc comment carries the evidence).
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForNSwagWhenNoOperationIdIsDeclared()
+    {
+        // "/health" declares no operationId, no query parameters and no request body — otherwise
+        // exactly the shape that would qualify. OperationKey.Resolve synthesizes "get_health" for
+        // it, which TestPlanBuilder must not mistake for a real, present operationId.
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "get_health");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "get_health" && n.Reason.Contains("operationId", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForNSwagWhenTheOperationIdContainsAnUnderscore()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithUnderscoreOperationId)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "Orders_GetById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "Orders_GetById" && n.Reason.Contains("'_'", StringComparison.Ordinal));
     }
 
     [TestMethod]

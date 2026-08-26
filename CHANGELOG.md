@@ -18,10 +18,14 @@ goes in `Unreleased` and when it moves to a version heading.
   `HttpRequestMessage`, while raw-bytes schema validation, expected-status assertions and every
   other case kind (declared-error, auth) work exactly as before — a `DelegatingHandler` buffers
   and captures the response before the typed client deserializes it, so the client changes only
-  *how* a request is issued, never what a generated test asserts. `client-map.json` lets an
-  adopter override or supply the call expression for any operation convention-derivation does not
-  reach (query parameters, a request body, or a non-Kiota client). This is entirely additive and
-  opt-in: a project with no `client` section produces byte-identical output to one built without
+  *how* a request is issued, never what a generated test asserts. Convention-derivation covers
+  Kiota unconditionally, and NSwag once the operation's `operationId` is present and contains no
+  `_` — both measured directly against real generator output, not assumed. `client-map.json` lets
+  an adopter override or supply the call expression for any operation convention-derivation does
+  not reach (query parameters, a request body, an NSwag operation whose `operationId` doesn't
+  qualify, or any Refit operation at all — Refit gets no convention, permanently, since its method
+  naming is never spec-derivable). This is entirely additive and opt-in: a project with no `client`
+  section produces byte-identical output to one built without
   this feature at all. **Migration:** none required. See
   `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md` for the design and
   `docs/getting-started.md`'s "Typed client invocation (opt-in)" for the three concrete client

@@ -20,11 +20,16 @@ public enum ClientKind
     Kiota,
 
     /// <summary>
-    /// Override-map-only in v1, on measured evidence rather than caution: NSwag's generated
-    /// methods take <b>strongly typed</b> parameters with no string overload
-    /// (<c>OrdersGETAsync(System.Guid id)</c>), so a fixture value — always a <see cref="string"/>
-    /// — cannot be spliced into a derived call and compile. See
-    /// <see cref="ClientCallPlanner"/>'s own doc comment for the full measured finding.
+    /// Gets a convention guess, but only when the spec's <c>operationId</c> makes NSwag's own
+    /// naming deterministic — <c>[nswag-needs-operationid]</c>. The original v1 measurement (no
+    /// <c>operationId</c> anywhere in the spec) found NSwag's synthesized
+    /// <c>{Resource}{VERB}Async</c> naming both unpredictable (a collection-vs-item split no
+    /// path-segment convention can see coming) and uncompilable (strongly-typed parameters with no
+    /// string overload). Measured again with a real <c>operationId</c> present: nswag 14.7.1 emits
+    /// exactly <c>{PascalCase(operationId)}Async</c> on the configured client class — see
+    /// <see cref="ClientCallPlanner"/>'s own doc comment for the full measured finding, including
+    /// the separate underscore-splitting hazard that still withholds convention even with an
+    /// <c>operationId</c> present.
     /// </summary>
     NSwag,
 

@@ -83,7 +83,8 @@ public sealed record TestCasePlan(
     // DeclaredError and Auth case unconditionally ([success-only] — TestPlanBuilder never even
     // attempts a resolution for those roles, regardless of config), and any Success case that
     // either declared no `client` config, matched no override, or failed one of
-    // ClientCallPlanner.Resolve's gates (a non-Kiota kind, a query parameter, or a request body) —
+    // ClientCallPlanner.Resolve's gates (Refit unconditionally; NSwag with no operationId or an
+    // underscored one; a query parameter or a request body for either Kiota or NSwag) —
     // TestPlanBuilder emits a CoverageNote pointing at client-map.json in that last case rather
     // than reporting the operation as unsupported, since its raw-HTTP Success case still generated
     // and still runs.

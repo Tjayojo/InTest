@@ -978,10 +978,15 @@ byte-level either way.
 **Which cases qualify.** Only `CaseRole.Success` cases are ever routed through a client —
 declared-error and auth cases exist to exercise the API's own behaviour against a deliberately
 unmatchable input, not a client's exception handling, and continue to use raw `HttpRequestMessage`
-unconditionally. Among `Success` cases, a per-generator convention derives the call expression
-(Kiota only, on measured evidence — see the plan document) for an operation with **no query
-parameters and no request body**; an adopter-owned `client-map.json` override bypasses every gate
-and covers everything convention does not, including NSwag and Refit.
+unconditionally. Among `Success` cases, a per-generator convention derives the call expression for
+an operation with **no query parameters and no request body**: for Kiota that condition alone is
+enough; for NSwag the operation's `operationId` must additionally be present and contain no `_`,
+both measured constraints (`[nswag-needs-operationid]` — see the plan document) rather than
+assumed ones. An adopter-owned `client-map.json` override bypasses every gate and covers
+everything convention does not — a query-parameter or request-body operation regardless of kind,
+an NSwag operation whose `operationId` does not qualify, and any Refit operation at all, since
+Refit gets no convention whatsoever (`[refit-override-only]`, permanent — no spec-derived fact
+could make an arbitrary interface's method naming deterministic).
 
 **The adopter's client must be constructed over the same pipeline InTest's own `Client` uses** —
 `IHttpClientFactory.CreateClient(InTestClients.Api)` — or it silently loses capture, the auth

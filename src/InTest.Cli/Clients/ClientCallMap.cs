@@ -6,10 +6,12 @@ namespace InTest.Cli.Clients;
 /// <summary>
 /// Parses the adopter-owned <c>client-map.json</c> at the project root:
 /// <c>{ "overrides": { "&lt;operationKey&gt;": "&lt;C# call expression&gt;" } }</c>. Overrides
-/// exist because <see cref="Planning.ClientCallPlanner"/>'s Kiota convention either does not apply
-/// (a query-parameter or request-body Success case), does not exist at all for the adopter's
-/// generator (NSwag, Refit — <c>[refit-override-only]</c>), or the adopter simply prefers to spell
-/// the call themselves.
+/// exist because <see cref="Planning.ClientCallPlanner"/>'s convention either does not apply to a
+/// given operation (a query-parameter or request-body Success case, for either Kiota or NSwag; an
+/// NSwag operation with no <c>operationId</c> or an underscored one —
+/// <c>[nswag-needs-operationid]</c>), does not exist at all for the adopter's generator (Refit —
+/// <c>[refit-override-only]</c>, permanent and unconditional, unlike NSwag's gated case), or the
+/// adopter simply prefers to spell the call themselves.
 /// <para>
 /// Parses the same way <see cref="Fixtures.FixtureDocument"/> parses a fixture, deliberately: both
 /// are committed, hand-edited files, so a malformed field — an unquoted number, a nested object

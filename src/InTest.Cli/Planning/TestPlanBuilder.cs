@@ -149,7 +149,7 @@ public static class TestPlanBuilder
                 // never call ClientCallPlanner at all, regardless of `client`, because they exist
                 // to exercise the API's own behaviour against an unmatchable id, not the client's.
                 var clientCallExpression = ResolveClientCall(
-                    client, key.Value, httpMethod, path, queryParameterNames.Count > 0, hasRequestBody, notes);
+                    client, key, httpMethod, path, queryParameterNames.Count > 0, hasRequestBody, notes);
 
                 draft.Add((tag, new TestCasePlan(
                     MethodName: methodName,
@@ -385,9 +385,16 @@ public static class TestPlanBuilder
     /// short-circuits before ever touching <see cref="ClientCallPlanner"/> — the common path today,
     /// and the one every existing golden fixture and test exercises, so it must add zero overhead
     /// and zero notes.
+    /// <para>
+    /// Takes the whole <see cref="OperationKey"/>, not just its <c>Value</c>, so
+    /// <c>[nswag-needs-operationid]</c>'s presence gate can read <c>!key.Synthesized</c> — the
+    /// fact <c>OperationKey.Resolve</c> already computed about whether the spec declared an
+    /// <c>operationId</c> — rather than this method (or <see cref="ClientCallPlanner"/>)
+    /// re-deriving it from the operation a second time.
+    /// </para>
     /// </summary>
     private static string? ResolveClientCall(
-        ClientPlanningConfig? client, string operationKey, string httpMethod, string path,
+        ClientPlanningConfig? client, OperationKey key, string httpMethod, string path,
         bool hasQueryParameters, bool hasRequestBody, List<CoverageNote> notes)
     {
         if (client is null)
@@ -396,11 +403,12 @@ public static class TestPlanBuilder
         }
 
         var resolution = ClientCallPlanner.Resolve(
-            client.Kind, operationKey, httpMethod, path, hasQueryParameters, hasRequestBody, client.Overrides);
+            client.Kind, key.Value, !key.Synthesized, httpMethod, path, hasQueryParameters, hasRequestBody,
+            client.Overrides);
 
         if (resolution.Expression is null && resolution.UnresolvedReason is not null)
         {
-            notes.Add(new CoverageNote(operationKey, resolution.UnresolvedReason));
+            notes.Add(new CoverageNote(key.Value, resolution.UnresolvedReason));
         }
 
         return resolution.Expression;

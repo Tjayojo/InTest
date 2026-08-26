@@ -301,6 +301,49 @@ public class ResponseCaptureHandlerTests
     }
 
     /// <summary>
+    /// Finding B's second half, pinned separately from the BOM test above: the handler's own
+    /// comment on why <c>replacement.ReadAsStringAsync()</c> replaced <c>Encoding.UTF8.GetString</c>
+    /// names two independent reasons — BOM-stripping (the test above) and honouring a
+    /// <c>charset</c> parameter on <c>Content-Type</c>, which <c>Encoding.UTF8.GetString</c> never
+    /// consults at all, decoding every byte as UTF-8 regardless of what the response actually
+    /// declared. This test exercises the second reason in isolation: a body genuinely encoded as
+    /// UTF-16LE (two bytes per ASCII character, a leading <c>FF FE</c> byte-order mark), with
+    /// <c>Content-Type: application/json; charset=utf-16</c> naming that encoding explicitly.
+    /// <c>ReadAsStringAsync</c> resolves <c>"utf-16"</c> via <see cref="Encoding.GetEncoding(string)"/>
+    /// to <see cref="Encoding.Unicode"/> and decodes correctly; <c>Encoding.UTF8.GetString</c> on
+    /// the same bytes would instead read every ASCII byte as UTF-8 with an interleaved NUL byte
+    /// following it — never valid UTF-8 for any byte above U+007F, and even for pure ASCII text the
+    /// embedded NULs and lone BOM bytes leave a string that is not the original JSON at all. The
+    /// captured <see cref="CapturedResponse.Body"/> must be the exact original text and must parse.
+    /// </summary>
+    [TestMethod]
+    public async Task CapturedBodyHonoursAUtf16CharsetOnContentTypeAndParsesAsJson()
+    {
+        var utf16Bytes = Encoding.Unicode.GetPreamble()
+            .Concat(Encoding.Unicode.GetBytes("""{"state":"ok"}"""))
+            .ToArray();
+
+        using var invoker = BuildInvoker(
+            utf16Bytes, headers: [("Content-Type", "application/json; charset=utf-16")]);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("https://h.invalid/api/orders/7"));
+        var slot = InTestAmbient.LastCapturedResponse.Value!;
+
+        using var response = await invoker.SendAsync(request, CancellationToken.None);
+
+        var captured = slot.Value;
+        captured.ShouldNotBeNull();
+
+        // Under Encoding.UTF8.GetString(utf16Bytes) this would not equal the original JSON at all
+        // (interleaved NUL bytes and the UTF-16 BOM bytes are not valid UTF-8 for this content),
+        // so this assertion — and the JsonDocument.Parse below — both fail loudly under the old
+        // behavior and pass under ReadAsStringAsync's charset-aware decoding.
+        captured!.Value.Body.ShouldBe("""{"state":"ok"}""");
+
+        using var parsed = System.Text.Json.JsonDocument.Parse(captured.Value.Body);
+        parsed.RootElement.GetProperty("state").GetString().ShouldBe("ok");
+    }
+
+    /// <summary>
     /// A relative request URI is unaffected by the authority check — <c>HttpClient.BaseAddress</c>
     /// governs it unconditionally, the same as every raw-HTTP case already relies on, so there is
     /// no second authority for it to disagree with. Sent through a bare <see cref="HttpMessageInvoker"/>

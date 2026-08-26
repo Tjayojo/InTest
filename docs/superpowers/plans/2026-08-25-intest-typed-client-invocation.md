@@ -1,7 +1,8 @@
 # Opt-in invocation through a team's pre-generated API client
 
-**Status: complete, 2026-08-26.** Five commits, in order, plus Task 5 (`[lockfile-recovery]`)
-below:
+**Status: complete, 2026-08-26.** Five commits, in order, for the original stages below, plus
+Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`) and Task 7
+(`[nswag-needs-operationid]`) — seven commits total:
 
 | Stage | Commit | What it landed |
 |---|---|---|
@@ -11,7 +12,8 @@ below:
 | 3 — `[template-and-render]` | `0104a4d` | The template branch, `GenerateCommand` writing `clientCaptureEnabled`, full golden proof of *generated* code |
 | fix — the schema-less gap | `19ab080` | A client-routed case with no response schema (a 204, or any `client-map.json` override) now still routes through the client instead of silently falling back to raw HTTP |
 | 5 — `[lockfile-recovery]` | `02af19d` | `intest init --client-lockfile <path>`: recovers `spec.source` — and, where the lockfile names one, a `client` section — from a client generator's own lockfile, for a team that owns a generated client but not the OpenAPI document it came from. Kiota only; NSwag was measured and scoped out. See `[lockfile-recovery]` below, which supersedes `[lockfile-configures]`'s "nothing reads them yet" |
-| 6 — `[typed-path-parameters]` | *(this change, uncommitted)* | A path parameter's fixture value is now converted to the type Kiota's per-parameter item-builder indexer actually declares (`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)`) before being spliced into a client-routed call, so the generated call binds the typed, non-obsolete indexer overload instead of the deprecated `this[string]` one. **Retires** the "Generator-version fragility" risk's dated finding below — see that risk entry, kept rather than deleted, for the closure note |
+| 6 — `[typed-path-parameters]` | `1e15fd4` | A path parameter's fixture value is now converted to the type Kiota's per-parameter item-builder indexer actually declares (`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)`) before being spliced into a client-routed call, so the generated call binds the typed, non-obsolete indexer overload instead of the deprecated `this[string]` one. **Retires** the "Generator-version fragility" risk's dated finding below — see that risk entry, kept rather than deleted, for the closure note |
+| 7 — `[nswag-needs-operationid]` | *(this change, uncommitted)* | NSwag now gets a convention guess too, gated on the spec declaring an `operationId` with no `_` in it — measured directly against a real nswag 14.7.1 client, both for the happy path (`{PascalCase(operationId)}Async`) and for the underscore hazard (NSwag's default `operationGenerationMode` splits onto a different client class). **Partially reopens** the "NSwag convention derivation does not work" finding below — see that finding's own correction note, and `ClientCallPlanner`'s doc comment, for the full measured evidence. Refit gets no convention still, but its own reasoning is now recorded as a *permanent* limitation, distinct from NSwag's gated one, not lumped in with it |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
 tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
@@ -528,6 +530,44 @@ mechanism. It must additionally match whatever NSwag itself chose for a given pa
 depends on NSwag's own generation settings — one more reason this is deferred rather than guessed
 at.
 
+**PARTIALLY REOPENED for NSwag by Task 7, `[nswag-needs-operationid]`.** Both problems named above
+turn out to be specific to the spec this finding measured against — one with **no `operationId`
+anywhere** — not to NSwag in general, and the type-mapping layer this section called for already
+exists by the time Task 7 needed it, built for a different reason: `[typed-path-parameters]` (Task
+6, above) landed first, and `TemplateRenderer.BuildClientCallExpression`'s per-`{param}`-placeholder
+substitution (`WrapForClientCall`) is generator-agnostic by construction — it converts *any*
+`{param}` token in `TestCasePlan.ClientCallExpression` per that parameter's `PathParameterKind`,
+regardless of which convention produced the surrounding expression text. NSwag's convention
+(`BuildNSwagConvention`) needed only to leave the same `{param}` placeholders in its own output,
+exactly as `BuildKiotaConvention` already does, and the existing conversion layer picks them up for
+free — no second type-classification mechanism was built, confirming the sentence above that
+predicted this would be "where such a layer would extend from."
+- **Problem 1 (unpredictable naming) does not apply when `operationId` is present.** Measured
+  directly (nswag 14.7.1, `openapi2csclient`, an explicit `/classname`): with
+  `operationId: "getOrderById"` declared, the client emits exactly `GetOrderByIdAsync` on the
+  single configured class — no collection-vs-item split, because that split is a symptom of NSwag
+  *synthesizing* a name from resource and verb when no `operationId` exists to use instead. An
+  operation that does declare one skips the synthesis path entirely.
+- **Problem 2 (strongly-typed parameters, no string overload) is solved by the type-mapping layer
+  Task 6 already built for Kiota, applied here for free.** Measured directly, same generation: a
+  `format: uuid` path parameter yields `GetOrderByIdAsync(System.Guid id, ...)`, and
+  `WrapForClientCall` converts the spliced `FixtureParameter(...)` call through `Guid.Parse(...)`
+  before it reaches that parameter — the exact conversion this finding said NSwag would need,
+  already present and reused rather than newly written.
+- **A third hazard this original finding never measured, because its spec had no `operationId` to
+  expose it: NSwag's default `operationGenerationMode` splits an `operationId` containing `'_'`
+  onto a separate client class per prefix.** Measured directly: `operationId: "Orders_GetById"`
+  alongside `operationId: "Customers_GetById"`, run through `nswag openapi2csclient` with no
+  `operationGenerationMode` override, emits **two** separate `public partial class` client types
+  (`OrdersClient.GetByIdAsync`, `CustomersClient.GetByIdAsync`) rather than one. `ClientCallPlanner.Resolve`
+  withholds convention for any `operationId` containing `_`, unconditionally — see
+  `ClientCallPlanner`'s own doc comment and the "Convention gates" section above for the full
+  reasoning and the gate order.
+
+Refit is unaffected by any of this — see `[refit-override-only]` above, now stated in the plan's
+decisions section as a permanent limitation distinct from NSwag's gated one, per Task 7's own scope
+(item 2 of that task's review).
+
 ---
 
 ## Convention gates, precisely as built
@@ -536,22 +576,39 @@ at.
 
 1. **Override lookup runs first, unconditionally.** A `client-map.json` entry for the operation
    key returns that value verbatim and skips every gate below — including for an operation with
-   query parameters or a request body.
-2. **Kind gate.** Anything other than `ClientKind.Kiota` gets no convention attempt at all —
-   `[refit-override-only]` for Refit unconditionally, and NSwag on the measured evidence above.
-3. **Query-parameter gate.** Kiota binds query parameters through a `RequestConfiguration<...>`
-   lambda, never positional arguments; convention derivation has no fixture value to splice into
-   that shape, so any operation with one or more query parameters withholds convention and emits a
-   `CoverageNote` pointing at `client-map.json`.
-4. **Request-body gate.** Kiota's `PostAsync`/`PutAsync`/`PatchAsync` take a **typed model
-   object** as their first positional parameter, never a JSON string — and a fixture's request
-   body is raw JSON text. Splicing it would mean guessing the generated model type's name, which
-   this planner never attempts; any operation with a JSON request body to compose withholds
-   convention the same way, with the same note.
+   query parameters or a request body, and including one with no `operationId` at all or one
+   containing `_`.
+2. **Refit: unconditional withhold.** `[refit-override-only]` — permanent, not gated on anything
+   the spec could supply. Checked first among the per-kind gates because, unlike NSwag's two gates
+   below, nothing about a given operation could ever change this verdict.
+3. **NSwag operationId-presence gate.** `[nswag-needs-operationid]`, Task 7. No declared
+   `operationId` reproduces the original measurement's no-`operationId` case exactly (NSwag's
+   synthesized, unpredictable, uncompilable naming), so convention withholds the same way it always
+   did for that case, with a `CoverageNote` pointing at `client-map.json`.
+4. **NSwag underscore gate.** `[nswag-needs-operationid]`, Task 7. An `operationId` containing `_`
+   withholds convention even though one is present — NSwag's default `operationGenerationMode`
+   would route the derived method onto a different, unnameable client class (measured — see the
+   finding below), so this planner cannot trust the single configured `client.typeName` to be the
+   right receiver.
+5. **Query-parameter gate.** Applies to both Kiota and NSwag. Kiota binds query parameters through
+   a `RequestConfiguration<...>` lambda; NSwag's own generated methods take differently-shaped
+   optional parameters for the same purpose. Neither convention has a fixture value to splice into
+   either shape, so any operation with one or more query parameters withholds convention regardless
+   of kind, with a `CoverageNote` pointing at `client-map.json`.
+6. **Request-body gate.** Applies to both Kiota and NSwag. Both generators' `POST`/`PUT`/`PATCH`
+   methods take a **typed model object** as a positional parameter, never a JSON string — and a
+   fixture's request body is raw JSON text. Splicing it would mean guessing the generated model
+   type's name, which this planner never attempts; any operation with a JSON request body to
+   compose withholds convention the same way, with the same note.
+7. **Verb gate — Kiota only.** A HEAD/OPTIONS/TRACE operation has no known Kiota verb-method
+   convention (`BuildKiotaConvention` only maps GET/POST/PUT/PATCH/DELETE) and withholds with a
+   note naming the verb. NSwag needs no equivalent: its method name comes from `operationId` alone,
+   never the verb, so no verb can make `BuildNSwagConvention` fail.
 
-Both gates apply only when reached — an override already returned before either runs, so an
-operation with query parameters *and* an entry in `client-map.json` is fully covered by the
-override, not silently dropped to raw HTTP.
+Every gate applies only when reached — an override already returned before any of them run, so an
+operation with query parameters, a request body, no `operationId`, or an underscored `operationId`
+*and* an entry in `client-map.json` is fully covered by the override, not silently dropped to raw
+HTTP.
 
 ---
 
@@ -618,27 +675,44 @@ for free.
 - **`TemplateEscapingGuardTests`.** `client_type_name` and `client_call_expression` are both
   listed in `AllowedInBarePosition` with a one-line reason each, so the guard that scans the
   template for un-escaped spec-derived text does not flag either as a defect.
-- **Measured on this branch, 2026-08-26** (`dotnet build InTest.sln`, then each suite
-  `--no-build`): build clean, 0 warnings. `InTest.Architecture.Tests` **12** passing,
+**Per-assembly counts below are each anchored to a specific commit, not stated as bare numbers —
+CLAUDE.md's own reviewer feedback on an earlier revision of this document is why: a bare count
+drifts the moment `main` moves under a contributor, silently reads as current forever after, and
+two independently-stated totals (this document said 555, the PR body said 572) can disagree with
+no way for a reader to tell which — if either — is still true. Every bullet below names the commit
+its numbers were measured against; re-measure before trusting any of them past that commit.**
+
+- **Measured as of commit `722fe7f` (stage 1, 2026-08-26)** (`dotnet build InTest.sln`, then each
+  suite `--no-build`): build clean, 0 warnings. `InTest.Architecture.Tests` **12** passing,
   `InTest.Cli.Tests` **555** passing, `InTest.Runtime.Tests` **234** passing,
   `InTest.Golden.Tests` **43** passing (3m14s) — the suite that actually proves generated code
-  compiles and runs, so do not skip it when touching the template or renderer. Do not trust these
-  counts without re-measuring — `main` moves under contributors on this repository.
-- **Re-measured after Task 6, `[typed-path-parameters]`, same 2026-08-26** (`dotnet build
-  InTest.sln`, then each suite `--no-build`): build clean, 0 warnings, `samples/*.json` restored
-  with `git checkout -- samples/` (a `dotnet build` regenerates them; never staged, per
-  CONTRIBUTING.md). `InTest.Architecture.Tests` **12** passing (unchanged — this task never touched
-  that project), `InTest.Cli.Tests` **589** passing (+10: six `TestPlanBuilderTests` covering each
-  of the four `PathParameterKind`s resolved from a real schema shape, four
-  `TemplateRendererClientTests` covering each kind's client-routed splice shape), `InTest.Runtime.Tests`
-  **245** passing (unchanged — CLAUDE.md's constraint against touching `src/InTest.Runtime/**`
-  applied), `InTest.Golden.Tests` **44** passing (3m14s, unchanged in count — the one path-parameter
-  golden test this task touches was renamed and its assertions rewritten in place, not
-  duplicated). The intervening commits between the first measurement above and this one
-  (`02af19d`, `19d4bb5`) already moved `InTest.Cli.Tests` from 555 to 579 and `InTest.Runtime.Tests`
-  from 234 to 245 before this task's own +10 landed — the deltas quoted here are against this
-  task's own starting point, not the first bullet's numbers directly. Do not trust these counts
-  without re-measuring either — the same caveat applies.
+  compiles and runs, so do not skip it when touching the template or renderer.
+- **Re-measured as of commit `1e15fd4` (Task 6, `[typed-path-parameters]`, same 2026-08-26)**
+  (`dotnet build InTest.sln`, then each suite `--no-build`): build clean, 0 warnings,
+  `samples/*.json` restored with `git checkout -- samples/` (a `dotnet build` regenerates them;
+  never staged, per CONTRIBUTING.md). `InTest.Architecture.Tests` **12** passing (unchanged — this
+  task never touched that project), `InTest.Cli.Tests` **589** passing (+10: six
+  `TestPlanBuilderTests` covering each of the four `PathParameterKind`s resolved from a real schema
+  shape, four `TemplateRendererClientTests` covering each kind's client-routed splice shape),
+  `InTest.Runtime.Tests` **245** passing (unchanged — CLAUDE.md's constraint against touching
+  `src/InTest.Runtime/**` applied), `InTest.Golden.Tests` **44** passing (3m14s, unchanged in
+  count — the one path-parameter golden test this task touches was renamed and its assertions
+  rewritten in place, not duplicated). The intervening commits between the previous measurement and
+  this one (`02af19d`, `19d4bb5`) already moved `InTest.Cli.Tests` from 555 to 579 and
+  `InTest.Runtime.Tests` from 234 to 245 before this task's own +10 landed — the deltas quoted here
+  are against this task's own starting point, not the previous bullet's numbers directly.
+- **Re-measured on top of commit `1e15fd4` (Task 7, `[nswag-needs-operationid]`, uncommitted,
+  2026-08-26)** (`dotnet build InTest.sln`, then each suite `--no-build`): build clean, 0 warnings,
+  `samples/*.json` unaffected by this task's own `dotnet build` runs (checked directly; nothing to
+  restore). `InTest.Architecture.Tests` **12** passing (unchanged). `InTest.Cli.Tests` **604**
+  passing (+15 over the `1e15fd4` count: `ClientCallPlannerTests` gained
+  `BuildNSwagConvention`-direct coverage and `Resolve`-level coverage for both new NSwag gates,
+  the Kiota-verb-gate/operationId-independence pair, and the Refit-rename; `TestPlanBuilderTests`
+  gained the NSwag-qualifies / no-operationId / underscore cases plus the Refit rename).
+  `InTest.Runtime.Tests` **246** passing (+1: `CapturedBodyHonoursAUtf16CharsetOnContentTypeAndParsesAsJson`,
+  item 3(b) below — the fix already in place, this pins it). `InTest.Golden.Tests` **45** passing
+  (3m20s; +1: `CompileVerificationTests.GeneratedProjectWithASelfClosingClientMapOverrideCompiles`,
+  item 3(a) below). All four counts increased or held; none decreased.
 
 ---
 
@@ -716,7 +790,15 @@ for free.
   drift-blocks-`generate` gate, because (unlike a fixture) there is no second derivable answer to
   diff an override against; the only available check is "does this key still name an operation in
   the plan at all."
-- **NSwag and Refit ship override-map-only**, by measured choice for NSwag and by definition for
-  Refit (`[refit-override-only]`) — not a gap expected to close automatically as more generators
-  are tried, but a decision each would need its own measurement (NSwag) or has no convention to
-  measure at all (Refit).
+- **NSwag ships gated, not override-map-only, as of Task 7.** An operation with no `operationId`,
+  or one containing `_`, still falls back to `client-map.json` — both measured reasons, not
+  caution (see `[nswag-needs-operationid]` and the corrected finding above). This is a *narrower*
+  gap than it was: an adopter who controls their own spec's `operationId`s can widen NSwag's
+  convention coverage simply by naming operations, something no override-map-only design could
+  ever offer.
+- **Refit ships override-map-only permanently, by definition, unrelated to any measurement
+  (`[refit-override-only]`).** Unlike NSwag above, there is no spec-derived fact — an `operationId`
+  included — that could ever make Refit's naming deterministic, because "Refit" names an interface
+  *shape* reachable from more than one generator (or hand-written), each free to name methods
+  however its author chose. This is not expected to close as more generators are tried or measured
+  further; it is a structural limitation of what "Refit" even means, not a gap this plan left open.

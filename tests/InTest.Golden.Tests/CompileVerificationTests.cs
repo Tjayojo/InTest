@@ -193,6 +193,101 @@ public class CompileVerificationTests
         exitCode.ShouldBe(0, $"Generated project failed to compile:{Environment.NewLine}{output}");
     }
 
+    /// <summary>
+    /// The reviewer-requested case <c>TemplateRendererClientTests</c>'s
+    /// <c>AppendsTheCancellationTokenToABareCallChainButNotToASelfClosingOverride</c> already
+    /// covers as a rendered-string assertion, but nothing compiled one — exactly the gap that hid
+    /// the CS0149 defect <c>TemplateRenderer.BuildClientCallExpression</c>'s own doc comment
+    /// names: before that fix, a self-closing <c>client-map.json</c> override (one that already
+    /// spells its own argument list, the documented escape hatch getting-started.md's own worked
+    /// example uses) got a second <c>(cancellationToken: …)</c> argument list appended
+    /// unconditionally, producing
+    /// <c>GetOrderByIdAsync(...)(cancellationToken: TestContext.CancellationToken)</c> — "method
+    /// group cannot be invoked twice", a real compiler error a string-content assertion can never
+    /// catch. This test builds a real client-routed project with a self-closing override and lets
+    /// the compiler be the oracle, the same way <see cref="GeneratedProjectCompiles"/> already is
+    /// for the raw-HTTP path.
+    /// <para>
+    /// <c>orders.json</c>'s <c>getOrderById</c> declares its <c>id</c> path parameter as a plain
+    /// <c>type: string</c> (no <c>format: uuid</c>), so it resolves to
+    /// <see cref="InTest.Cli.Planning.PathParameterKind.String"/> and the <c>{id}</c> placeholder substitutes
+    /// to a bare <c>FixtureParameter(...)</c> call with no <c>.Parse(...)</c> wrapper — matching
+    /// the fake client's own <c>string id</c> parameter below without needing a type-conversion
+    /// wrapper to also compile correctly.
+    /// </para>
+    /// <para>
+    /// The fake client type is written directly into the scaffolded project root (picked up by
+    /// the SDK-style csproj's default <c>**/*.cs</c> glob, the same way
+    /// <see cref="CreateProject"/>'s own <c>AssemblyInfo.cs</c> already is) rather than referenced
+    /// from a real generated Kiota/NSwag package — this test only needs a type that compiles
+    /// against the override's call shape, not a real generator's output; <c>client.kind</c> is set
+    /// to <c>"kiota"</c> arbitrarily, since an override bypasses <c>ClientCallPlanner</c>'s
+    /// per-kind gating entirely regardless of which kind is configured.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedProjectWithASelfClosingClientMapOverrideCompiles()
+    {
+        var root = CreateProject("orders.json");
+
+        File.WriteAllText(Path.Combine(root, "intest.json"), """
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                             "framework": "mstest" },
+                                                                "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                                                              """);
+
+        // orders.json's other operation, listOrders (GET /orders, no path parameter, no query
+        // parameter, no request body), qualifies for the Kiota convention on its own — the fake
+        // client below is not a real Kiota builder chain, so it needs an override too, or
+        // ClientCallPlanner.Resolve would derive "Api.Orders.GetAsync" against a type that has no
+        // such member. Overridden with the same self-closing shape as getOrderById below, rather
+        // than only overriding the one operation this test cares about, so the whole class routes
+        // through the fake client the same way a real adopter project fully configured for a
+        // client section would — the point of this test is proving a self-closing override
+        // compiles, not proving convention derivation withholds correctly (already covered by
+        // ClientCallPlannerTests and TestPlanBuilderTests).
+        File.WriteAllText(Path.Combine(root, "client-map.json"), """
+                                                                  { "overrides": {
+                                                                      "getOrderById": "GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)",
+                                                                      "listOrders": "ListOrdersAsync(cancellationToken: TestContext.CancellationToken)"
+                                                                  } }
+                                                                  """);
+
+        File.WriteAllText(Path.Combine(root, "FakeOrdersApiClient.cs"), """
+                                                                         namespace Orders.ApiClient;
+
+                                                                         // Stands in for a real Kiota/NSwag-generated client — only the two call
+                                                                         // shapes client-map.json's overrides above name need to exist for this
+                                                                         // test's project to compile.
+                                                                         public sealed class OrdersApiClient
+                                                                         {
+                                                                             public Task<object?> GetOrderByIdAsync(string id, CancellationToken cancellationToken = default)
+                                                                                 => throw new NotImplementedException();
+
+                                                                             public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
+                                                                                 => throw new NotImplementedException();
+                                                                         }
+                                                                         """);
+
+        (await FixturesRepairCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        // Pins the premise before the compile assertion is allowed to mean anything (the same
+        // discipline GeneratedProjectWithHostileSpecTextCompiles's own comment argues for): the
+        // override must actually have reached the renderer, substituted, and closed its own
+        // argument list — not merely "the project happened to build".
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        generated.ShouldContain(
+        "await ApiClient<Orders.ApiClient.OrdersApiClient>().GetOrderByIdAsync(FixtureParameter(\"getOrderById\", \"id\"), cancellationToken: TestContext.CancellationToken);",
+        customMessage: "the self-closing override did not reach the renderer substituted and unmodified — did the cancellation-token append fire a second time?");
+
+        var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
+
+        exitCode.ShouldBe(0, $"Generated project with a self-closing client-map.json override failed to compile:{Environment.NewLine}{output}");
+    }
+
     [TestMethod]
     public async Task RefusesAnInjectionShapedRootNamespaceInsteadOfCompilingIt()
     {
