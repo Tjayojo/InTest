@@ -273,6 +273,111 @@ not a misdiagnosis this time but a hard block. The samples model this: `Orders.A
 sample with auth at all — marks its `/health/ready` `.AllowAnonymous()` alongside every
 authorized endpoint it declares.
 
+### Typed client invocation (opt-in)
+
+If your team already owns a pre-generated API client for this API — Kiota, NSwag, or Refit — you
+can opt generated tests into calling it instead of building `HttpRequestMessage` by hand. Add a
+`client` section to `intest.json`:
+
+```json
+{
+  "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" }
+}
+```
+
+`kind` is `"kiota"`, `"nswag"` or `"refit"`; `typeName` is the client's fully-qualified C# type
+name, exactly as you would write it in code. Leave the section out entirely and nothing changes —
+every generated case keeps building its own `HttpRequestMessage`, byte-for-byte identical to a
+project with no `client` section at all.
+
+**The one thing that matters more than the config: register the client over InTest's own
+`HttpClient`, or it silently stops working.** `AuthHandler`, `RunIdHandler`, and the handler that
+lets a client-routed test still validate the raw response bytes are all attached to one named
+client, `InTestClients.Api` — the same one `Client` itself resolves from. A typed client built
+over any other `HttpClient` never passes through those handlers at all: no run-id header, no auth
+token, and (worse) no captured response for the assertion to check against, which fails loudly
+with a message naming the cause rather than passing against nothing — but only *after* you have
+spent time wondering why a "working" client fails every test. Construct it in
+`TestStartup.Register`, resolving the named client from `IHttpClientFactory` exactly the way
+`Client` itself is resolved:
+
+```csharp
+private static void Register(IServiceCollection services, IConfiguration configuration)
+{
+    // Kiota — HttpClientRequestAdapter needs no auth provider of its own; AuthHandler already
+    // sets the Authorization header on every request that passes through InTestClients.Api.
+    services.AddTransient(sp =>
+    {
+        var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api);
+        var adapter = new HttpClientRequestAdapter(new AnonymousAuthenticationProvider(), httpClient: httpClient)
+        {
+            BaseUrl = httpClient.BaseAddress!.ToString()   // must agree with Api:BaseUrl — see below
+        };
+        return new OrdersApiClient(adapter);
+    });
+}
+```
+
+```csharp
+// NSwag — most generated clients take (string baseUrl, HttpClient httpClient) directly.
+services.AddTransient(sp =>
+{
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api);
+    return new OrdersClient(httpClient.BaseAddress!.ToString(), httpClient);
+});
+```
+
+```csharp
+// Refit — RestService.For<T> reads BaseAddress off the HttpClient it is given, so nothing else
+// needs pointing anywhere.
+services.AddTransient(sp =>
+{
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api);
+    return RestService.For<IOrdersApi>(httpClient);
+});
+```
+
+**Why the base URL has to agree, and why a mismatch is a hard failure rather than a quiet one.**
+`HttpClient.BaseAddress` only resolves a *relative* request URI. Kiota's adapter (and some NSwag
+clients) build a fully-qualified, absolute URI from their own configured base URL instead — so if
+that base URL disagrees with `Api:BaseUrl`, `HttpClient.BaseAddress` is never even consulted, and
+the request goes wherever the client's own configuration points, silently ignoring the
+`appsettings.*.json` value you actually meant to hit. InTest cannot stop that request from being
+sent, but it does refuse to let it pass unnoticed: the handler that captures the response compares
+the outgoing request's authority against `Api:BaseUrl` and throws a message naming the exact
+cause the moment they disagree, rather than letting the test run against the wrong host and pass
+or fail for the wrong reason.
+
+**Which operations get routed through the client, and which need `client-map.json`.** Only
+`Success` cases ever route through a client — a 404 or a 401/403 case is testing what your *API*
+does with a bad request, not what your client does with one, so those always build
+`HttpRequestMessage` directly regardless of this section. Among `Success` cases, `generate`
+derives the call automatically today only for Kiota, and only for an operation with **no query
+parameters and no request body** — Kiota binds query parameters through a
+`RequestConfiguration` lambda and takes a typed model object for a request body, and there is no
+fixture value InTest could safely splice into either shape. `coverage-report.json` (Phase 4) notes
+every operation this withholds convention for, and points at `client-map.json`.
+
+Add an entry there to route anything convention does not cover — a query-parameter operation, a
+POST, or any NSwag/Refit operation at all (neither gets an automatic convention in v1; see
+`docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md` for the measured reason
+NSwag's generated methods cannot be spliced into safely):
+
+```json
+{
+  "overrides": {
+    "getOrderById": "Api.Orders[{id}].GetAsync"
+  }
+}
+```
+
+Keyed by operation key, one entry per operation you want routed through the client. The value is
+a real C# expression — everything after `ApiClient<T>()`. `{param}` placeholders are replaced with
+the same per-operation fixture value the raw-HTTP path already resolves; wrap it in parentheses
+with any additional argument the call needs. A wrong expression fails your own next `dotnet
+build` at the generated line — the same way a typo in any other line of your test project would —
+rather than being silently accepted.
+
 ---
 
 ## Phase 4 — generate

@@ -1,0 +1,503 @@
+# Opt-in invocation through a team's pre-generated API client
+
+**Status: complete, 2026-08-26.** Five commits, in order:
+
+| Stage | Commit | What it landed |
+|---|---|---|
+| 1 — `[capture-infrastructure]` | `722fe7f` | `ResponseCaptureHandler`, `InTestAmbient.LastCapturedResponse`/`CapturedResponseSlot`, `[client-rides-the-api-pipeline]`'s authority guard. Inert: nothing registers the handler yet |
+| 1b — the decisive proof | `69ede59` | A hand-written golden test class, calling a fake Kiota-shaped client, proves raw-bytes schema validation survives the client's own deserialization — before `ClientCallPlanner` exists |
+| 2 — `[convention-and-config]` | `336b166` | The `client` config section, `client-map.json`, `ClientCallPlanner`, `TestPlanBuilder` wiring. Plans the call expression; nothing renders it yet |
+| 3 — `[template-and-render]` | `0104a4d` | The template branch, `GenerateCommand` writing `clientCaptureEnabled`, full golden proof of *generated* code |
+| fix — the schema-less gap | `19ab080` | A client-routed case with no response schema (a 204, or any `client-map.json` override) now still routes through the client instead of silently falling back to raw HTTP |
+
+**Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
+tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
+`HttpRequestMessage` by hand. Absent that section, output is byte-identical to before this
+feature existed — every existing golden file and every project without a `client` section is
+unaffected.
+
+---
+
+## Context
+
+### The finding that shapes the whole design
+
+The OpenAPI document feeds InTest two categorically different kinds of fact:
+
+- **Invocation facts** — path template, method, path/query params, body media type. A typed
+  client encodes these *better* than the spec does, because it encodes them typed.
+- **Contract facts** — expected statuses, response schemas, `security` scopes,
+  `example`/`default`, `required`. A generated client **discards** these on its way to producing
+  a strongly-typed result. They are the entirety of what InTest asserts.
+
+A generated client is therefore a **contract-lossy projection** of the spec, and the two are not
+interchangeable planning inputs. Planning from a client instead of the spec would drop schema
+validation, both auth cases, and fixture tiers 1–3 — a suite that passes while asserting almost
+nothing, which is exactly what CLAUDE.md's "fail loudly / never substitute plausible defaults"
+rule forbids. It is also circular: a test generated from `C(S)` (a client generated from spec
+`S`) can only prove the API agrees with `C`, and typed deserializers are deliberately tolerant of
+exactly the drift a contract test exists to catch — a required property silently defaulting to
+`null`, an unknown enum member silently becoming the enum's default, are features of a
+well-behaved client and the precise failures a contract test exists to surface.
+
+**So `[spec-is-truth]`: the spec stays required and stays `TestPlanBuilder`'s only planning
+input. The client changes only *how* a request is issued, never *what* is asserted.**
+`TestPlanBuilder.Build` reads nothing new from the document because of this feature — it gains
+one additional, optional parameter (`ClientPlanningConfig?`) carrying the adopter's *own*
+configuration, not a second reading of the spec.
+
+Two consequences follow directly, and both are load-bearing enough to be their own decisions
+below: raw-bytes schema validation has to survive a typed client's deserialization
+(`[capture-not-deserialize]`), and there is no common surface across generators to reflect over,
+so a call expression has to be *derived per generator* rather than discovered
+(`[convention-plus-override]`).
+
+### Why this is not the §5 "HTTP pack" axis
+
+The design spec's §5 frozen-axes table reserves an "HTTP pack" row for a *future* v2 concern:
+`ApiTestBase.Client` being typed per pack (`HttpClient` under one pack, `IFlurlClient` under
+another) — a single concrete base class cannot expose both, so switching packs is frozen and
+would need a template-set swap. **This feature is not that.** `Client` stays exactly what it has
+always been — `HttpClient` — and this feature adds a **parallel route** alongside it: a
+client-routed Success case calls `ApiClient<TClient>()` instead of `Client.SendAsync(...)`, but
+`Client` itself is untouched, still resolves the same way, and every raw-HTTP case (which is
+still most of a mixed suite — see `[success-only]`) still uses it. The frozen-axis reasoning
+transfers (an adopter's hand-written code that touches `ApiClient<T>()` would need to change if
+the client type changed), but the *identity* does not: this is not the HTTP pack axis wearing a
+new name, and the design spec update below is careful not to claim it is.
+
+### How the runtime-framework split changes the picture
+
+This feature landed after `docs/superpowers/plans/2026-08-25-runtime-framework-split.md` split
+`InTest.Runtime` into a neutral package and `InTest.Runtime.MSTest`. That split is what makes
+`[neutral-helper]` below free rather than a tradeoff: `ApiClient<T>()` and the captured-response
+accessor land on `ApiTestCore`, which is framework-neutral, so a future xUnit or NUnit adapter
+gets client-routed invocation for nothing — no MSTest-specific code exists to duplicate.
+
+---
+
+## Decisions
+
+Named with slugs per `CONTRIBUTING.md`'s "Writing plans" — insertion and reordering cannot break
+a slug, and several of these are quoted verbatim in doc comments already shipped in `src/`
+(`InTestAmbient.cs`, `ResponseCaptureHandler.cs`, `ClientCallPlanner.cs`, `ClientCallMap.cs`,
+`mstest-class.scriban`) — this document is the canonical explanation those comments point at.
+
+### `[spec-is-truth]` — the spec stays required and stays the sole planning input
+
+Covered in Context above. The mechanical consequence: `TestPlanBuilder.Build(OpenApiDocument
+document, ClientPlanningConfig? client = null)` gained one optional trailing parameter. Every
+existing call site (`GenerateCommand`, `FixturesRepairCommand`, every single-argument test call)
+compiles unchanged, and a project with no `client` section in `intest.json` resolves
+`clientPlanningConfig` to `null` in `GenerateCommand.RunAsync`, which short-circuits
+`ResolveClientCall` to return `null` for every case before `ClientCallPlanner` is ever touched —
+this is the mechanism behind "absent config, byte-identical output."
+
+### `[capture-not-deserialize]` — a `DelegatingHandler` buffers raw bytes before the client sees them
+
+**This is the feature's whole viability**, per `ResponseCaptureHandler`'s own doc comment.
+`ResponseCaptureHandler` sits in the `InTestClients.Api` pipeline, after `AuthHandler` (closest
+to the wire), and on the way back up: reads the response body into a `byte[]` via
+`ReadAsByteArrayAsync`, stashes a `CapturedResponse` (status, body, method, URI) into the ambient
+slot (see `[capture-is-opt-in]` for when it is even attached), then **replaces**
+`response.Content` with a fresh `ByteArrayContent` built from those same bytes, headers copied
+across (`Content-Encoding`/`Content-Length` included — confirmed by direct experiment
+(`ResponseCaptureHandlerTests.GzipEncodedContentRoundTripsCorrectlyWhenHeadersAreCopiedOntoTheReplacement`)
+not to corrupt a gzip-encoded response, because `IHttpClientFactory`'s default primary handler
+never enables `AutomaticDecompression`, so nothing in the pipeline ever touches the bytes between
+the wire and this handler). The typed client then reads that replacement exactly as it would have
+read the original — Kiota and NSwag both deserialize via `ReadAsStreamAsync`, never
+`ReadAsStringAsync`, which is why the golden proof's fake client is written to match that
+specific API surface rather than a `ReadAsStringAsync` shape that would pass while proving
+nothing (see the decisive golden test below).
+
+Without this, the whole feature degrades to "the API answered and the client parsed it," which is
+what CLAUDE.md's fail-loudly rule forbids — `SchemaBundle.Validate` needs the raw bytes, and a
+typed client discards them on the way to a strongly-typed result.
+
+### `[client-rides-the-api-pipeline]` — the adopter's client MUST be built over `InTestClients.Api`
+
+**The design gap that most needed closing**, and the failure mode an adopter will actually hit
+first — this is why `docs/getting-started.md`'s update leads with three concrete registrations
+rather than starting from the config file.
+
+The adopter's typed client must be constructed over
+`IHttpClientFactory.CreateClient(InTestClients.Api)`. This is *not* the same shape as registering
+`ITestTokenProvider`: a token provider is consumed *by* InTest; a typed client instead carries its
+own `HttpClient` unless deliberately built over InTest's named one. Miss this and an adopter
+silently loses `ResponseCaptureHandler`, `AuthHandler` and `RunIdHandler` at once — three
+pipeline behaviours gone with no error, because nothing about a client built over a bare
+`new HttpClient()` fails to compile or fails to run; it just talks to whatever base address it
+was independently configured with (or none at all).
+
+Two guards make the miss self-diagnosing rather than mysterious:
+
+1. **`ApiTestCore.LastCapturedResponse` throws, naming the cause, rather than returning
+   `default`.** A silent `default` would make a misconfigured client's test pass against status 0
+   and an empty body — the exact "passes while asserting almost nothing" outcome CLAUDE.md
+   forbids, and a far worse failure than an immediate, named exception.
+2. **`ResponseCaptureHandler` compares the outgoing request's absolute-URI authority against the
+   configured `Api:BaseUrl` authority, and throws on mismatch.** This is a genuinely new hazard,
+   not one `InTestUrl.EnsureNoPrefixDuplication` already covers, and the two are easy to conflate
+   because both reason about a request ending up in the wrong place:
+   - `EnsureNoPrefixDuplication` runs once, at `InitializeAsync` time, comparing `Api:BaseUrl`
+     against the spec's own operation-path prefix. It says nothing about what an individual
+     request's URI looks like at send time, because for every *raw-HTTP* case there is nothing
+     to say: `HttpClient.BaseAddress` resolves every relative URI those cases build, so there is
+     exactly one place the request can go.
+   - A typed client changes that. Kiota's request adapter is constructed with its own `BaseUrl`
+     and builds a fully-qualified, **absolute** request URI directly from it — and per
+     `HttpRequestMessage.RequestUri`'s own documented behavior, `HttpClient.BaseAddress` is not
+     consulted at all once a request URI is absolute. A client whose own `BaseUrl` disagrees with
+     `Api:BaseUrl` compiles, runs, gets a run id and an auth header exactly like any other request
+     through this pipeline, and is capture-recorded exactly like any other — but was sent wherever
+     *that client's own configuration* pointed, silently ignoring `Api:BaseUrl` the whole time.
+     Nothing about that failure mode involves a repeated path prefix, so
+     `EnsureNoPrefixDuplication` has no way to see it. A relative request URI needs no such check:
+     `HttpClient.BaseAddress` (set to the same normalized `baseUrl` by
+     `InTestRun.RegisterInTestClients`) governs it unconditionally, exactly as it already does for
+     every raw-HTTP case, so there is no second authority for a relative URI to disagree with.
+
+### `[captured-response-is-the-verdict]` — the pinned `try`/filter/`catch`, and why each part is load-bearing
+
+A Success case whose typed-client call actually returns 500 is precisely what a generated
+contract test exists to catch — and every typed client (Kiota, NSwag, Refit) throws its own
+generator-specific exception on a non-2xx response *before* deserializing at all. Without this
+decision, the adopter would see a bare Kiota `ApiException` stack trace instead of InTest's own
+contract failure (run id, expected vs. actual status, elapsed, body excerpt) — a real regression
+in error-reporting quality in exactly the case that matters most. The template emits, per
+client-routed case:
+
+```csharp
+var stopwatch = Stopwatch.StartNew();
+try
+{
+    await ApiClient<Orders.ApiClient.OrdersApiClient>().Api.Orders[FixtureParameter("getOrderById", "id")].GetAsync(cancellationToken: TestContext.CancellationToken);
+}
+catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }
+catch (Exception) { /* the captured response is the verdict */ }
+stopwatch.Stop();
+
+await ApiResponseAssertions.ShouldMatchCapturedContractAsync(
+    LastCapturedResponse, 200, "OrderResponse", Schemas, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+```
+
+Three details in it are load-bearing, not stylistic, and the emitted comment says so:
+
+- **The stopwatch starts before the `try`, not inside it.** `ShouldMatchCapturedContractAsync`
+  takes `elapsed`, and the throwing path still needs a real number — if the stopwatch started
+  inside the `try`, a case that throws before the first `await` completes would report a
+  meaningless (or unset) elapsed time in its own failure message.
+- **It is an exception filter (`when (...)`), not catch-and-test inside the `catch` body.** A
+  filter rethrows without ever entering the `catch` block on the "nothing captured" path, and —
+  critically — it never touches the *throwing* `ApiTestCore.LastCapturedResponse` property. If the
+  template instead wrote `catch (Exception) { if (LastCapturedResponse is null) throw; ... }`, the
+  read of `LastCapturedResponse` itself would throw its own "[client-rides-the-api-pipeline]:
+  nothing was captured" `InvalidOperationException` — masking whatever the real exception was
+  (frequently the *actual* `[client-rides-the-api-pipeline]` authority-mismatch exception thrown
+  from inside `ResponseCaptureHandler`, which lands in exactly this `catch`) and reporting the
+  wrong cause to the adopter. The filter instead reads `InTestAmbient.LastCapturedResponse.Value?.Value`
+  directly — the non-throwing ambient slot, not the throwing property.
+- **Two `?.`s, not one.** `InTestAmbient.LastCapturedResponse` is
+  `AsyncLocal<CapturedResponseSlot?>`. The first `?.` covers "no slot exists at all" (no test
+  scope currently active — `ApiTestCore.BeginTest` has not run, or `EndTest` already cleared it);
+  the second covers "a slot exists, but `ResponseCaptureHandler` has not written anything into it
+  yet." Both conditions mean "there is no captured response to report the verdict from," so the
+  filter falls through to `throw;` in either case, letting the original exception (whatever a
+  bare `HttpClient` failure, a DNS error, or `[client-rides-the-api-pipeline]`'s own authority
+  check produced) propagate unchanged.
+
+### `[capture-is-opt-in]` — registration is derived from `clientCaptureEnabled`, not an always-on toggle
+
+`ResponseCaptureHandler` is registered in DI unconditionally (`services.AddTransient(_ => new
+ResponseCaptureHandler(baseUrl))`), but only actually **attached** to `InTestClients.Api` —
+never `InTestClients.Readiness`, the same F10 exclusion `AuthHandler` already observes — when
+`InTestRun.RegisterInTestClients`'s `captureEnabled` parameter is `true`. That parameter is read,
+once, from `clientCaptureEnabled` in the generated project's `Generated/spec-paths.json`
+(`InTestRun.ReadSpecPaths`), a key `GenerateCommand.BuildOutputs` writes as `true` — never `false`,
+never written at all otherwise — exactly when at least one case in the plan resolved a non-null
+`TestCasePlan.ClientCallExpression`.
+
+This is justified by blast radius, not by worrying about toggle drift (an `appsettings.json` flag
+would drift too, and that is not the reason this was rejected). `ResponseCaptureHandler` replaces
+`response.Content` on **every** response that passes through `InTestClients.Api` once attached —
+a change with unverified interaction risk for whatever downstream code eventually reads that
+content. Deriving attachment from whether the plan actually produced a client-routed case confines
+that risk to the adopters who opted in, rather than running it unconditionally for the ~100% of
+suites (today, all of them) that never will. `GenerateCommand.cs`'s own comment on this point notes
+one more subtlety: the check is against the *plan's* `ClientCallExpression`, not
+`TemplateRenderer`'s per-case `client_call_expression` — the latter can additionally render `null`
+for a schema-less case in an older build (fixed by `19ab080`, see below) — but registering the
+handler is harmless even for a case that ends up rendering raw HTTP anyway, because `Client` and
+every typed client both resolve over the same `InTestClients.Api` pipeline, so the handler simply
+has nothing extra to do for those cases.
+
+### `[convention-plus-override]` — derive per generator; `client-map.json` overrides unconditionally
+
+`ClientCallPlanner.Resolve` is the single place a call expression is decided, called only for
+`CaseRole.Success` cases (`[success-only]`, below), with the override lookup running **first,
+before either gate is even inspected**: an explicit entry in `client-map.json` bypasses
+convention-derivation, the query-parameter gate, and the request-body gate all at once, because
+the adopter wrote real C# and owns it. See `[compiler-is-oracle]` and the two measured findings
+below for why convention exists for Kiota only.
+
+### `[compiler-is-oracle]` — a wrong guess fails the adopter's own build, loudly, at a generated line
+
+No convention-derived or override expression is validated beyond syntax-adjacent checks
+(`client-map.json`'s blank-value refusal; `client.typeName`'s
+`CSharpIdentifier.TryValidateDottedName` check, since it reaches the template in *reference*
+position, `ApiClient<T>()`, not inside a string literal). Whether the expression actually compiles
+against the adopter's real generated client is left entirely to the C# compiler on the adopter's
+next build. This is a genuinely stronger oracle than a name-existence check would be: the compiler
+proves the whole call expression — receiver chain, indexer overload resolution, argument list — not
+merely that a method with that name exists, and `InTest.Golden.Tests` already runs a real `dotnet
+build` on generated output, so a convention that is *wrong* fails CI immediately rather than
+compiling into a test that asserts nothing useful.
+
+### `[success-only]` — only `CaseRole.Success` cases ever resolve a client call
+
+`TestPlanBuilder.Build`'s main loop calls `ResolveClientCall` at exactly one site, building the
+`Success` case — declared-error (404) and auth (401/403) cases are built afterward, from separate
+helper methods (`TryPlanDeclaredNotFound`, `PlanAuthCases`), and neither ever touches
+`ClientCallPlanner`, regardless of whether `client` is configured. Those cases exist to exercise
+the *API's* behaviour against a deliberately unmatchable path value (a GUID that does not exist, a
+wrong-scope token) — the test's whole point is what the API does with a bad input, not how a typed
+client happens to handle one, and routing them through a client would demand per-generator
+exception-shape knowledge (does this client throw on 404? What type? Does it deserialize the
+`ProblemDetails` body or discard it?) for no gain: the assertion those cases make is purely about
+status and (for errors) schema, exactly what `[capture-not-deserialize]` already lets a
+raw-HTTP case verify without any client involved.
+
+### `[neutral-helper]` — `ApiClient<T>()` and the captured-response accessor live on `ApiTestCore`
+
+Both are `protected` members of the neutral `ApiTestCore`, not the MSTest-specific `ApiTestBase`:
+`ApiClient<TClient>()` resolves `Services.GetRequiredService<TClient>()` (the same DI scope
+`Client` itself resolves from), and `LastCapturedResponse` reads
+`InTestAmbient.LastCapturedResponse.Value?.Value`, throwing `[client-rides-the-api-pipeline]`'s
+named exception when nothing was captured. Neither needs anything MSTest-shaped, so placing them
+on `ApiTestCore` — made possible by the runtime-framework split landing first — means a future
+xUnit or NUnit adapter inherits client-routed invocation for free, the same reasoning that already
+applies to `RequireFixture` and the rest of that class.
+
+### `[refit-override-only]` — "Refit" names an interface shape, not one generator with one convention
+
+Refit clients are reachable from more than one source — Refitter, NSwag's own Refit template
+output, or a hand-written interface — so there is no single naming/shape convention to derive at
+all, unconditionally, independent of any measurement. `ClientKind.Refit` gets no
+`ClientCallPlanner` branch; every Refit operation routes through `client-map.json`.
+
+### `[lockfile-configures]` — noted as a design constraint, not shipped in this feature
+
+`kiota-lock.json`'s `clientClassName`/`clientNamespaceName` and `nswag.json`'s
+`operationGenerationMode`/`className` *configure* what a generator's convention actually produces,
+rather than leaving it purely guessed — a fact worth recording because it bears on the
+generator-version-fragility risk below, but reading either lockfile automatically (to recover
+`client.typeName`, or to detect a convention-breaking regeneration) was not built in this feature
+and ships with no code behind it. `client.typeName` is adopter-supplied, hand-written JSON.
+
+---
+
+## Two findings settled by direct experiment, not reasoning — and where the plan document was wrong
+
+CLAUDE.md asks this codebase to record whether a claim was "confirmed by direct experiment" or
+merely "the docs say." Both findings below correct the original plan sketch after it was measured
+against real generator output; the corrected shape is what shipped, and each is pinned by a test
+that fails if the correction is reverted.
+
+### 1. `AsyncLocal` cannot carry the capture directly — the naive shape was built and measured, and it fails
+
+The first, intuitive design was `ResponseCaptureHandler.SendAsync` doing
+`InTestAmbient.LastCapturedResponse.Value = new CapturedResponse(...)` directly — a plain
+reassignment — with a generated test method reading that same static property back after its
+`await client.SomeCall()` returned. **This was built first and measured, not merely reasoned
+about, and it does not work.**
+
+`AsyncLocal<T>` reassignments made inside a nested, genuinely-suspending `await` are isolated to
+that nested call's own continuation and are **reverted the instant control returns to the awaiting
+caller** — the same `ExecutionContext` capture/restore mechanism that (correctly, and by design)
+already makes `TestId` and `Identity` flow *downward* from `ApiTestCore.BeginTest` into every
+handler a test's requests pass through is exactly what kills the *upward* direction this capture
+needs. The downward flow is not in question — it is what makes `LastCapturedResponse` reachable
+inside `ResponseCaptureHandler` at all — but a value set *deep inside* an awaited call, meant to
+be read back by the *caller* once that call returns, does not survive the same boundary.
+
+Verified with two isolated repros: a bare nested `async` method, and the exact
+`HttpMessageInvoker`-over-`DelegatingHandler` shape this handler actually runs in. Both showed the
+naive reassignment reverting to its prior value the moment the outer `await` returned. Independent
+confirmation the shipped fix actually depends on this: patching the handler back to the naive
+reassignment and rerunning `ApiTestCoreCaptureTests.CapturesStatusBodyMethodAndUri` and the gzip
+round-trip test makes both fail.
+
+**The fix:** flow a *mutable reference cell* (`CapturedResponseSlot`, a plain class with one
+settable `Value` property) downward via the `AsyncLocal`, and have `ResponseCaptureHandler` mutate
+the cell's own field rather than ever reassigning the `AsyncLocal`'s `Value` itself. Mutating an
+already-shared reference type is ordinary heap mutation, independent of `ExecutionContext`
+propagation entirely, so it survives the await-return boundary that a plain reassignment does not.
+`ApiTestCore.BeginTest` assigns a **fresh** `CapturedResponseSlot` (not merely clears a stale one),
+so a test that never makes a client-routed call can never observe a previous test's leftover
+capture purely by construction — a brand-new object holds nothing yet.
+
+**This is why `[captured-response-is-the-verdict]`'s exception filter needs two `?.`s, not one**:
+the slot itself can be null (no test scope active) independently of whether the slot, once
+present, holds a captured value yet.
+
+### 2. NSwag convention derivation does not work; Kiota's does — measured, not assumed
+
+The original plan sketched a `{OperationId}Async` convention meant to apply across generators.
+Measured against **kiota 1.34.1** and **nswag 14.7.1**, both run against
+`samples/Orders.Api/Orders.Api.json` — which declares **no `operationId`** anywhere, the common
+ASP.NET Core case — the results narrowed this materially, in Kiota's favor and against NSwag's:
+
+- **Kiota — convention ships.** Confirmed directly from the generated builder classes: each
+  literal path segment becomes a PascalCase property on a fluent builder chain, each `{param}`
+  segment becomes an indexer, and the verb becomes a method (`GetAsync`, `PostAsync`, `PutAsync`,
+  `PatchAsync`, `DeleteAsync`). `GET /api/orders/{id}` becomes
+  `client.Api.Orders[id].GetAsync()`. Crucially, **every item builder Kiota emits carries both a
+  `this[Guid position]` indexer and an `[Obsolete]`-marked `this[string position]` overload**
+  (confirmed in `OrdersItemRequestBuilder.cs`, `CustomersItemRequestBuilder.cs`) — which is exactly
+  why splicing `FixtureParameter("opKey", "param")` (a `string`-returning helper) into the
+  indexer compiles at all. Without that string overload this convention would need a
+  per-parameter type conversion, the same problem that rules NSwag out below.
+- **NSwag — override-map-only, on measured evidence, not caution.** The plan's original
+  `{OperationId}Async` convention turned out wrong twice over, against the same no-`operationId`
+  spec:
+  1. NSwag synthesizes `{Resource}{VERB}Async` and invents a **collection-vs-item distinction**
+     no path-segment convention like Kiota's predicts without also knowing NSwag's own naming
+     settings: `CustomersAllAsync()` for `GET /api/customers` (the list), but
+     `CustomersGETAsync(id)` for `GET /api/customers/{id}` (the item).
+  2. **Fatally, parameters are strongly typed with no string overload** —
+     `OrdersGETAsync(System.Guid id)`. Splicing a fixture's `string` value there does not compile.
+     `[compiler-is-oracle]` would catch this loudly, which is the design working as intended — but
+     shipping a convention *already measured* to emit uncompilable code is not a guess worth
+     making regardless.
+
+NSwag support is **deferred, not closed off**. It needs a type-mapping layer that turns the spec's
+`type`/`format` into a conversion expression (`format: uuid` → `Guid.Parse(...)`, `integer` →
+`int.Parse(...)`) before a fixture's raw string value could ever be spliced into a strongly-typed
+NSwag parameter and compile. `TestPlanBuilder.PathParameterKinds` (used today for a different
+purpose — deciding fixture-value shape) already carries a coarser version of exactly this verdict,
+so that is where such a layer would extend from, rather than inventing a second type-classification
+mechanism. It must additionally match whatever NSwag itself chose for a given parameter, which
+depends on NSwag's own generation settings — one more reason this is deferred rather than guessed
+at.
+
+---
+
+## Convention gates, precisely as built
+
+`ClientCallPlanner.Resolve`'s gate order, in the order it actually runs:
+
+1. **Override lookup runs first, unconditionally.** A `client-map.json` entry for the operation
+   key returns that value verbatim and skips every gate below — including for an operation with
+   query parameters or a request body.
+2. **Kind gate.** Anything other than `ClientKind.Kiota` gets no convention attempt at all —
+   `[refit-override-only]` for Refit unconditionally, and NSwag on the measured evidence above.
+3. **Query-parameter gate.** Kiota binds query parameters through a `RequestConfiguration<...>`
+   lambda, never positional arguments; convention derivation has no fixture value to splice into
+   that shape, so any operation with one or more query parameters withholds convention and emits a
+   `CoverageNote` pointing at `client-map.json`.
+4. **Request-body gate.** Kiota's `PostAsync`/`PutAsync`/`PatchAsync` take a **typed model
+   object** as their first positional parameter, never a JSON string — and a fixture's request
+   body is raw JSON text. Splicing it would mean guessing the generated model type's name, which
+   this planner never attempts; any operation with a JSON request body to compose withholds
+   convention the same way, with the same note.
+
+Both gates apply only when reached — an override already returned before either runs, so an
+operation with query parameters *and* an entry in `client-map.json` is fully covered by the
+override, not silently dropped to raw HTTP.
+
+---
+
+## What does not change
+
+- **`TestPlanBuilder.Build`'s existing signature and every existing call site.** The new
+  `ClientPlanningConfig?` parameter is optional and trailing; every caller that predates this
+  feature compiles and behaves unchanged.
+- **A project with no `client` section in `intest.json`.** `ConfigLoader.Load`'s
+  `ReadOptionalClientConfig` returns `null`; `GenerateCommand` never constructs a
+  `ClientPlanningConfig`; `TestPlanBuilder.Build` never resolves a client call; `clientCaptureEnabled`
+  is never written to `spec-paths.json`; `ResponseCaptureHandler` is registered in DI (always) but
+  never attached to `InTestClients.Api`. Output is byte-for-byte identical to a build that predates
+  this feature — the golden regression suite pins this.
+- **`Client`.** Still `HttpClient`, resolved exactly as before. See "Why this is not the §5 HTTP
+  pack axis" above.
+- **`CSharpLiteral.Escape` and `FixtureDocument.TryValidateOperationKey`.** Neither applies to a
+  `client-map.json` override value — it is trusted C# spliced bare, per that file's own
+  documented trust model, not a string literal and not a filename.
+- **Declared-error and auth cases.** Never route through a client, regardless of configuration —
+  `[success-only]`.
+
+---
+
+## Files that carry this feature
+
+| File | Role |
+|---|---|
+| `src/InTest.Runtime/CapturedResponse.cs` | `readonly record struct` — status, body, method, URI |
+| `src/InTest.Runtime/InTestAmbient.cs` | `LastCapturedResponse` (`AsyncLocal<CapturedResponseSlot?>`) and `CapturedResponseSlot` — the mutable-cell fix from finding 1 |
+| `src/InTest.Runtime/ResponseCaptureHandler.cs` | `[capture-not-deserialize]` + `[client-rides-the-api-pipeline]`'s authority check |
+| `src/InTest.Runtime/ApiTestCore.cs` | `ApiClient<T>()`, `LastCapturedResponse` accessor — `[neutral-helper]` |
+| `src/InTest.Runtime/ApiResponseAssertions.cs` | `ShouldMatchCapturedContractAsync`, `ShouldMatchCapturedStatusAsync` — captured-response counterparts of the existing raw-HTTP assertions, sharing one `Failure(...)` message formatter |
+| `src/InTest.Runtime/InTestRun.cs` | Registers `ResponseCaptureHandler`; reads `clientCaptureEnabled` from `spec-paths.json`; attaches the handler to `InTestClients.Api` only when true |
+| `src/InTest.Cli/Configuration/LoadedClientConfig.cs`, `ConfigLoader.cs` | The `client` section — `kind` + `typeName`, both required together |
+| `src/InTest.Cli/Clients/ClientCallMap.cs` | `client-map.json` parsing — trusted overrides |
+| `src/InTest.Cli/Planning/ClientKind.cs`, `ClientPlanningConfig.cs`, `ClientCallPlanner.cs` | Kind enum, the assembled planning input, and convention derivation + override resolution |
+| `src/InTest.Cli/Planning/TestPlanBuilder.cs` | `ResolveClientCall`, called once per Success case; the stale-override-key `CoverageNote` |
+| `src/InTest.Cli/Planning/TestCasePlan.cs` | `ClientCallExpression` — the carried verdict |
+| `src/InTest.Cli/Rendering/TemplateRenderer.cs`, `Templates/mstest-class.scriban` | `BuildClientCallExpression`; the pinned `try`/filter/`catch` branch; `client_type_name`/`client_call_expression` as bare (unescaped) template fields |
+| `src/InTest.Cli/Commands/GenerateCommand.cs` | Assembles `ClientPlanningConfig` from `LoadedConfig.Client` + `ClientCallMap.Load`; writes `clientCaptureEnabled` |
+
+`src/InTest.Runtime.MSTest/` needs no change — `ApiTestBase` inherits `ApiTestCore`'s new members
+for free.
+
+---
+
+## Verification
+
+- **The decisive proof (stage 1b, `69ede59`).** A hand-written golden test class
+  (`GoldenTypedClientSources.FakeStatusClient`, deliberately deserializing via
+  `ReadAsStreamAsync` — the one API surface a `ReadAsStringAsync`-based fake would fail to
+  exercise) calling a fake client against `GoldenApiStub`: a schema-violating body with a
+  matching status fails the inner test on a *named schema violation*; a conforming body passes
+  and hands the client a usable deserialized result; a 500 surfaces InTest's own contract failure,
+  never the client's exception type. Mutation-checked by flipping `clientCaptureEnabled` to
+  `false`: the test goes red on its own discriminating assertion, not by accident.
+- **The generated-code proof (stage 3, `0104a4d`, extended by `19ab080`).** The same three
+  verdicts, now against *generated* code calling a Kiota-shaped builder chain, plus the
+  schema-less case (`19ab080`'s bodiless `GET /api/ping` returning 204, chosen for needing no
+  fixture machinery) routing through the client rather than silently falling back to raw HTTP.
+- **Golden regression.** A project with no `client` section matches the existing golden file
+  byte-for-byte — the mechanical proof behind "What does not change" above.
+- **`TemplateEscapingGuardTests`.** `client_type_name` and `client_call_expression` are both
+  listed in `AllowedInBarePosition` with a one-line reason each, so the guard that scans the
+  template for un-escaped spec-derived text does not flag either as a defect.
+- **Measured on this branch, 2026-08-26** (`dotnet build InTest.sln`, then each suite
+  `--no-build`): build clean, 0 warnings. `InTest.Architecture.Tests` **12** passing,
+  `InTest.Cli.Tests` **555** passing, `InTest.Runtime.Tests` **234** passing,
+  `InTest.Golden.Tests` **43** passing (3m14s) — the suite that actually proves generated code
+  compiles and runs, so do not skip it when touching the template or renderer. Do not trust these
+  counts without re-measuring — `main` moves under contributors on this repository.
+
+---
+
+## Risks
+
+- **A mixed suite, by design, in v1.** A generated class can contain both client-routed Success
+  cases and raw-HTTP siblings (declared-error, auth, and any Success case a gate withheld) —
+  reintroducing "two ways of calling the same API" *inside a single file*, the exact problem this
+  feature's own motivation names. Accepted for v1: guessing query-parameter or request-body
+  binding across three generators is how a wrong test ships that still compiles, and the override
+  map covers any operation a team actually cares about routing through the client.
+- **Generator-version fragility.** Kiota and NSwag have both changed default naming/topology
+  across majors. `[compiler-is-oracle]` is the defence — a convention that compiles today but
+  breaks against a regenerated client (regenerated by the adopter's own tooling, entirely outside
+  any `intest generate` run) fails the adopter's build loudly, not silently. `[lockfile-configures]`
+  documents that the two lockfiles *could* narrow this further; nothing reads them yet.
+- **Stale `client-map.json` entries warn, not block** — a `CoverageNote`, softer than fixtures'
+  drift-blocks-`generate` gate, because (unlike a fixture) there is no second derivable answer to
+  diff an override against; the only available check is "does this key still name an operation in
+  the plan at all."
+- **NSwag and Refit ship override-map-only**, by measured choice for NSwag and by definition for
+  Refit (`[refit-override-only]`) — not a gap expected to close automatically as more generators
+  are tried, but a decision each would need its own measurement (NSwag) or has no convention to
+  measure at all (Refit).

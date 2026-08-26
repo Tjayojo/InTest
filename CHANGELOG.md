@@ -10,6 +10,25 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in invocation through a team's own pre-generated API client (Kiota, NSwag, or Refit): a new
+  `client` section in `intest.json` (`{ "kind": "kiota", "typeName": "..." }`) routes qualifying
+  generated `Success` cases through `ApiClient<TClient>()` instead of a hand-built
+  `HttpRequestMessage`, while raw-bytes schema validation, expected-status assertions and every
+  other case kind (declared-error, auth) work exactly as before — a `DelegatingHandler` buffers
+  and captures the response before the typed client deserializes it, so the client changes only
+  *how* a request is issued, never what a generated test asserts. `client-map.json` lets an
+  adopter override or supply the call expression for any operation convention-derivation does not
+  reach (query parameters, a request body, or a non-Kiota client). This is entirely additive and
+  opt-in: a project with no `client` section produces byte-identical output to one built without
+  this feature at all. **Migration:** none required. See
+  `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md` for the design and
+  `docs/getting-started.md`'s "Typed client invocation (opt-in)" for the three concrete client
+  registrations, including the one requirement that matters most — construct the client over
+  `IHttpClientFactory.CreateClient(InTestClients.Api)`, or it silently loses capture, auth and the
+  run-id header.
+
 ### Changed
 
 - **Breaking:** `InTest.Runtime` split into two packages — the framework-neutral `InTest.Runtime`
