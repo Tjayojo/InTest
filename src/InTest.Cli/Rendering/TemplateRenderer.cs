@@ -207,14 +207,23 @@ public sealed class TemplateRenderer
     }
 
     /// <summary>
-    /// A large in-range integer literal for <see cref="PathParameterKind.Integer"/> — well-typed
-    /// (a compliant binder accepts it and reaches the action) but unmatchable by any seeded row
-    /// using ordinary small or sequential ids. Every other kind keeps the fresh GUID this
-    /// renderer always emitted, which was already a well-typed unmatchable value for a string
-    /// (uuid-formatted or not).
+    /// A large in-range integer literal for <see cref="PathParameterKind.Integer"/> and
+    /// <see cref="PathParameterKind.Long"/> — well-typed (a compliant binder accepts it and
+    /// reaches the action; <c>2147483647</c> fits both <c>int</c> and <c>long</c>, so one literal
+    /// serves both) but unmatchable by any seeded row using ordinary small or sequential ids.
+    /// Every other kind — <see cref="PathParameterKind.String"/> and <see cref="PathParameterKind.Guid"/>
+    /// alike — keeps the fresh GUID this renderer always emitted, which was already a well-typed
+    /// unmatchable value for a string (uuid-formatted or not). This method feeds only the
+    /// raw-HTTP declared-error/auth branch (<see cref="PathArguments"/>) — <c>[typed-path-parameters]</c>'s
+    /// per-kind conversion is a client-routed-branch-only concern
+    /// (<see cref="BuildClientCallExpression"/>/<see cref="WrapForClientCall"/>), since
+    /// <c>InTestUrl.Build</c> takes strings regardless of a path parameter's declared type.
     /// </summary>
-    private static string UnmatchableValueFor(PathParameterKind kind)
-        => kind == PathParameterKind.Integer ? "\"2147483647\"" : "Guid.NewGuid().ToString()";
+    private static string UnmatchableValueFor(PathParameterKind kind) => kind switch
+    {
+        PathParameterKind.Integer or PathParameterKind.Long => "\"2147483647\"",
+        _ => "Guid.NewGuid().ToString()"
+    };
 
     /// <summary>
     /// The one place a <c>FixtureParameter("opKey", "param")</c> call is spelled out —
@@ -297,6 +306,22 @@ public sealed class TemplateRenderer
     /// not a shape <c>client-map.json</c>'s own contract describes, and <c>[compiler-is-oracle]</c>
     /// catches it at the adopter's next build regardless of which arm this heuristic takes.
     /// </para>
+    /// <para>
+    /// <c>[typed-path-parameters]</c>: each <c>{param}</c> placeholder is substituted with
+    /// <see cref="FixtureParameterCall"/>'s bare, <see cref="string"/>-returning call wrapped per
+    /// <see cref="TestCasePlan.PathParameterKinds"/> (<see cref="WrapForClientCall"/>) — never the
+    /// bare call alone, unlike <see cref="PathArguments"/>'s Success arm, which stays bare
+    /// unconditionally because <c>InTestUrl.Build</c> takes strings regardless of declared type.
+    /// This is the whole fix for the deprecated-indexer risk this plan's own risk section names:
+    /// splicing a bare <see cref="string"/> into a non-string-typed item-builder indexer used to
+    /// bind Kiota's <c>[Obsolete]</c>-marked <c>this[string]</c> overload every time; converting
+    /// first makes the call bind the typed, non-obsolete overload instead — measured directly
+    /// against a real kiota 1.34.1 client (see the plan's own measurement table). A missing or
+    /// short <see cref="TestCasePlan.PathParameterKinds"/> — every call site that predates this
+    /// field, including a hand-built <see cref="TestCasePlan"/> in a test — reads as "kind
+    /// unknown", wrapped identically to <see cref="PathParameterKind.String"/>: no wrap at all,
+    /// the same bare splice this method always produced before this field existed.
+    /// </para>
     /// </summary>
     private static string? BuildClientCallExpression(TestCasePlan plan, string? clientTypeName)
     {
@@ -307,11 +332,14 @@ public sealed class TemplateRenderer
 
         var operationKeyLiteral = CSharpLiteral.Escape(plan.OperationKey);
         var expression = plan.ClientCallExpression;
+        var kinds = plan.PathParameterKinds;
 
-        foreach (var name in plan.PathParameterNames)
+        for (var i = 0; i < plan.PathParameterNames.Count; i++)
         {
-            expression = expression.Replace(
-                $"{{{name}}}", FixtureParameterCall(operationKeyLiteral, name), StringComparison.Ordinal);
+            var name = plan.PathParameterNames[i];
+            var kind = kinds is not null && i < kinds.Count ? kinds[i] : PathParameterKind.String;
+            var value = WrapForClientCall(FixtureParameterCall(operationKeyLiteral, name), kind);
+            expression = expression.Replace($"{{{name}}}", value, StringComparison.Ordinal);
         }
 
         // A self-closing override (one that already spells its own argument list, e.g. a typed
@@ -321,6 +349,25 @@ public sealed class TemplateRenderer
         // against and why "already ends with ')'" is the correct — not merely convenient — test.
         return expression.EndsWith(')') ? expression : $"{expression}(cancellationToken: TestContext.CancellationToken)";
     }
+
+    /// <summary>
+    /// <c>[typed-path-parameters]</c>: converts <see cref="FixtureParameterCall"/>'s bare
+    /// <see cref="string"/>-returning splice to the type Kiota's per-parameter item-builder
+    /// indexer actually declares for the given <paramref name="kind"/> — the whole reason a
+    /// convention-derived path-parameter call now binds the typed, non-obsolete indexer overload
+    /// instead of the deprecated <c>this[string]</c> one (see this plan's risk section, "measured,
+    /// not assumed"). <see cref="PathParameterKind.String"/> needs no conversion at all — the
+    /// fixture value already has the type the string-typed indexer expects — so it is the only
+    /// kind that returns <paramref name="fixtureParameterCall"/> unwrapped; every other kind wraps
+    /// it in the matching <c>.Parse(...)</c> call.
+    /// </summary>
+    private static string WrapForClientCall(string fixtureParameterCall, PathParameterKind kind) => kind switch
+    {
+        PathParameterKind.Guid => $"Guid.Parse({fixtureParameterCall})",
+        PathParameterKind.Integer => $"int.Parse({fixtureParameterCall})",
+        PathParameterKind.Long => $"long.Parse({fixtureParameterCall})",
+        _ => fixtureParameterCall
+    };
 
     /// <summary>
     /// Appended to the built path so the query string comes entirely from whichever declared

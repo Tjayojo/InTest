@@ -278,12 +278,23 @@ internal static class GoldenTypedClientSources
     /// <c>CustomersItemRequestBuilder.cs</c> — see this plan's own risk section for the full
     /// account). Before this addition, no golden test compiled a client-routed case with a path
     /// parameter at all — <c>FakeOrdersApiClient</c> had no indexer anywhere, so
-    /// <c>ClientCallPlanner.BuildKiotaConvention</c>'s <c>Api.Status[{id}].GetAsync</c> shape
-    /// (confirmed to compile only against the <c>this[string]</c> overload, since
-    /// <c>FixtureParameter</c> returns <see cref="string"/>) went unexercised end to end, which is
-    /// exactly how the CS0618-with-no-pragma defect this addition covers went unnoticed. The
-    /// <c>this[Guid position]</c> overload alongside it is unused by anything InTest generates
-    /// today — present only so this fake matches the real shape's two-overload indexer, not one.
+    /// <c>ClientCallPlanner.BuildKiotaConvention</c>'s <c>Api.Status[{id}].GetAsync</c> shape went
+    /// unexercised end to end, which is exactly how the CS0618-with-no-pragma defect this addition
+    /// covers went unnoticed.
+    /// </para>
+    /// <para>
+    /// <c>[typed-path-parameters]</c>: at the time [finding-3] added it, this overload was the one
+    /// InTest's generated call actually bound — <c>FixtureParameter</c> returns
+    /// <see cref="string"/>, spliced bare — with <c>this[Guid position]</c> alongside it present
+    /// only so this fake matched the real shape's two-overload indexer, unused by anything InTest
+    /// generated. That is now reversed: <c>TestPlanBuilder.ResolvePathParameterKind</c> resolves a
+    /// uuid-formatted path parameter to <c>PathParameterKind.Guid</c>, and
+    /// <c>TemplateRenderer.WrapForClientCall</c> wraps the spliced value in <c>Guid.Parse(...)</c>
+    /// before it reaches the indexer — so <c>this[Guid position]</c> is the overload
+    /// <c>GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer</c>
+    /// now actually exercises, and <c>this[string position]</c> sits unused, kept only so this
+    /// fake still matches the real, still-two-overload shape a real kiota client carries until its
+    /// next major version actually removes the deprecated one (this plan's risk section).
     /// </para>
     /// </summary>
     public const string FakeOrdersApiClient = """
@@ -354,16 +365,21 @@ internal static class GoldenTypedClientSources
         // [finding-3]: word-for-word the same deprecation text a real kiota 1.34.1 item builder's
         // this[string] overload carries (OrdersItemRequestBuilder.cs, CustomersItemRequestBuilder.cs
         // -- see GoldenTypedClientSources.FakeOrdersApiClient's own doc comment and this plan's risk
-        // section). ClientCallPlanner.BuildKiotaConvention splices FixtureParameter's string return
-        // value in here, so a path-parameter client-routed case reaches exactly this overload --
-        // this is what proves the template's #pragma warning disable CS0618 actually compiles under
-        // TreatWarningsAsErrors, rather than merely rendering text nothing ever builds.
+        // section). [typed-path-parameters]: unused by anything InTest generates today -- a
+        // uuid-formatted path parameter now converts through Guid.Parse(...) before reaching the
+        // indexer (TemplateRenderer.WrapForClientCall), so this deprecated overload never binds.
+        // Kept, still Obsolete, so this fake still matches the real, still-two-overload shape a
+        // real kiota client carries until its own next major version removes it.
         [Obsolete("This indexer is deprecated and will be removed in the next major version. Use the one with the typed parameter instead.")]
         public FakeStatusItemRequestBuilder this[string position] => new(httpClient, position);
 
-        // The typed overload real kiota output carries alongside the deprecated one. Unused by
-        // anything InTest generates today -- present only so this fake's indexer shape matches the
-        // real one measured (two overloads, not one).
+        // [typed-path-parameters]: the typed overload real kiota output carries alongside the
+        // deprecated one -- and, since that change, the one a uuid-formatted path parameter's
+        // client-routed case now actually binds (see this[string]'s own comment above). Before
+        // that change this overload was present only so this fake's indexer shape matched the
+        // real one measured (two overloads, not one) without anything InTest generated reaching
+        // it; GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer
+        // is the golden proof that it now does.
         public FakeStatusItemRequestBuilder this[Guid position] => new(httpClient, position.ToString());
     }
 

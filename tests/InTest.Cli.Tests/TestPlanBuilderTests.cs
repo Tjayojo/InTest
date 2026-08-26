@@ -347,6 +347,76 @@ public class TestPlanBuilderTests
         notFound.PathParameterKinds.ShouldBe([PathParameterKind.Integer]);
     }
 
+    // --- [typed-path-parameters]: ResolvePathParameterKinds is format-aware, not type-alone.
+    // Each test below builds a plan from a real schema shape and reads the kind back off the
+    // Success case rather than the declared-error one — Success is the new call site this task
+    // added (TemplateRenderer.BuildClientCallExpression's per-kind conversion needs it there), so
+    // asserting against it is the one that would actually catch a regression in that wiring,
+    // not just in ResolvePathParameterKind's own mapping. ---
+
+    private static async Task<PathParameterKind> ResolvedKindAsync(string schemaJson)
+    {
+        var spec = $$"""
+        {
+          "openapi": "3.0.3",
+          "info": { "title": "Orders", "version": "1.0" },
+          "paths": {
+            "/orders/{id}": {
+              "get": {
+                "operationId": "getOrderById",
+                "tags": ["Orders"],
+                "parameters": [
+                  { "name": "id", "in": "path", "required": true, "schema": {{schemaJson}} }
+                ],
+                "responses": {
+                  "200": { "description": "ok", "content": { "application/json": {
+                    "schema": { "$ref": "#/components/schemas/Order" } } } }
+                }
+              }
+            }
+          },
+          "components": { "schemas": { "Order": { "type": "object" } } }
+        }
+        """;
+
+        var plan = await BuildAsync(spec);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.Role == CaseRole.Success);
+
+        return success.PathParameterKinds.ShouldHaveSingleItem();
+    }
+
+    [TestMethod]
+    public async Task APlainStringPathParameterResolvesToStringKind()
+        => (await ResolvedKindAsync("""{ "type": "string" }""")).ShouldBe(PathParameterKind.String);
+
+    [TestMethod]
+    public async Task AUuidFormattedStringPathParameterResolvesToGuidKind()
+        // The measured shape a real kiota 1.34.1 client's this[Guid] indexer overload expects
+        // (typed-client-invocation plan's measurement table) — previously indistinguishable from
+        // a plain string, since only "numeric or not" mattered before the client-routed branch's
+        // per-kind conversion existed.
+        => (await ResolvedKindAsync("""{ "type": "string", "format": "uuid" }""")).ShouldBe(PathParameterKind.Guid);
+
+    [TestMethod]
+    public async Task ANonUuidFormattedStringPathParameterStillResolvesToStringKind()
+        // A declared format this resolver does not specifically recognize must fall through to
+        // String, not be silently misclassified as Guid — ClientCallPlanner.Resolve's own doc
+        // comment relies on ResolvePathParameterKind being exhaustive over every schema shape it
+        // can see, with String as the catch-all.
+        => (await ResolvedKindAsync("""{ "type": "string", "format": "date-time" }""")).ShouldBe(PathParameterKind.String);
+
+    [TestMethod]
+    public async Task ABareIntegerPathParameterWithNoFormatResolvesToIntegerKind()
+        => (await ResolvedKindAsync("""{ "type": "integer" }""")).ShouldBe(PathParameterKind.Integer);
+
+    [TestMethod]
+    public async Task AnInt32FormattedIntegerPathParameterResolvesToIntegerKind()
+        => (await ResolvedKindAsync("""{ "type": "integer", "format": "int32" }""")).ShouldBe(PathParameterKind.Integer);
+
+    [TestMethod]
+    public async Task AnInt64FormattedIntegerPathParameterResolvesToLongKind()
+        => (await ResolvedKindAsync("""{ "type": "integer", "format": "int64" }""")).ShouldBe(PathParameterKind.Long);
+
     [TestMethod]
     public async Task TheSuccessCaseIsUnaffectedByTheDeclaredErrorCaseItGainsANeighbour()
     {

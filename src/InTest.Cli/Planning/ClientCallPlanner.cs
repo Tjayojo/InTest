@@ -118,6 +118,18 @@ public static class ClientCallPlanner
     /// letting an exception a planning-time caller never expected escape all the way out of
     /// `generate`.
     /// </para>
+    /// <para>
+    /// <b>No path-parameter-kind gate — deliberately absent, not an oversight.</b>
+    /// <c>[typed-path-parameters]</c> asked whether this method needs a fifth gate withholding
+    /// convention when a path parameter resolves to a kind outside <c>PathParameterKind</c>'s four
+    /// members. It does not, and cannot: <see cref="TestPlanBuilder"/>'s own
+    /// <c>ResolvePathParameterKind</c> is exhaustive over every schema shape it can see — anything
+    /// it does not specifically recognize (a declared type this enum has no member for, or none
+    /// declared at all) already falls through to <see cref="PathParameterKind.String"/> rather
+    /// than some fifth, unmapped value. There is no "unsupported kind" for this method to detect,
+    /// so adding a gate for one would be dead code guarding against a state the type system and
+    /// <see cref="TestPlanBuilder"/>'s own resolution logic already make unreachable.
+    /// </para>
     /// </summary>
     public static Resolution Resolve(
         ClientKind kind,

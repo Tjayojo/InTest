@@ -63,6 +63,16 @@ public class GeneratedSuiteExecutionTests
     /// rather than folded into <see cref="Spec"/> so the two existing tests below, which build
     /// and run the suite without ever touching <c>fixtures/getStatusById.json</c>, are unaffected
     /// by this addition.
+    /// <para>
+    /// <c>[typed-path-parameters]</c>: <c>id</c> declares <c>format: uuid</c> — not a bare
+    /// <c>type: string</c> — so that
+    /// <see cref="GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer"/>
+    /// exercises <c>PathParameterKind.Guid</c> end to end. This is the same spec
+    /// <see cref="FixtureParameterReachesALiveRequestEndToEnd"/> already builds and runs over raw
+    /// HTTP with no <c>client</c> section configured, so the format change is covered by that
+    /// test too: a uuid-formatted string path parameter must still round-trip as a plain fixture
+    /// string on the raw-HTTP path, which never converts it.
+    /// </para>
     /// </summary>
     private const string SpecWithPathParameter = """
                                                  {
@@ -90,7 +100,7 @@ public class GeneratedSuiteExecutionTests
                                                          "operationId": "getStatusById",
                                                          "tags": ["Status"],
                                                          "parameters": [
-                                                           { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                                                           { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
                                                          ],
                                                          "responses": {
                                                            "200": {
@@ -983,32 +993,40 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
-    /// [finding-3]'s coverage-gap closure. Before this test, no golden test compiled a
-    /// client-routed case with a path parameter at all —
-    /// <see cref="GoldenTypedClientSources.FakeOrdersApiClient"/> had no indexer anywhere until
-    /// this same finding added one, so <c>ClientCallPlanner.BuildKiotaConvention</c>'s
-    /// <c>Api.Status[{id}].GetAsync</c> shape — and the template's
-    /// <c>#pragma warning disable CS0618</c> wrapping it — went completely unexercised by anything
-    /// that actually compiles.
+    /// [finding-3]'s coverage-gap closure, then <c>[typed-path-parameters]</c>'s own fix on top of
+    /// it. Before [finding-3], no golden test compiled a client-routed case with a path parameter
+    /// at all — <see cref="GoldenTypedClientSources.FakeOrdersApiClient"/> had no indexer anywhere
+    /// until that finding added one, so <c>ClientCallPlanner.BuildKiotaConvention</c>'s
+    /// <c>Api.Status[{id}].GetAsync</c> shape went completely unexercised by anything that
+    /// actually compiles. At that point the fix was a stopgap: <c>FixtureParameter</c> returns
+    /// <see cref="string"/>, so the generated call bound the <c>[Obsolete]</c>-marked
+    /// <c>this[string]</c> overload every time, wrapped in a
+    /// <c>#pragma warning disable CS0618</c> that suppressed the warning without changing what the
+    /// call actually bound.
     /// <para>
-    /// <c>GetStatusById_Contract</c>'s typed-client call reaches exactly the
-    /// <c>[Obsolete]</c>-marked <c>this[string]</c> overload confirmed against a real kiota 1.34.1
-    /// client (this plan's own risk section): <c>FixtureParameter</c> returns
-    /// <see cref="string"/>, and <c>FakeStatusRequestBuilder</c> now carries that same overload,
-    /// obsolete text verbatim, alongside the typed <c>this[Guid]</c> one real kiota output also
-    /// has.
+    /// <c>[typed-path-parameters]</c> is the real fix this test now proves: <c>id</c> declares
+    /// <c>format: uuid</c> (<see cref="SpecWithPathParameter"/>), so
+    /// <c>TestPlanBuilder.ResolvePathParameterKind</c> resolves it to <c>PathParameterKind.Guid</c>
+    /// and <c>TemplateRenderer.WrapForClientCall</c> wraps the spliced fixture value in
+    /// <c>Guid.Parse(...)</c> before it reaches the indexer — binding
+    /// <c>FakeStatusRequestBuilder</c>'s <c>this[Guid position]</c> overload instead, the
+    /// non-obsolete one real kiota 1.34.1 output carries alongside the deprecated
+    /// <c>this[string]</c> (confirmed in this plan's own measurement table). The pragma is gone
+    /// from <c>mstest-class.scriban</c> entirely now — there is nothing left for it to suppress.
     /// </para>
     /// <para>
     /// <c>-p:WarningsAsErrors=CS0618</c> — not a blanket <c>TreatWarningsAsErrors</c> — is what
-    /// actually proves the pragma matters: the scaffold's own <c>.csproj</c> sets no
-    /// <c>TreatWarningsAsErrors</c>, so without promoting this one warning code to an error the
-    /// build would succeed even with the defect this test exists to catch reintroduced (CS0618
-    /// would merely warn, never fail). A blanket flip risks failing on some unrelated warning this
-    /// test has no business asserting about.
+    /// actually proves the fix rather than merely asserting it in a comment: the scaffold's own
+    /// <c>.csproj</c> sets no <c>TreatWarningsAsErrors</c>, so promoting this one warning code to
+    /// an error is what makes a regression back to the deprecated overload fail the build instead
+    /// of merely warning. A blanket flip would risk failing on some unrelated warning this test has
+    /// no business asserting about. The build succeeding here, with no pragma present anywhere in
+    /// the generated source and no CS0618 in the build output, is the whole proof: the generated
+    /// call binds the typed overload, not the deprecated one.
     /// </para>
     /// </summary>
     [TestMethod]
-    public async Task GeneratedClientRoutedSuccessCaseWithAPathParameterCompilesDespiteTheObsoleteIndexer()
+    public async Task GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer()
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
 
@@ -1026,18 +1044,21 @@ public class GeneratedSuiteExecutionTests
         var generatedText = File.ReadAllText(generatedFile);
 
         generatedText.ShouldContain(
-        "Api.Status[FixtureParameter(\"getStatusById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);",
-        customMessage: "getStatusById's client-routed case should splice the indexer exactly as " +
-                       "ClientCallPlanner.BuildKiotaConvention derives it");
-        generatedText.ShouldContain("#pragma warning disable CS0618",
-        customMessage: "the client call must be wrapped in the CS0618 suppression -- see [finding-3]");
-        generatedText.ShouldContain("#pragma warning restore CS0618");
+        "Api.Status[Guid.Parse(FixtureParameter(\"getStatusById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);",
+        customMessage: "getStatusById's client-routed case should splice the indexer through " +
+                       "Guid.Parse(...), binding the typed this[Guid] overload rather than the " +
+                       "deprecated this[string] one");
+        generatedText.ShouldNotContain("#pragma warning disable CS0618",
+        customMessage: "[typed-path-parameters] removed the pragma from mstest-class.scriban -- " +
+                       "nothing this template emits should need it any more");
+        generatedText.ShouldNotContain("#pragma warning restore CS0618");
 
         var build = await ProcessRunner.RunAsync("dotnet",
         $"build \"{_root}\" --nologo -v q -p:WarningsAsErrors=CS0618");
         build.ExitCode.ShouldBe(0,
-        $"generated project failed to build with CS0618 promoted to an error -- the #pragma " +
-        $"suppression did not take effect:{Environment.NewLine}{build.Output}");
+        $"generated project failed to build with CS0618 promoted to an error -- the generated " +
+        $"call must bind the typed, non-obsolete this[Guid] overload with no pragma needed at " +
+        $"all:{Environment.NewLine}{build.Output}");
         build.Output.ShouldNotContain("CS0618", customMessage: build.Output);
     }
 

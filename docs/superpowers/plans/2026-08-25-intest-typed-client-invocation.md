@@ -10,7 +10,8 @@ below:
 | 2 — `[convention-and-config]` | `336b166` | The `client` config section, `client-map.json`, `ClientCallPlanner`, `TestPlanBuilder` wiring. Plans the call expression; nothing renders it yet |
 | 3 — `[template-and-render]` | `0104a4d` | The template branch, `GenerateCommand` writing `clientCaptureEnabled`, full golden proof of *generated* code |
 | fix — the schema-less gap | `19ab080` | A client-routed case with no response schema (a 204, or any `client-map.json` override) now still routes through the client instead of silently falling back to raw HTTP |
-| 5 — `[lockfile-recovery]` | *(this change, uncommitted)* | `intest init --client-lockfile <path>`: recovers `spec.source` — and, where the lockfile names one, a `client` section — from a client generator's own lockfile, for a team that owns a generated client but not the OpenAPI document it came from. Kiota only; NSwag was measured and scoped out. See `[lockfile-recovery]` below, which supersedes `[lockfile-configures]`'s "nothing reads them yet" |
+| 5 — `[lockfile-recovery]` | `02af19d` | `intest init --client-lockfile <path>`: recovers `spec.source` — and, where the lockfile names one, a `client` section — from a client generator's own lockfile, for a team that owns a generated client but not the OpenAPI document it came from. Kiota only; NSwag was measured and scoped out. See `[lockfile-recovery]` below, which supersedes `[lockfile-configures]`'s "nothing reads them yet" |
+| 6 — `[typed-path-parameters]` | *(this change, uncommitted)* | A path parameter's fixture value is now converted to the type Kiota's per-parameter item-builder indexer actually declares (`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)`) before being spliced into a client-routed call, so the generated call binds the typed, non-obsolete indexer overload instead of the deprecated `this[string]` one. **Retires** the "Generator-version fragility" risk's dated finding below — see that risk entry, kept rather than deleted, for the closure note |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
 tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
@@ -367,6 +368,80 @@ scaffolds the recovered `spec.source` and a working `client` section verified th
 template would actually be caught; both flags together refused naming both; neither given refused
 exactly like a blank `--spec` always has been).
 
+### `[typed-path-parameters]` — Task 6: convert a fixture value to the declared type before splicing it into the indexer
+
+**What was built.** `PathParameterKind` (`src/InTest.Cli/Planning/PathParameterKind.cs`) grew from
+two members (`String`, `Integer`) to four: `String`, `Integer`, `Long`, `Guid`. Deliberately kept
+to those four — they cover id-shaped path parameters, which is what path parameters overwhelmingly
+are; date/decimal/etc. were not speculatively added.
+`TestPlanBuilder.ResolvePathParameterKind` (the per-parameter classification
+`ResolvePathParameterKinds` maps every declared path parameter schema through) now reads
+`IOpenApiSchema.Format` alongside `.Type`: `string` + `format: uuid` → `Guid`; `integer` +
+`format: int64` → `Long`; `integer` with any other or absent format (`int32` included) → `Integer`,
+unchanged from before this task; everything else → `String`, also unchanged. `IsNumericType` is
+reused for the "numeric at all" question rather than reimplemented — only the format-based
+sub-classification is new logic.
+
+`TestPlanBuilder.Build`'s Success-case construction now also calls `ResolvePathParameterKinds` and
+sets `TestCasePlan.PathParameterKinds` — previously only the declared-error and auth branches
+(`TryPlanDeclaredNotFound`, `PlanAuthCases`) populated this field, because the raw-HTTP
+declared-error/auth branch was its only consumer. The client-routed branch is why Success needs it
+too now.
+
+`TemplateRenderer.BuildClientCallExpression` — the client-routed branch's only consumer of this —
+wraps each `{param}` placeholder's `FixtureParameterCall` splice per its resolved kind
+(`WrapForClientCall`): `Guid.Parse(...)` for `Guid`, `int.Parse(...)` for `Integer`,
+`long.Parse(...)` for `Long`, and no wrap at all for `String` (the fixture value already has the
+type a string-typed indexer expects). **This applies to the client-routed branch only** —
+`TemplateRenderer.PathArguments`'s raw-HTTP branch, which feeds `InTestUrl.Build` (a
+`string`-typed API), still splices every Success path parameter bare regardless of declared kind,
+exactly as it always has; `PathArguments`'s declared-error/auth arm (`UnmatchableValueFor`) is
+untouched in behaviour too — it still renders the same numeric literal for both `Integer` and
+`Long`, and the same fresh GUID for both `String` and `Guid`, since a raw-HTTP request needs no
+type conversion at all and only ever needed "numeric or not" to pick a well-typed unmatchable
+value (decision 6). The `#pragma warning disable CS0618` / `#pragma warning restore CS0618` pair
+around the client-routed call in `mstest-class.scriban` is deleted outright — nothing this
+template emits reaches the deprecated overload any more, so there is nothing left to suppress.
+
+`ClientCallPlanner.Resolve` gained no fifth gate for an "unsupported path-parameter kind" — asked
+for, and found unreachable by construction: `ResolvePathParameterKind` is exhaustive over every
+schema shape it can see, with `String` as the catch-all for anything it does not specifically
+recognize, so there is no fifth, unmapped kind for such a gate to ever detect. Adding one would
+have been dead code guarding a state the type system and `TestPlanBuilder`'s own resolution logic
+already make impossible; `ClientCallPlanner`'s own doc comment now records this explicitly rather
+than leaving a future reader to wonder why the gate is missing.
+
+**Verification.** `TestPlanBuilderTests` resolves all four kinds from real schema shapes
+(`{"type":"string"}` → `String`; `{"type":"string","format":"uuid"}` → `Guid`;
+`{"type":"string","format":"date-time"}` → `String`, proving an unrecognized format falls through
+rather than being misclassified; `{"type":"integer"}` and `{"type":"integer","format":"int32"}` →
+`Integer`; `{"type":"integer","format":"int64"}` → `Long`) — read off the Success case specifically,
+since that is the new call site this task added and the one that would actually catch a regression
+in that wiring. `TemplateRendererClientTests` covers all four kinds' splice shape directly
+(`Guid.Parse(FixtureParameter(...))`, `int.Parse(FixtureParameter(...))`,
+`long.Parse(FixtureParameter(...))`, and the unwrapped `FixtureParameter(...)` for `String`).
+
+**The golden proof — this is the one that actually closes the risk below, not merely asserts it.**
+`GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer` (renamed
+from the pre-existing `GeneratedClientRoutedSuccessCaseWithAPathParameterCompilesDespiteTheObsoleteIndexer`,
+which this task's fix obsoletes by construction — its own name described the exact defect that no
+longer exists) changed `SpecWithPathParameter`'s `id` parameter from a bare `type: string` to
+`type: string, format: uuid`, so the case it generates resolves to `PathParameterKind.Guid`.
+`GoldenTypedClientSources.FakeOrdersApiClient`'s `FakeStatusRequestBuilder` already carried both a
+`this[Guid position]` (non-obsolete) and an `[Obsolete]`-marked `this[string position]` overload,
+matching real kiota 1.34.1 output — added by the *previous* task's `[finding-3]` fix, at which
+point `this[Guid]` was present but unused (the generated call still spliced a bare `string`, so it
+bound `this[string]` instead). This task reverses which overload the generated call actually
+binds; the golden test's own doc comment and the two indexer declarations' inline comments in
+`GoldenTypedClientSources.cs` were updated to say so. The test asserts the generated line reads
+`Api.Status[Guid.Parse(FixtureParameter("getStatusById", "id"))].GetAsync(...)`, asserts **no**
+pragma appears anywhere in the generated source, and still builds with
+`-p:WarningsAsErrors=CS0618` — passing with no `CS0618` in the build output at all, because the
+generated call never reaches the deprecated overload in the first place. Before this task the same
+build-clean-under-that-flag result depended on the pragma; now it depends on nothing but the
+generated call binding the right overload, which is the actual claim this plan's risk section
+needed proven, not merely asserted.
+
 ---
 
 ## Two findings settled by direct experiment, not reasoning — and where the plan document was wrong
@@ -549,6 +624,21 @@ for free.
   `InTest.Golden.Tests` **43** passing (3m14s) — the suite that actually proves generated code
   compiles and runs, so do not skip it when touching the template or renderer. Do not trust these
   counts without re-measuring — `main` moves under contributors on this repository.
+- **Re-measured after Task 6, `[typed-path-parameters]`, same 2026-08-26** (`dotnet build
+  InTest.sln`, then each suite `--no-build`): build clean, 0 warnings, `samples/*.json` restored
+  with `git checkout -- samples/` (a `dotnet build` regenerates them; never staged, per
+  CONTRIBUTING.md). `InTest.Architecture.Tests` **12** passing (unchanged — this task never touched
+  that project), `InTest.Cli.Tests` **589** passing (+10: six `TestPlanBuilderTests` covering each
+  of the four `PathParameterKind`s resolved from a real schema shape, four
+  `TemplateRendererClientTests` covering each kind's client-routed splice shape), `InTest.Runtime.Tests`
+  **245** passing (unchanged — CLAUDE.md's constraint against touching `src/InTest.Runtime/**`
+  applied), `InTest.Golden.Tests` **44** passing (3m14s, unchanged in count — the one path-parameter
+  golden test this task touches was renamed and its assertions rewritten in place, not
+  duplicated). The intervening commits between the first measurement above and this one
+  (`02af19d`, `19d4bb5`) already moved `InTest.Cli.Tests` from 555 to 579 and `InTest.Runtime.Tests`
+  from 234 to 245 before this task's own +10 landed — the deltas quoted here are against this
+  task's own starting point, not the first bullet's numbers directly. Do not trust these counts
+  without re-measuring either — the same caveat applies.
 
 ---
 
@@ -598,6 +688,30 @@ for free.
   of, and the same one NSwag's strongly-typed, no-string-overload parameters need before *that*
   generator can get a convention at all. One piece of future work unblocks both gaps this plan
   currently ships without; it remains unbuilt today, so both gaps remain open until it lands.
+
+  **CLOSED for Kiota by Task 6, `[typed-path-parameters]` (this change).** The type-mapping layer
+  the paragraph above called for is exactly what was built: `PathParameterKind` grew `Long` and
+  `Guid` alongside `String`/`Integer`, `TestPlanBuilder.ResolvePathParameterKind` reads
+  `format` (`uuid` → `Guid`, `int64` → `Long`) as well as `type`, and
+  `TemplateRenderer.WrapForClientCall` converts a client-routed splice through
+  `Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)` before it reaches the indexer — so the
+  generated call now binds the *typed* overload (`this[Guid position]`, confirmed non-obsolete in
+  the same measured fixture) rather than the deprecated `this[string position]` one this finding
+  named. The `#pragma warning disable CS0618` stopgap named above is deleted outright, not merely
+  left in place alongside the fix: it suppressed a warning the generated call no longer triggers,
+  so keeping it would have hidden a real regression instead of a known, accepted one.
+  `GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer`
+  (`tests/InTest.Golden.Tests/GeneratedSuiteExecutionTests.cs`) is the golden proof: it builds a
+  generated project with `-p:WarningsAsErrors=CS0618` and asserts both that the pragma is nowhere
+  in the generated source *and* that the build still succeeds with no `CS0618` anywhere in its
+  output — which is only possible if the generated call binds the non-obsolete overload, not
+  merely if a suppression is hiding whichever one it actually bound. The single-version-cliff this
+  finding warned about (every convention-derived path-parameter call breaking at once when Kiota's
+  next major actually removes `this[string]`) no longer applies to a path parameter InTest can
+  classify as `Guid`, `Integer`, or `Long` — it only remains live for a path parameter this
+  four-kind classification cannot recognize at all (falls through to `String`, e.g. a spec that
+  encodes an id as a bare, non-uuid-formatted string), which was never eligible for the removal
+  risk in the first place since a plain `string` never bound the deprecated overload to begin with.
 - **Stale `client-map.json` entries warn, not block** — a `CoverageNote`, softer than fixtures'
   drift-blocks-`generate` gate, because (unlike a fixture) there is no second derivable answer to
   diff an override against; the only available check is "does this key still name an operation in

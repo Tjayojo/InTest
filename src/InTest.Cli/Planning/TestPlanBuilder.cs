@@ -166,6 +166,17 @@ public static class TestPlanBuilder
                     NeedsFixture: needsFixture,
                     QueryParameterNames: queryParameterNames,
                     HasRequestBody: hasRequestBody,
+                    // [typed-path-parameters]: the Success case never used to carry a kind per
+                    // path parameter — the raw-HTTP branch's PathArguments always splices a bare
+                    // FixtureParameter(...) for Success regardless of declared type (decision 1:
+                    // every Success path parameter is required, so it always comes from the
+                    // fixture, and InTestUrl.Build takes strings either way). TemplateRenderer's
+                    // client-routed branch is the new reason this is needed here: converting a
+                    // fixture's string value to the declared type before splicing it into Kiota's
+                    // item-builder indexer needs to know that type per parameter, and this is the
+                    // single source of truth for it (ResolvePathParameterKinds), not a second
+                    // re-derivation in the renderer.
+                    PathParameterKinds: ResolvePathParameterKinds(operation, pathParameterNames),
                     ClientCallExpression: clientCallExpression)));
 
                 // Declared-error and auth cases only exist below this point — a call-site fact,
@@ -590,11 +601,23 @@ public static class TestPlanBuilder
 
     /// <summary>
     /// One <see cref="PathParameterKind"/> per entry in <paramref name="pathParameterNames"/>,
-    /// same order — the spec data <see cref="TemplateRenderer"/> needs to render a well-typed
-    /// unmatchable value for a declared-error case (decision 6, and the review finding above
-    /// this method's only call site). Every declared type except integer/number renders as
-    /// <see cref="PathParameterKind.String"/>, which keeps rendering the fresh GUID this code
-    /// already used before that finding — only the integer case is new behaviour.
+    /// same order — originally the spec data <see cref="TemplateRenderer"/> needed to render a
+    /// well-typed unmatchable value for a declared-error/auth case (decision 6, and the review
+    /// finding above <see cref="TryPlanDeclaredNotFound"/>'s call site); <c>[typed-path-parameters]</c>
+    /// widened this method's own call sites to include the Success case too (see <see cref="Build"/>),
+    /// because the client-routed branch needs the same per-parameter kind to convert a fixture's
+    /// <c>string</c> value to the type Kiota's item-builder indexer actually declares.
+    /// <para>
+    /// Format-aware, not type-alone, per <c>[typed-path-parameters]</c>: a bare <c>type: integer</c>
+    /// (no <c>format</c>, or any format other than <c>int64</c> — <c>int32</c> included) still
+    /// resolves to <see cref="PathParameterKind.Integer"/>, exactly as before this change;
+    /// <c>type: integer, format: int64</c> is new and resolves to <see cref="PathParameterKind.Long"/>;
+    /// <c>type: string, format: uuid</c> is also new and resolves to <see cref="PathParameterKind.Guid"/>
+    /// (previously indistinguishable from a plain string, since only "numeric or not" mattered
+    /// before the client-routed branch existed). Every other declared type, or no path parameter
+    /// schema declared at all, resolves to <see cref="PathParameterKind.String"/>, which keeps
+    /// rendering the fresh GUID this code already used before either finding.
+    /// </para>
     /// </summary>
     private static IReadOnlyList<PathParameterKind> ResolvePathParameterKinds(
         OpenApiOperation operation, IReadOnlyList<string> pathParameterNames)
@@ -604,10 +627,34 @@ public static class TestPlanBuilder
             .ToDictionary(p => p.Name!, p => p.Schema, StringComparer.Ordinal);
 
         return pathParameterNames
-            .Select(name => declared.TryGetValue(name, out var schema) && IsNumericType(schema)
-                ? PathParameterKind.Integer
-                : PathParameterKind.String)
+            .Select(name => declared.TryGetValue(name, out var schema) ? ResolvePathParameterKind(schema) : PathParameterKind.String)
             .ToList();
+    }
+
+    /// <summary>
+    /// The per-parameter classification <see cref="ResolvePathParameterKinds"/> maps each declared
+    /// path parameter schema through — see that method's own doc comment for the four-way mapping
+    /// this implements. <see cref="IsNumericType"/> is reused rather than reimplemented (CLAUDE.md's
+    /// "re-deriving is the recurring defect" rule) for the "numeric at all" question; only which
+    /// numeric or string sub-kind — <c>format</c> — is new logic.
+    /// </summary>
+    private static PathParameterKind ResolvePathParameterKind(IOpenApiSchema? schema)
+    {
+        if (schema?.Type is not { } type)
+        {
+            return PathParameterKind.String;
+        }
+
+        if (IsNumericType(schema))
+        {
+            return string.Equals(schema.Format, "int64", StringComparison.Ordinal)
+                ? PathParameterKind.Long
+                : PathParameterKind.Integer;
+        }
+
+        return type.HasFlag(JsonSchemaType.String) && string.Equals(schema.Format, "uuid", StringComparison.Ordinal)
+            ? PathParameterKind.Guid
+            : PathParameterKind.String;
     }
 
     private static bool IsNumericType(IOpenApiSchema? schema)

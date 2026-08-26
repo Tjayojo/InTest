@@ -36,11 +36,16 @@ public sealed record TestCasePlan(
     // — FixtureComposer.HasJsonBodyToCompose is the sole authority on this (same reasoning as
     // NeedsFixture above), so this is set from that method directly rather than re-derived here.
     bool HasRequestBody = false,
-    // Parallel to PathParameterNames — same order, same length when set. TestPlanBuilder's
-    // declared-error and auth branches both populate this (the only roles that ever render an
-    // unmatchable value from it); every other call site, including every one that predates this
-    // field, is read as "kind unknown", which TemplateRenderer treats identically to String — the
-    // same GUID it always rendered, so no existing behaviour changes silently.
+    // Parallel to PathParameterNames — same order, same length when set. Originally populated only
+    // by TestPlanBuilder's declared-error and auth branches, to render an unmatchable-but-well-typed
+    // value (decision 6); [typed-path-parameters] widened this to the Success case too, because
+    // TemplateRenderer's client-routed branch needs the same per-parameter kind to convert a
+    // fixture's string value to the type Kiota's item-builder indexer declares, before splicing it
+    // into the indexer. Every call site that predates either use — including every hand-built
+    // TestCasePlan in a test that does not care about kinds — leaves this null, read as "kind
+    // unknown", which TemplateRenderer treats identically to String in both branches: the same GUID
+    // the declared-error/auth branch always rendered, and the same bare FixtureParameter(...) the
+    // client-routed branch always spliced, so no existing behaviour changes silently.
     IReadOnlyList<PathParameterKind>? PathParameterKinds = null,
     // Decision 7: which identity a CaseRole.Auth case authenticates as. Defaults to Default, the
     // no-override slot, so every call site that predates Task 5 — none of which had a slot to

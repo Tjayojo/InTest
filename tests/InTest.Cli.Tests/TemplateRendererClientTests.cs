@@ -118,6 +118,28 @@ public class TemplateRendererClientTests
                 Category: "Contract")
         ]);
 
+    /// <summary>
+    /// <c>[typed-path-parameters]</c>: a client-routed Success case carrying a declared
+    /// <see cref="PathParameterKind"/> for its one path parameter, so
+    /// <c>BuildClientCallExpression</c>'s per-kind conversion (<c>WrapForClientCall</c>) has
+    /// something to convert against. Otherwise identical to <see cref="PlanWithClientCall"/>.
+    /// </summary>
+    private static TestClassPlan PlanWithClientCallAndKind(PathParameterKind kind) => new(
+        "OrdersTests", "Orders",
+        [new TestCasePlan(
+            MethodName: "GetOrderById_Contract",
+            DisplayName: "Given Orders, when getOrderById, then 200",
+            OperationKey: "getOrderById",
+            OperationKeySynthesized: false,
+            HttpMethod: "GET",
+            PathTemplate: "/orders/{id}",
+            PathParameterNames: ["id"],
+            ExpectedStatus: 200,
+            SchemaKey: "Order",
+            Category: "Contract",
+            PathParameterKinds: [kind],
+            ClientCallExpression: "Api.Orders[{id}].GetAsync")]);
+
     private static string Render(TestClassPlan plan, string? clientTypeName = ClientTypeName)
         => new TemplateRenderer().RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase", clientTypeName);
 
@@ -135,6 +157,59 @@ public class TemplateRendererClientTests
         // implementation of path-parameter fixture resolution, per the typed-client-invocation
         // plan's explicit instruction not to reimplement it.
         var rendered = Render(PlanWithClientCall());
+
+        rendered.ShouldContain("Api.Orders[FixtureParameter(\"getOrderById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);");
+    }
+
+    // --- [typed-path-parameters]: per-kind conversion before the indexer splice. A missing
+    // PathParameterKinds (every call site above this point in the file, and every one that
+    // predates this field) already exercises the "unknown -> String -> bare splice" default via
+    // the test just above; these four cover each PathParameterKind explicitly, proving the
+    // conversion WrapForClientCall performs rather than only its absence. ---
+
+    [TestMethod]
+    public void SplicesAGuidPathParameterThroughGuidParse()
+    {
+        // The measured fix itself: a real kiota 1.34.1 item builder's this[Guid] overload is the
+        // non-obsolete one for a uuid-formatted path parameter (this plan's measurement table) --
+        // Guid.Parse(...) is what makes the call bind that overload instead of the deprecated
+        // this[string] one a bare FixtureParameter(...) splice would reach.
+        var rendered = Render(PlanWithClientCallAndKind(PathParameterKind.Guid));
+
+        rendered.ShouldContain(
+        "Api.Orders[Guid.Parse(FixtureParameter(\"getOrderById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);");
+    }
+
+    [TestMethod]
+    public void SplicesAnIntegerPathParameterThroughIntParse()
+    {
+        var rendered = Render(PlanWithClientCallAndKind(PathParameterKind.Integer));
+
+        rendered.ShouldContain(
+        "Api.Orders[int.Parse(FixtureParameter(\"getOrderById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);");
+    }
+
+    [TestMethod]
+    public void SplicesALongPathParameterThroughLongParse()
+    {
+        var rendered = Render(PlanWithClientCallAndKind(PathParameterKind.Long));
+
+        rendered.ShouldContain(
+        "Api.Orders[long.Parse(FixtureParameter(\"getOrderById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);");
+    }
+
+    [TestMethod]
+    public void LeavesAStringPathParameterBareWithNoConversionWrapper()
+    {
+        // String needs no conversion at all -- the fixture value already has the type the
+        // string-typed indexer expects, so the splice at the call site itself stays exactly the
+        // bare shape every kind rendered before this field existed (and that the "unknown kind"
+        // default above still produces). Checked as "the exact unwrapped line is present" rather
+        // than "the rendered text contains no '.Parse(' anywhere" -- the template's own comment
+        // above the client-routed branch names Guid.Parse/int.Parse/long.Parse in prose
+        // regardless of which kind a given case actually resolves to, so a whole-text substring
+        // search would false-positive on that comment rather than testing the call site.
+        var rendered = Render(PlanWithClientCallAndKind(PathParameterKind.String));
 
         rendered.ShouldContain("Api.Orders[FixtureParameter(\"getOrderById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);");
     }
