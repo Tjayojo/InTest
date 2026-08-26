@@ -633,6 +633,203 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// Stage 3's own golden proof, alongside the three <c>ClientRouted*</c> tests above: those
+    /// prove the runtime mechanism works against a <b>hand-written</b> test class
+    /// (<c>GoldenTypedClientSources.ClientRoutedStatusTests</c>), written before
+    /// <c>ClientCallPlanner</c> or the template branch existed. This proves the same three
+    /// verdicts — a schema violation caught after deserialization, a conforming body passing, a
+    /// 500 surfacing InTest's own contract failure — against code <c>generate</c> itself emits,
+    /// with <c>GenerateCommand</c> resolving the client config, writing
+    /// <c>clientCaptureEnabled</c>, and <c>TemplateRenderer</c> rendering the pinned
+    /// try/filter/catch shape, none of it hand-written here.
+    /// <para>
+    /// The scaffold's <c>getStatus</c> operation has no path parameter, so its single Success case
+    /// (<c>GetStatus_Contract</c>) becomes the client-routed one directly — no separate
+    /// <c>_ClientRouted</c> method name is needed the way the hand-written stage-1b class used
+    /// one, because there is only ever one Success case per operation to collide with. This test's
+    /// own decisive assertion mirrors <c>ClientRoutedSuccessCaseCatchesASchemaViolationAfterTheClientDeserializes</c>
+    /// exactly, against <c>GetStatus_Contract</c> instead of <c>GetStatus_ClientRouted</c>.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedSuccessCaseCatchesASchemaViolationAfterTheClientDeserializes()
+    {
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        // Decisive proof that GenerateCommand itself resolved the client call and wrote the
+        // opt-in flag — no EnableClientCaptureInSpecPaths patch step exists in this test at all,
+        // unlike the three ClientRouted* tests above.
+        var specPathsPath = Path.Combine(_root, "Generated", "spec-paths.json");
+        File.ReadAllText(specPathsPath).ShouldContain("\"clientCaptureEnabled\": true",
+        customMessage: "generate should have written clientCaptureEnabled itself once a client " +
+                       "config resolved a call for getStatus's Success case");
+
+        var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
+        var generatedText = File.ReadAllText(generatedFile);
+        generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
+        customMessage: "GetStatus_Contract itself should be the client-routed case — there is only one Success case for getStatus to collide with");
+        generatedText.ShouldContain("Api.Status.GetAsync(cancellationToken: TestContext.CancellationToken)");
+
+        // Status 200 (so the client itself never throws) but a body missing the required "state"
+        // property entirely — a schema violation the client's own lenient deserialization does not
+        // notice, but SchemaBundle.Validate, run against the raw captured bytes, does.
+        _stub.OverrideStatusResponse(200, "{}");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        $"GetStatus_Contract must fail on the schema violation — if this passed, the generated " +
+        $"client-routed case did not preserve raw-bytes validation:{Environment.NewLine}{test.Output}");
+
+        var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
+            .Select(e => e.Value).FirstOrDefault() ?? "";
+
+        failureText.ShouldContain("Schema:",
+        customMessage: $"GetStatus_Contract failed, but not on a schema violation:{Environment.NewLine}{test.Output}");
+        failureText.ShouldContain("PropertyRequired",
+        customMessage: $"GetStatus_Contract failed, but the violation was not the missing 'state' property:{Environment.NewLine}{test.Output}");
+
+        // Rules out the failure being FakeOrdersApiClient's own exception surfacing instead of
+        // InTest's contract failure — status 200 never throws from the fake client.
+        failureText.ShouldNotContain("FakeOrdersApiClient: request failed",
+        customMessage: $"the failure came from the fake client's own exception, not InTest's captured-response verdict:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(1, test.Output);
+    }
+
+    /// <summary>
+    /// The happy-path half of the generated-code proof, alongside
+    /// <see cref="GeneratedClientRoutedSuccessCaseCatchesASchemaViolationAfterTheClientDeserializes"/>:
+    /// a schema-conforming body must still pass, over the wire, through the generated
+    /// <c>GetStatus_Contract</c> case's client call. Unlike the hand-written
+    /// <c>ClientRoutedStatusTests</c> (stage 1b), the generated case never keeps the deserialized
+    /// result in a local variable to assert on — the pinned template shape has no reason to — so
+    /// this test's proof is that the request reached the stub and the case passed, not a second
+    /// assertion on a return value nothing generated code retains.
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedSuccessCaseReceivesAConformingBody()
+    {
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        _stub.OverrideStatusResponse(200, """{"state":"ok"}""");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        $"GetStatus_Contract should pass against a schema-conforming body:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        _stub.ReceivedPaths.ShouldContain("/api/status",
+        $"the generated client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
+
+    /// <summary>
+    /// <c>[captured-response-is-the-verdict]</c>'s live proof against generated code: a Success
+    /// case whose typed client call actually returns 500 must surface InTest's own contract
+    /// failure — run id, expected vs actual status, elapsed, body excerpt — not the fake client's
+    /// own <c>FakeApiException</c>. Mirrors
+    /// <see cref="ClientRoutedSuccessCaseSurfacesInTestsOwnContractFailureNotTheClientsException"/>
+    /// exactly, against generated rather than hand-written source.
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedSuccessCaseSurfacesInTestsOwnContractFailureNotTheClientsException()
+    {
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        _stub.OverrideStatusResponse(500, """{"error":"boom"}""");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        $"GetStatus_Contract should fail against a 500 response:{Environment.NewLine}{test.Output}");
+
+        var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
+            .Select(e => e.Value).FirstOrDefault() ?? "";
+
+        failureText.ShouldContain("expected 200, got 500",
+        customMessage: $"GetStatus_Contract did not fail with InTest's own expected-vs-actual status message:{Environment.NewLine}{test.Output}");
+
+        failureText.ShouldNotContain("FakeOrdersApiClient: request failed",
+        customMessage: $"the fake client's own exception leaked into the failure instead of being replaced by InTest's own verdict:{Environment.NewLine}{test.Output}");
+        failureText.ShouldNotContain("FakeApiException",
+        customMessage: $"the fake client's own exception type name leaked into the failure:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(1, test.Output);
+
+        _stub.ReceivedPaths.ShouldContain("/api/status",
+        $"the generated client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
+
+    /// <summary>
     /// F10 inverted (Task 1, Step 3). Before the readiness client existed, this exact scenario —
     /// a throwing handler on <c>InTestClients.Api</c>, exactly where an adopter's own bearer
     /// handler attaches via <c>TestStartup.cs</c>'s <c>Register</c> hook — made
@@ -1630,6 +1827,61 @@ public class GeneratedSuiteExecutionTests
         File.WriteAllText(testStartupPath, testStartup.Replace(
         anchor,
         "services.AddTransient(sp => new FakeStatusClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api)));\n\n        " + anchor,
+        StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Adds intest.json's optional top-level <c>"client"</c> section — <c>{ "kind": "kiota",
+    /// "typeName": ... }</c> — the way an adopter would hand-edit it after <c>init</c>, since
+    /// <c>init</c> itself never scaffolds one (<c>--client-lockfile</c> is a later, separate
+    /// stage). Assert-first, the same discipline every other <c>TestStartup.cs</c>/<c>intest.json</c>
+    /// patch helper in this file uses: the section must be genuinely absent before this adds it,
+    /// so a future <c>InitCommand</c> change that starts scaffolding one itself fails this
+    /// assertion loudly rather than this helper silently double-writing the key.
+    /// </summary>
+    private void AddClientConfig(string typeName)
+    {
+        var path = Path.Combine(_root, "intest.json");
+        var original = File.ReadAllText(path);
+        original.ShouldNotContain("\"client\"",
+        customMessage: "intest.json already declares a client section — InitCommand's scaffold changed");
+
+        var node = JsonNode.Parse(original)!.AsObject();
+        node["client"] = new JsonObject
+        {
+            ["kind"] = "kiota",
+            ["typeName"] = typeName
+        };
+
+        // Same writer options EnableClientCaptureInSpecPaths uses for spec-paths.json — indented,
+        // CRLF interior line endings — so this patched file stays byte-shaped like a hand-edited
+        // intest.json would.
+        var patched = node.ToJsonString(new JsonSerializerOptions { WriteIndented = true, NewLine = "\r\n" }) + "\r\n";
+        File.WriteAllText(path, patched);
+    }
+
+    /// <summary>
+    /// Writes <see cref="GoldenTypedClientSources.FakeOrdersApiClient"/> into the project and
+    /// registers it in <c>TestStartup.cs</c>'s <c>Register</c> hook, over
+    /// <c>IHttpClientFactory.CreateClient(InTestClients.Api)</c> — same anchor and same reason
+    /// <see cref="RegisterFakeStatusClient"/> uses. Unlike that helper, this writes no hand-written
+    /// test class alongside the client: the whole point of stage 3's golden tests is that
+    /// <c>generate</c> itself emits the client-routed case (<c>GetStatus_Contract</c>) once
+    /// <see cref="AddClientConfig"/> has been called before it runs.
+    /// </summary>
+    private void RegisterFakeOrdersApiClient()
+    {
+        File.WriteAllText(Path.Combine(_root, "FakeOrdersApiClient.cs"), GoldenTypedClientSources.FakeOrdersApiClient);
+
+        var testStartupPath = Path.Combine(_root, "TestStartup.cs");
+        var testStartup = File.ReadAllText(testStartupPath);
+        const string anchor = "// Per-request fixtures: path and query parameter values live in fixtures/, not";
+        testStartup.ShouldContain(anchor,
+        customMessage: "the scaffolded Register method's comment must still be present to anchor this edit");
+
+        File.WriteAllText(testStartupPath, testStartup.Replace(
+        anchor,
+        "services.AddTransient(sp => new FakeOrdersApiClient(sp.GetRequiredService<IHttpClientFactory>().CreateClient(InTestClients.Api)));\n\n        " + anchor,
         StringComparison.Ordinal));
     }
 

@@ -35,6 +35,25 @@ public partial class {{ class_name }} : {{ base_class }}
         RequireFixture("{{ tc.operation_key_literal }}");
 
 {{~ end ~}}
+{{~ if tc.client_call_expression ~}}
+        // [captured-response-is-the-verdict], pinned shape — see
+        // docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md. stopwatch starts
+        // before the try because ShouldMatchCapturedContractAsync takes elapsed and the throwing
+        // path still needs a real number. The filter's two '?.'s and the empty second catch are
+        // both load-bearing, not stylistic — see that decision's own text before changing either.
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await ApiClient<{{ tc.client_type_name }}>().{{ tc.client_call_expression }};
+        }
+        catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }
+        catch (Exception) { /* the captured response is the verdict */ }
+        stopwatch.Stop();
+
+        await ApiResponseAssertions.ShouldMatchCapturedContractAsync(
+            LastCapturedResponse, {{ tc.expected_status }}, "{{ tc.schema_key_literal }}", Schemas, TestId, stopwatch.Elapsed,
+            TestContext.CancellationToken);
+{{~ else ~}}
         using var request = new HttpRequestMessage(
             HttpMethod.{{ tc.http_method_pascal }},
             InTestUrl.Build("{{ tc.path_template_literal }}"{{ tc.path_argument_list }}){{ tc.query_expression }});
@@ -53,6 +72,7 @@ public partial class {{ class_name }} : {{ base_class }}
 {{~ else ~}}
         await ApiResponseAssertions.ShouldMatchStatusAsync(
             response, {{ tc.expected_status }}, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+{{~ end ~}}
 {{~ end ~}}
     }
 {{~ end ~}}

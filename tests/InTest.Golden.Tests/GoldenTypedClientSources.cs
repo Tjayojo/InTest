@@ -233,4 +233,89 @@ internal static class GoldenTypedClientSources
         }
     }
     """;
+
+    /// <summary>
+    /// Stage 3's counterpart to <see cref="FakeStatusClient"/>: same behaviour (deserializes via
+    /// <c>ReadAsStreamAsync</c>, throws <see cref="FakeApiException"/>-equivalent on a non-2xx
+    /// status, tolerant <c>FakeStatusResult</c> — see <see cref="FakeStatusClient"/>'s own doc
+    /// comment for why each of those choices matters and is not "simplifiable"), but shaped as a
+    /// <c>.Api.&lt;Segment&gt;...</c> fluent builder chain rather than one flat method, because
+    /// that is the shape <c>ClientCallPlanner.BuildKiotaConvention</c> actually derives
+    /// (<c>GET /api/status</c> → <c>Api.Status.GetAsync</c> — no path parameter on this operation,
+    /// so nothing here exercises the indexer/<c>FixtureParameter</c> substitution
+    /// <c>TemplateRenderer.BuildClientCallExpression</c> also has to do; that substitution is
+    /// covered directly by <c>TemplateRendererClientTests</c> in <c>InTest.Cli.Tests</c> instead,
+    /// against a hand-built plan, since proving it needs no live HTTP round trip).
+    /// <para>
+    /// <c>GetAsync</c> additionally takes a leading, unused
+    /// <c>Action&lt;FakeRequestConfiguration&gt;? requestConfiguration = default</c> parameter —
+    /// present only so the call this file's golden tests actually exercise
+    /// (<c>generate</c>'s own template output, not hand-written source) has to pass
+    /// <c>cancellationToken</c> <b>by name</b> to reach it, the same way it would have to against a
+    /// real Kiota-generated verb method (see <c>ClientCallPlanner</c>'s own doc comment: every
+    /// Kiota verb method takes <c>(Action&lt;RequestConfiguration&lt;...&gt;&gt;?
+    /// requestConfiguration = default, CancellationToken cancellationToken = default)</c>). A
+    /// method with only a trailing <c>cancellationToken</c> parameter would let
+    /// <c>TemplateRenderer.BuildClientCallExpression</c> get away with a positional argument and
+    /// still compile, silently losing the proof that the by-name call this renderer emits is
+    /// actually necessary.
+    /// </para>
+    /// </summary>
+    public const string FakeOrdersApiClient = """
+    using System.Net.Http;
+    using System.Text.Json;
+
+    namespace Stub.ApiTests;
+
+    public sealed class FakeRequestConfiguration;
+
+    public sealed class FakeOrdersApiClient(HttpClient httpClient)
+    {
+        public FakeApiRequestBuilder Api { get; } = new(httpClient);
+    }
+
+    public sealed class FakeApiRequestBuilder(HttpClient httpClient)
+    {
+        public FakeStatusRequestBuilder Status { get; } = new(httpClient);
+    }
+
+    public sealed class FakeStatusRequestBuilder(HttpClient httpClient)
+    {
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+        public async Task<FakeStatusResult> GetAsync(
+            Action<FakeRequestConfiguration>? requestConfiguration = default, CancellationToken cancellationToken = default)
+        {
+            using var response = await httpClient.GetAsync("/api/status", cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new FakeApiException((int)response.StatusCode);
+            }
+
+            // Deliberately ReadAsStreamAsync, never ReadAsStringAsync — see FakeStatusClient's own
+            // doc comment (GoldenTypedClientSources.FakeStatusClient) for the full account.
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var result = await JsonSerializer.DeserializeAsync<FakeStatusResult>(stream, JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return result ?? new FakeStatusResult();
+        }
+    }
+
+    /// <summary>Mimics a generator's own strongly-typed response model for getStatus's 200
+    /// response (the Status schema: required "state", string). State is deliberately nullable,
+    /// not `required` — see FakeStatusClient's own doc for why.</summary>
+    public sealed class FakeStatusResult
+    {
+        public string? State { get; set; }
+    }
+
+    /// <summary>Stands in for the generator-specific exception every real typed client throws on
+    /// a non-2xx response — see FakeStatusClient.FakeApiException's own doc comment.</summary>
+    public sealed class FakeApiException(int statusCode)
+        : Exception($"FakeOrdersApiClient: request failed with status {statusCode}.")
+    {
+        public int StatusCode { get; } = statusCode;
+    }
+    """;
 }

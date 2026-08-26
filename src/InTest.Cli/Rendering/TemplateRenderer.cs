@@ -9,7 +9,16 @@ public sealed class TemplateRenderer
 {
     private readonly Template _classTemplate = Template.Parse(LoadEmbedded("mstest-class.scriban"));
 
-    public string RenderClass(TestClassPlan plan, string @namespace, string baseClass)
+    /// <param name="clientTypeName">
+    /// The adopter's typed-client dotted type name — <c>LoadedConfig.Client?.TypeName</c> — or
+    /// <see langword="null"/> when the project declares no <c>client</c> section, the default and
+    /// every call site that predates stage 3 (GoldenFileTests' own <c>RenderAsync</c> included).
+    /// Optional so every existing caller keeps compiling unchanged; see
+    /// <see cref="BuildClientCallExpression"/> for why a null here forces every case's
+    /// <c>client_call_expression</c> to null regardless of what <see cref="TestCasePlan.ClientCallExpression"/>
+    /// carries.
+    /// </param>
+    public string RenderClass(TestClassPlan plan, string @namespace, string baseClass, string? clientTypeName = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -97,6 +106,26 @@ public sealed class TemplateRenderer
                     IdentitySlot.Secondary => "IdentitySlot.Secondary",
                     _ => null
                 },
+                // Stage 3 ([template-and-render], typed-client invocation): both fields sit bare,
+                // never inside a quoted string — TemplateEscapingGuardTests.AllowedInBarePosition
+                // carries both by name below rather than a '_literal' suffix. Carried per case
+                // (not once at the model's root) purely so that guard's tc.<name> scan — which
+                // only inspects case-scoped references — accounts for them; client_type_name's
+                // value is identical across every case in the class.
+                //
+                // client_type_name reaches mstest-class.scriban in reference position
+                // (ApiClient<{{ tc.client_type_name }}>()), the same reference-position rule
+                // base_class/@namespace above already follow: ConfigLoader.ReadOptionalClientConfig
+                // validates client.typeName with CSharpIdentifier.TryValidateDottedName before this
+                // ever runs, not CSharpLiteral.Escape, so there is nothing here for that escaper to
+                // do.
+                client_type_name = clientTypeName,
+                // See BuildClientCallExpression's own doc comment for the two reasons a non-null
+                // TestCasePlan.ClientCallExpression can still render as null here. Null is what
+                // turns the template's `{{ if tc.client_call_expression }}` branch off — the same
+                // idiom identity_override above already uses for its own if-condition — so a case
+                // this renders null for takes today's raw-HTTP branch exactly as it always has.
+                client_call_expression = BuildClientCallExpression(c, clientTypeName),
                 // Decision 6: a declared-error case shares its operation key with the success
                 // case beside it, so calling RequireFixture here would let that sibling's unfilled
                 // or unresolved fixture block a case that needs no data at all — the exact failure
@@ -167,8 +196,7 @@ public sealed class TemplateRenderer
         {
             var operationKeyLiteral = CSharpLiteral.Escape(plan.OperationKey);
             return ", " + string.Join(", ",
-                plan.PathParameterNames.Select(n =>
-                    $"FixtureParameter(\"{operationKeyLiteral}\", \"{CSharpLiteral.Escape(n)}\")"));
+                plan.PathParameterNames.Select(n => FixtureParameterCall(operationKeyLiteral, n)));
         }
 
         var kinds = plan.PathParameterKinds;
@@ -187,6 +215,90 @@ public sealed class TemplateRenderer
     /// </summary>
     private static string UnmatchableValueFor(PathParameterKind kind)
         => kind == PathParameterKind.Integer ? "\"2147483647\"" : "Guid.NewGuid().ToString()";
+
+    /// <summary>
+    /// The one place a <c>FixtureParameter("opKey", "param")</c> call is spelled out —
+    /// <see cref="PathArguments"/> (raw-HTTP path arguments) and
+    /// <see cref="BuildClientCallExpression"/> (stage 3's typed-client indexer substitution) both
+    /// call this rather than each formatting the string itself, per the typed-client-invocation
+    /// plan's explicit instruction to reuse <see cref="PathArguments"/>'s existing
+    /// path-parameter-fixture-resolution logic rather than reimplementing it. <paramref
+    /// name="operationKeyLiteral"/> is taken pre-escaped (both callers already hold one, built
+    /// once per case) rather than re-escaping the same operation key twice per parameter.
+    /// </summary>
+    private static string FixtureParameterCall(string operationKeyLiteral, string paramName)
+        => $"FixtureParameter(\"{operationKeyLiteral}\", \"{CSharpLiteral.Escape(paramName)}\")";
+
+    /// <summary>
+    /// Turns <see cref="TestCasePlan.ClientCallExpression"/>'s placeholder-intact call chain
+    /// (<c>Api.Orders[{id}].GetAsync</c> — <see cref="Planning.ClientCallPlanner.BuildKiotaConvention"/>'s
+    /// own doc comment names the shape) into the executable expression the template splices bare
+    /// after <c>ApiClient&lt;T&gt;()</c>: every <c>{param}</c> placeholder becomes the same
+    /// <see cref="FixtureParameterCall"/> text <see cref="PathArguments"/> already produces for the
+    /// raw-HTTP branch (one implementation of path-parameter fixture resolution, not two), and the
+    /// trailing call arguments are appended last. Kiota's verb methods take
+    /// <c>(Action&lt;RequestConfiguration&lt;...&gt;&gt;? requestConfiguration = default,
+    /// CancellationToken cancellationToken = default)</c> — passing only <c>cancellationToken</c>,
+    /// and by name, lets <c>requestConfiguration</c> fall back to its own default rather than this
+    /// renderer having to name or construct one.
+    /// <para>
+    /// Returns <see langword="null"/> — which turns the template's whole
+    /// <c>{{ if tc.client_call_expression }}</c> branch off, falling back to today's raw-HTTP
+    /// shape — for two reasons, neither reachable by construction from <c>TestPlanBuilder</c>
+    /// today but both real enough to guard explicitly rather than assume can't happen:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><paramref name="clientTypeName"/> is null: no <c>client</c> config reached
+    /// <see cref="RenderClass"/> at all. In production <c>TestPlanBuilder</c> only ever sets
+    /// <see cref="TestCasePlan.ClientCallExpression"/> when <c>GenerateCommand</c> supplied a
+    /// <c>ClientPlanningConfig</c>, and <c>GenerateCommand</c> only ever does that from the same
+    /// <c>LoadedClientConfig</c> that supplies <paramref name="clientTypeName"/> — so the two are
+    /// always both-null or both-set together there. This guard is for the shape, not a reachable
+    /// production gap: a test that constructs a <see cref="TestCasePlan"/> directly, bypassing
+    /// <c>TestPlanBuilder</c>, must not be able to render a bare <c>ApiClient&lt;null&gt;()</c> by
+    /// skipping it.</item>
+    /// <item><see cref="TestCasePlan.SchemaKey"/> is null: a bodiless Success response (204/205/304,
+    /// or any response declaring no schema at all). This one <b>is</b> reachable today —
+    /// <c>samples/Orders.Api</c>'s cancel-order <c>DELETE</c> returns 204 with a path parameter, no
+    /// query parameters and no request body, exactly the shape
+    /// <see cref="Planning.ClientCallPlanner"/>'s Kiota convention resolves — and
+    /// <c>client-map.json</c>'s override path bypasses every one of <c>ClientCallPlanner.Resolve</c>'s
+    /// own gates by design (that method's own doc comment: "no gate below applies to it"), so an
+    /// override can point a bodiless operation at the client too, regardless of convention.
+    /// <c>ApiResponseAssertions.ShouldMatchCapturedContractAsync</c> (<c>src/InTest.Runtime</c>)
+    /// takes a non-blank <c>schemaKey</c> and throws on one that is blank or unregistered
+    /// (<c>ArgumentException</c> / <c>KeyNotFoundException</c>, via <c>SchemaBundle.Validate</c>) —
+    /// there is no captured-response counterpart of <c>ShouldMatchStatusAsync</c> to fall back to
+    /// yet, and adding one is a <c>src/InTest.Runtime</c> change this task's brief explicitly
+    /// scopes out ("if you need it, STOP and report rather than adding it"). Falling back to the
+    /// raw-HTTP branch here is the same fail-safe-default idiom this file's other helpers already
+    /// choose whenever a case's shape was not anticipated (<see cref="PathArguments"/>,
+    /// <see cref="QueryExpression"/> and <c>emits_fixture_lookup</c> in <see cref="RenderClass"/>
+    /// all fail toward "do the safe, already-proven thing" rather than emit code guaranteed to
+    /// throw at run time) — a schema-less client-routed case still gets fully tested, just over
+    /// raw HTTP exactly as it always has been, instead of a generated case that would call
+    /// <c>ShouldMatchCapturedContractAsync</c> and crash on every run regardless of what the API
+    /// answers.</item>
+    /// </list>
+    /// </summary>
+    private static string? BuildClientCallExpression(TestCasePlan plan, string? clientTypeName)
+    {
+        if (clientTypeName is null || plan.ClientCallExpression is null || plan.SchemaKey is null)
+        {
+            return null;
+        }
+
+        var operationKeyLiteral = CSharpLiteral.Escape(plan.OperationKey);
+        var expression = plan.ClientCallExpression;
+
+        foreach (var name in plan.PathParameterNames)
+        {
+            expression = expression.Replace(
+                $"{{{name}}}", FixtureParameterCall(operationKeyLiteral, name), StringComparison.Ordinal);
+        }
+
+        return $"{expression}(cancellationToken: TestContext.CancellationToken)";
+    }
 
     /// <summary>
     /// Appended to the built path so the query string comes entirely from whichever declared
