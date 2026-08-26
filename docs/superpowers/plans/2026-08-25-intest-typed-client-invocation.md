@@ -3,8 +3,9 @@
 **Status: complete, 2026-08-26.** Five commits, in order, for the original stages below, plus
 Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`), Task 7
 (`[nswag-needs-operationid]`), Task 8 (`[nswag-compile-verification]`), Task 9
-(`[warn-on-swallowed-exception]`) and Task 10 (`[mixed-idiom-execution]`) — nine commits plus one
-uncommitted test-only change:
+(`[warn-on-swallowed-exception]`), Task 10 (`[mixed-idiom-execution]`) and Task 11 (two code-review
+findings against Task 6/7's own shipped reasoning, corrected in place rather than only patched) —
+nine commits plus two uncommitted test-only/code changes:
 
 | Stage | Commit | What it landed |
 |---|---|---|
@@ -19,6 +20,7 @@ uncommitted test-only change:
 | 8 — `[nswag-compile-verification]` | *(this change, uncommitted)* | The third instance of one recurring PR defect closed properly: NSwag's convention-derived call — materially different in shape from Kiota's (a flat `{Method}(args)` on the client type itself, not a builder-chain indexer) — was asserted only as a string in `ClientCallPlannerTests`, with nothing compiling it. A new `CompileVerificationTests` case builds a real project with an NSwag-derived call over a `format: uuid` path parameter, proving the `Guid.Parse(...)` conversion compiles against a strongly-typed parameter and that the token-carrying overload is selected by name. The audit this task's own review asked for found a second gap in the same category — `int.Parse(...)`/`long.Parse(...)` path-parameter conversions asserted only as text in `TemplateRendererClientTests`, never compiled anywhere — recorded below at the time, then closed in a follow-up pass by `CompileVerificationTests.GeneratedProjectWithIntegerAndLongPathParametersCompiles` (see that finding's own closure note) |
 | 9 — `[warn-on-swallowed-exception]` | *(this change, uncommitted)* | The pinned client-routed catch's second clause used to discard the client's own exception outright once a response was already captured — silent on the specific failure mode a reviewer raised: a `client-map.json` override issuing more than one call, where an earlier one captures and a later one fails before reaching the wire. A per-test `IRunDiagnostics` sink now flows through `ApiTestCore.BeginTest`/`ApiTestBase.ApiTestInitialize` (the same seam `testDisplayName` already uses), and the second catch calls the new `ApiTestCore.WarnSwallowedClientException(ex)`, which reports the exception's type and message at `Warn` — reaching the operator even on a run that otherwise passes |
 | 10 — `[mixed-idiom-execution]` | *(this change, uncommitted, test-only)* | An audit found the "mixed suite" risk below (a client-routed Success case and its raw-HTTP auth/declared-error siblings sharing one generated class, `[success-only]`) was **compiled** in three `CompileVerificationTests` cases but never **run** anywhere — every Golden test that runs an auth case configures no `client` section, and every Golden test that configures one has no auth case in play. `GeneratedSuiteExecutionTests.GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings` closes that: it reuses `SpecWithSecuredOperation`, adds a `client` section and a small extension to `GoldenTypedClientSources.FakeApiRequestBuilder` (a new `Secure` builder over `GET /api/secure`), and runs all three cases in one generated class — `GetSecureResource_Contract` now client-routed, `_Unauthorized`/`_Forbidden` still raw HTTP — against the live stub. See the "mixed suite" risk entry below for what running it actually showed |
+| 11 — two corrected findings, `[nswag-path-parameter-order]` and corrected `[typed-path-parameters]` | *(this change, uncommitted)* | Two code-review findings against reasoning Tasks 6 and 7 themselves shipped, both measured, both corrected in place (not silently overwritten — see each section's own "corrected finding" callout). **(a)** `BuildNSwagConvention` bound a generated method's positional path-parameter arguments in path-template order; NSwag actually binds them in the spec's declared `parameters`-array order, and the two only agree when an operation has at most one path parameter — every piece of evidence the convention originally shipped on. Measured against nswag 14.7.1: a `parameters` array declaring `orderId` before `customerId` on `/customers/{customerId}/orders/{orderId}` generates `GetCustomerOrderAsync(System.Guid orderId, System.Guid customerId, ...)` — the wrong order still compiles (both parameters share a type) and silently asserts against the wrong resource. `TestPlanBuilder.DeclaredPathParameterOrder` now carries the declared order explicitly; `ClientCallPlanner.Resolve` withholds NSwag's convention (never Kiota's — its builder chain is structurally path-ordered) when a path-template placeholder has no matching declared entry, rather than guessing. **(b)** `PathParameterKind`'s four members were reasoned to be exhaustive over every schema shape `TestPlanBuilder.ResolvePathParameterKind` can see — true that the method always returned something, false that it always returned the *right* thing: measured against real kiota 1.34.1 output, `type: string, format: date-time` generates `this[DateTimeOffset]` (not `this[string]` — misclassified as `String`, this silently bound the deprecated indexer overload the pragma-removal task's own golden proof assumed was closed) and `type: number, format: double` generates `this[double]` (misclassified as `Integer` via the old `IsNumericType` helper, this compiled and then threw `FormatException` at runtime on a non-integral fixture value). `ResolvePathParameterKind` now returns `PathParameterKind?`, `null` for any shape outside the four genuinely-typable ones, and `ClientCallPlanner.Resolve` withholds convention (both generators alike) when any path parameter is untypable — the fifth gate a now-corrected doc comment used to say could never be needed. Neither finding restores the deleted CS0618 pragma; `TemplateRenderer.UnmatchableValueFor`'s raw-HTTP fallback and `WrapForClientCall`'s override fallback both keep treating `null` like `String` where no fixture value is actually being converted |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
 tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
@@ -418,6 +420,45 @@ have been dead code guarding a state the type system and `TestPlanBuilder`'s own
 already make impossible; `ClientCallPlanner`'s own doc comment now records this explicitly rather
 than leaving a future reader to wonder why the gate is missing.
 
+**CORRECTED by Task 11 — the paragraph above was wrong, not merely cautious.** A code-review
+finding measured directly against real kiota 1.34.1 output that `ResolvePathParameterKind`'s
+"exhaustive by construction" is not the same claim as "correct by construction", and the gap
+between them was live, not hypothetical: `type: string, format: date-time` generates a
+`this[DateTimeOffset]` item-builder indexer, and `type: number, format: double` generates
+`this[double]` — neither is `String`/`Integer` in disguise, but the mapping the paragraph above
+describes (`"everything else → String"`, and `IsNumericType` matching `integer`/`number` together
+before picking `Integer`/`Long` from `format`) filed both under one of those two members anyway.
+The consequence was exactly the deprecated-overload risk this task's own golden proof believed it
+had closed: a `date-time` parameter classified as `String` still spliced a bare
+`FixtureParameter(...)` call into a `this[DateTimeOffset]`-carrying item builder, binding the
+`[Obsolete]` `this[string]` fallback overload every time (undetected — with the pragma already
+deleted, this would surface as an unsuppressed `CS0618` the next time a real generator with that
+shape was exercised, not a silent pass) — and a `number`/`double` parameter classified as `Integer`
+spliced `int.Parse(...)`, which compiles against a `double`-typed parameter (an implicit widening
+conversion at the call site) but throws `FormatException` at runtime for any non-integral fixture
+value such as `"1.5"`.
+<br><br>
+`ResolvePathParameterKind` now returns `PathParameterKind?` — `null` for any shape outside the four
+genuinely-typable ones (a plain `string`, `string`/`uuid`, `integer`, `integer`/`int64`) — and the
+`IsNumericType` helper that conflated `integer` and `number` is deleted rather than kept and worked
+around. `ClientCallPlanner.Resolve` gained exactly the fifth gate this section said could never be
+needed: `hasUntypablePathParameter`, computed once by `TestPlanBuilder` from the same per-parameter
+list and withholding convention — for both Kiota and NSwag alike, since
+`TemplateRenderer.WrapForClientCall`'s per-kind conversion is the one mechanism both conventions'
+`{param}` placeholders share — when any path parameter resolves to `null`. See
+`PathParameterKind`'s own doc comment and `ClientCallPlanner.Resolve`'s own doc comment for the
+same correction recorded at the code, not only here; `TestPlanBuilderTests` and
+`ClientCallPlannerTests` cover the new `null` verdict and the new gate directly (see this section's
+own **Verification** paragraph below, updated in place).
+<br><br>
+The pragma stays deleted — this correction closes a gap in when convention applies, not a
+regression in what a convention-derived call, once permitted, can bind. A `client-map.json`
+override is unaffected by any of this and was never gated by `Resolve` in the first place
+(overrides win outright, unconditionally): an override naming an untypable-kind parameter still
+gets `WrapForClientCall`'s bare-splice fallback for the same reason `String` always did — the
+adopter wrote real C# and owns its type-correctness at their own next build, exactly
+`[compiler-is-oracle]`'s existing bargain for every override, not a new one this correction adds.
+
 **Verification.** `TestPlanBuilderTests` resolves all four kinds from real schema shapes
 (`{"type":"string"}` → `String`; `{"type":"string","format":"uuid"}` → `Guid`;
 `{"type":"string","format":"date-time"}` → `String`, proving an unrecognized format falls through
@@ -427,6 +468,20 @@ since that is the new call site this task added and the one that would actually 
 in that wiring. `TemplateRendererClientTests` covers all four kinds' splice shape directly
 (`Guid.Parse(FixtureParameter(...))`, `int.Parse(FixtureParameter(...))`,
 `long.Parse(FixtureParameter(...))`, and the unwrapped `FixtureParameter(...)` for `String`).
+
+**Superseded in part by Task 11's correction above:** the `date-time` case this paragraph describes
+(`{"type":"string","format":"uuid"}` → `String`, "proving an unrecognized format falls through
+rather than being misclassified") is no longer what the code does or what the test asserts —
+`ANonUuidFormattedStringPathParameterResolvesToNoTypableKind` (renamed from
+`ANonUuidFormattedStringPathParameterStillResolvesToStringKind`) now asserts `null`, and
+`ANumberPathParameterResolvesToNoTypableKind`/`ADoubleFormattedNumberPathParameterResolvesToNoTypableKind`/
+`ABooleanPathParameterResolvesToNoTypableKind` cover the `IsNumericType`-conflation half of the same
+correction. `TemplateRendererTests.ADeclaredErrorCaseWithAnUntypablePathParameterFallsBackToTheGuidDefault`
+and `TemplateRendererClientTests.SplicesAnUntypablePathParameterBareWithNoConversionWrapper` verify
+`UnmatchableValueFor`/`WrapForClientCall`'s `null`-handling directly, rather than assuming it from
+the switch expression's default arm; `TestPlanBuilderTests.AnUntypablePathParameterKindWithholdsTheClientConventionForKiota`/`...ForNSwag`
+and `ClientCallPlannerTests.ResolveWithholdsConventionForAnUntypablePathParameterKindOnKiota`/`...OnNSwag`
+cover the new `Resolve` gate end to end and at the unit layer respectively.
 
 **The golden proof — this is the one that actually closes the risk below, not merely asserts it.**
 `GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer` (renamed
@@ -720,6 +775,21 @@ predicted this would be "where such a layer would extend from."
   withholds convention for any `operationId` containing `_`, unconditionally — see
   `ClientCallPlanner`'s own doc comment and the "Convention gates" section above for the full
   reasoning and the gate order.
+- **A fourth hazard, found by code review rather than by this section's own original measurement:
+  a multi-path-parameter operation's argument order.** Every operation this section's own
+  measurements used had at most one path parameter — a shape where path-template order and the
+  spec's declared `parameters`-array order are indistinguishable. `BuildNSwagConvention` originally
+  derived its argument order from the path template alone, which happened to agree with every
+  measurement above by construction, not because path order is what NSwag actually binds by.
+  Measured directly, corrected by Task 11 (`[nswag-path-parameter-order]`): a `parameters` array
+  declaring `orderId` before `customerId` on `/customers/{customerId}/orders/{orderId}` generates
+  `GetCustomerOrderAsync(System.Guid orderId, System.Guid customerId, ...)` — declared order, which
+  disagrees with path order here, and because both parameters share a type the wrong order still
+  compiled and would have silently asserted against the wrong resource. `TestPlanBuilder.DeclaredPathParameterOrder`
+  now carries the spec's own declared order to `BuildNSwagConvention`, and `ClientCallPlanner.Resolve`
+  gained a matching withhold gate for a path-template placeholder with no declared counterpart (the
+  "Convention gates" section above has the full gate list). Kiota is unaffected — its builder chain
+  is structurally path-ordered, so `BuildKiotaConvention` was never exposed to this hazard.
 
 Refit is unaffected by any of this — see `[refit-override-only]` above, now stated in the plan's
 decisions section as a permanent limitation distinct from NSwag's gated one, per Task 7's own scope
@@ -747,25 +817,40 @@ decisions section as a permanent limitation distinct from NSwag's gated one, per
    would route the derived method onto a different, unnameable client class (measured — see the
    finding below), so this planner cannot trust the single configured `client.typeName` to be the
    right receiver.
-5. **Query-parameter gate.** Applies to both Kiota and NSwag. Kiota binds query parameters through
+5. **NSwag path-parameter-order gate — added by Task 11, `[nswag-path-parameter-order]`.** A
+   path-template placeholder with no matching `in: path` entry among the operation's declared
+   parameters withholds convention: this planner cannot determine NSwag's real declared argument
+   order for that operation (see the corrected finding below), so it declines to guess at
+   path-template order rather than risk repeating the defect this gate exists to close. Kiota is
+   unaffected — `BuildKiotaConvention` derives its indexer placeholders from the path template's
+   own structure and never reads a declared order at all, so this gate never applies to it.
+6. **Query-parameter gate.** Applies to both Kiota and NSwag. Kiota binds query parameters through
    a `RequestConfiguration<...>` lambda; NSwag's own generated methods take differently-shaped
    optional parameters for the same purpose. Neither convention has a fixture value to splice into
    either shape, so any operation with one or more query parameters withholds convention regardless
    of kind, with a `CoverageNote` pointing at `client-map.json`.
-6. **Request-body gate.** Applies to both Kiota and NSwag. Both generators' `POST`/`PUT`/`PATCH`
+7. **Request-body gate.** Applies to both Kiota and NSwag. Both generators' `POST`/`PUT`/`PATCH`
    methods take a **typed model object** as a positional parameter, never a JSON string — and a
    fixture's request body is raw JSON text. Splicing it would mean guessing the generated model
    type's name, which this planner never attempts; any operation with a JSON request body to
    compose withholds convention the same way, with the same note.
-7. **Verb gate — Kiota only.** A HEAD/OPTIONS/TRACE operation has no known Kiota verb-method
+8. **Untypable-path-parameter-kind gate — added by Task 11, correcting `[typed-path-parameters]`.**
+   Applies to both Kiota and NSwag, checked right before the two conventions diverge. Any path
+   parameter whose declared schema is outside the four shapes `PathParameterKind` can represent
+   (`TestPlanBuilder.ResolvePathParameterKind` returns `null` for it) withholds convention entirely
+   — `TemplateRenderer.WrapForClientCall`'s per-kind conversion is the one mechanism both
+   conventions' `{param}` placeholders share, so neither can safely receive an unconverted or
+   wrongly-converted fixture value. See the corrected finding below for the measured evidence this
+   gate closes.
+9. **Verb gate — Kiota only.** A HEAD/OPTIONS/TRACE operation has no known Kiota verb-method
    convention (`BuildKiotaConvention` only maps GET/POST/PUT/PATCH/DELETE) and withholds with a
    note naming the verb. NSwag needs no equivalent: its method name comes from `operationId` alone,
    never the verb, so no verb can make `BuildNSwagConvention` fail.
 
 Every gate applies only when reached — an override already returned before any of them run, so an
-operation with query parameters, a request body, no `operationId`, or an underscored `operationId`
-*and* an entry in `client-map.json` is fully covered by the override, not silently dropped to raw
-HTTP.
+operation with query parameters, a request body, an untypable path parameter, no `operationId`, or
+an underscored `operationId` *and* an entry in `client-map.json` is fully covered by the override,
+not silently dropped to raw HTTP.
 
 ---
 
@@ -1002,6 +1087,28 @@ its numbers were measured against; re-measure before trusting any of them past t
   four-kind classification cannot recognize at all (falls through to `String`, e.g. a spec that
   encodes an id as a bare, non-uuid-formatted string), which was never eligible for the removal
   risk in the first place since a plain `string` never bound the deprecated overload to begin with.
+
+  **CORRECTED by Task 11 — the paragraph above's closing claim was false, not merely imprecise.**
+  "Falls through to `String`" was not, in fact, limited to a genuinely-plain, non-uuid-formatted
+  string id. Measured directly: `type: string, format: date-time` fell through to `String` too
+  (the old `ResolvePathParameterKind` recognized only `uuid` as a distinguishing string format),
+  and a real kiota 1.34.1 client types that shape as `this[DateTimeOffset]`, carrying the very
+  `[Obsolete]`-marked `this[string]` fallback this whole risk entry is about — so the
+  single-version-cliff this paragraph declared closed for "every path parameter InTest can
+  classify" was still live for a `date-time`-formatted one, silently, because the classifier
+  mis-filed it as a shape that was never at risk instead of recognizing it as a shape it could not
+  classify. The same misclassification affected `type: number` on the runtime-`FormatException`
+  side of `[typed-path-parameters]`, a separate but sibling defect (see that section's own Task 11
+  correction above for the full evidence on both). `ResolvePathParameterKind` now returns
+  `PathParameterKind?`, `null` for `date-time` and every other shape outside the four genuinely
+  well-typed ones, and `ClientCallPlanner.Resolve` withholds convention entirely for an operation
+  with an untypable path parameter rather than letting it reach the indexer under a borrowed
+  identity. The single-version-cliff claim now holds as originally stated, for the classification
+  as corrected: a path parameter InTest classifies as `Guid`, `Integer`, or `Long` is covered by
+  the typed-overload fix; a path parameter it classifies as `String` is, and always was, a
+  genuinely plain string with no more-specific overload to have bound in the first place; and a
+  path parameter it cannot classify at all no longer reaches convention-derived Kiota *or* NSwag
+  code, so it cannot bind a deprecated overload (or anything else) through this path either.
 - **Stale `client-map.json` entries warn, not block** — a `CoverageNote`, softer than fixtures'
   drift-blocks-`generate` gate, because (unlike a fixture) there is no second derivable answer to
   diff an override against; the only available check is "does this key still name an operation in

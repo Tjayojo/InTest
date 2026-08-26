@@ -301,6 +301,41 @@ public class TemplateRendererTests
         rendered.ShouldContain("\"2147483647\"");
     }
 
+    /// <summary>
+    /// <c>[typed-path-parameters]</c>, corrected: <see cref="PathParameterKind"/>? can now carry
+    /// <see langword="null"/> ("untypable" — e.g. a <c>date-time</c>- or <c>number</c>-typed path
+    /// parameter, per <c>TestPlanBuilder.ResolvePathParameterKind</c>'s own doc comment). This
+    /// raw-HTTP branch never splices a real fixture value regardless of kind (decision 6: always a
+    /// generated, unmatchable id), so "untypable" has nothing to convert and must keep falling back
+    /// to the same well-typed-but-unmatchable GUID a plain string already used — verified directly
+    /// rather than assumed, since <c>UnmatchableValueFor</c>'s signature widened to accept the
+    /// nullable kind.
+    /// </summary>
+    [TestMethod]
+    public void ADeclaredErrorCaseWithAnUntypablePathParameterFallsBackToTheGuidDefault()
+    {
+        var plan = new TestClassPlan("OrdersTests", "Orders",
+        [new TestCasePlan(
+            MethodName: "DeleteOrder_NotFound",
+            DisplayName: "Given Orders, when deleteOrder, then 404",
+            OperationKey: "deleteOrder",
+            OperationKeySynthesized: false,
+            HttpMethod: "GET",
+            PathTemplate: "/orders/{id}",
+            PathParameterNames: ["id"],
+            ExpectedStatus: 404,
+            SchemaKey: null,
+            Category: "Contract",
+            Role: CaseRole.DeclaredError,
+            NeedsFixture: false,
+            PathParameterKinds: [null])]);
+
+        var rendered = Render(plan);
+
+        rendered.ShouldContain("Guid.NewGuid().ToString()");
+        rendered.ShouldNotContain("\"2147483647\"");
+    }
+
     [TestMethod]
     public void ASuccessCaseIsUnaffectedByTheDeclaredErrorBranch()
     {

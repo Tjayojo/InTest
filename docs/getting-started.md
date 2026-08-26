@@ -371,13 +371,18 @@ does with a bad request, not what your client does with one, so those always bui
 `HttpRequestMessage` directly regardless of this section. Among `Success` cases, `generate`
 derives the call automatically for an operation with **no query parameters and no request
 body** — neither generator's convention has a fixture value InTest could safely splice into a
-query-binding shape or a typed request-body parameter. For Kiota that is the only condition. For
-NSwag it additionally needs your spec to declare an `operationId` for the operation, with no `_`
-in it — `generate` derives `{PascalCase(operationId)}Async` directly on your configured client
-type (measured against a real nswag 14.7.1 client), but an operation with no `operationId` reduces
-to NSwag's own unpredictable, uncompilable synthesized naming, and an `operationId` containing `_`
-gets split by NSwag's default generation mode onto a *different* client class than the one you
-configured — measured the same way, see
+query-binding shape or a typed request-body parameter. It also needs every path parameter's
+declared schema to be one of four shapes InTest can convert a fixture value through — a plain
+`string`, a `string` formatted `uuid`, an `integer`, or an `integer` formatted `int64` — so a
+`number`-, `date-time`-, `date`-, `boolean`-, or unrecognized-format-typed path parameter withholds
+convention too, for both generators alike (`[typed-path-parameters]`, same doc). For Kiota, that
+plus the query-parameter/request-body rule above is everything. For NSwag it additionally needs
+your spec to declare an `operationId` for the operation, with no `_` in it — `generate` derives
+`{PascalCase(operationId)}Async` directly on your configured client type (measured against a real
+nswag 14.7.1 client), but an operation with no `operationId` reduces to NSwag's own unpredictable,
+uncompilable synthesized naming, and an `operationId` containing `_` gets split by NSwag's default
+generation mode onto a *different* client class than the one you configured — measured the same
+way, see
 `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s `[nswag-needs-operationid]`
 for both pieces of evidence. Refit gets no automatic convention at all, ever: a Refit interface's
 method names are either hand-written or generator-settings-dependent, so there is no spec-derived
@@ -399,10 +404,31 @@ all:
 
 Keyed by operation key, one entry per operation you want routed through the client. The value is
 a real C# expression — everything after `ApiClient<T>()`. `{param}` placeholders are replaced with
-the same per-operation fixture value the raw-HTTP path already resolves; wrap it in parentheses
-with any additional argument the call needs. A wrong expression fails your own next `dotnet
-build` at the generated line — the same way a typo in any other line of your test project would —
-rather than being silently accepted.
+the same per-operation fixture value the raw-HTTP path already resolves — converted through
+`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)` first when the parameter's declared schema is
+one of the three non-string typable shapes above, spliced bare otherwise (a plain `string`, or a
+shape InTest cannot classify at all — the adopter's own responsibility to type-correct at the next
+build in that last case).
+
+Your expression takes one of two shapes, and `generate` tells them apart only by whether the
+expression *already ends in a closing `)`* once every `{param}` placeholder has been substituted:
+
+- **A bare call chain with no argument list of its own** — the same shape `generate` derives for
+  you, e.g. `"getOrderById": "Api.Orders[{id}].GetAsync"`. `generate` appends the call's arguments
+  for you: `(cancellationToken: TestContext.CancellationToken)`.
+- **A self-closing expression that already spells out its own argument list**, ending in `)` —
+  the shape a query-parameter or request-body operation needs, since neither generator's
+  convention can guess those arguments for you: e.g. `"createOrder": "Api.Orders.PostAsync(new
+  CreateOrderRequest())"`. `generate` splices this verbatim and appends nothing further; pass
+  `cancellationToken: TestContext.CancellationToken` yourself, by name, if your call needs one.
+
+Getting this wrong the first way round — writing a self-closing expression but expecting `generate`
+to still append the cancellation token — used to produce `PostAsync(new
+CreateOrderRequest())(cancellationToken: …)`, which fails to compile (`CS0149`, "cannot invoke a
+non-delegate type twice") because a completed method call is not itself invocable a second time. A
+wrong expression of either shape fails your own next `dotnet build` at the generated line — the
+same way a typo in any other line of your test project would — rather than being silently
+accepted.
 
 ---
 

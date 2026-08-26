@@ -44,6 +44,29 @@ public class ApiTestCoreCaptureTests
         public void ExposedWarnSwallowedClientException(Exception exception) => WarnSwallowedClientException(exception);
 
         public void ExposedEndTest() => EndTest();
+
+        /// <summary>
+        /// [restore-one-arg-begintest]: reaches the new one-argument compatibility overload the
+        /// same way every other exposed member in this class reaches a protected one — a thin
+        /// public passthrough on this test-local subclass, not reflection, since the overload
+        /// itself is an ordinary <c>protected</c> method with nothing reflection is needed for.
+        /// </summary>
+        public void ExposedBeginTestOneArg(string? testDisplayName) => BeginTest(testDisplayName);
+
+        /// <summary>
+        /// [restore-one-arg-begintest]: the two-argument form, exposed the same way, so a test can
+        /// drive both overloads through the identical real production body and compare the
+        /// resulting per-test state directly rather than trusting the one-argument overload's own
+        /// one-line delegation by inspection alone.
+        /// </summary>
+        public void ExposedBeginTest(string? testDisplayName, IRunDiagnostics diagnostics) =>
+            BeginTest(testDisplayName, diagnostics);
+
+        /// <summary>Exposes the otherwise-protected <see cref="ApiTestCore.TestId"/> — the same
+        /// escape hatch <see cref="ApiTestBaseTests.TestableApiTestCore"/> already uses, duplicated
+        /// here rather than shared because that type has no <c>BeginTest</c> passthrough and this
+        /// one has no reason to take on that file's dependency.</summary>
+        public string ExposedTestId => TestId;
     }
 
     /// <summary>Records every <see cref="Warn"/>/<see cref="Note"/> call verbatim, in order —
@@ -237,5 +260,171 @@ public class ApiTestCoreCaptureTests
 
         diagnostics.Warnings.ShouldBeEmpty();
         diagnostics.Notes.ShouldBeEmpty();
+    }
+
+    // ---- BeginTest(string?) — the one-argument compatibility overload ------------------------
+
+    /// <summary><see cref="InTestRun.Root"/> has a private setter — production code only ever
+    /// assigns it from <see cref="InTestRun.InitializeAsync"/>. Reached here via reflection, the
+    /// same escape hatch this file already uses for <see cref="ApiTestCore"/>'s own private
+    /// fields (<see cref="TestableApiTestCore.SetScope"/>, <see cref="TestableApiTestCore.SetDiagnostics"/>),
+    /// because the real, production <c>BeginTest(string?)</c> overload under test calls
+    /// <c>InTestRun.Root.CreateScope()</c> directly rather than accepting a scope parameter — there
+    /// is no way to drive its actual body without a live <see cref="InTestRun.Root"/> to call
+    /// into.</summary>
+    private static readonly PropertyInfo InTestRunRootProperty =
+        typeof(InTestRun).GetProperty(nameof(InTestRun.Root), BindingFlags.Public | BindingFlags.Static)!;
+
+    /// <summary>Same reasoning as <see cref="InTestRunRootProperty"/>: <c>BeginTest</c> reads
+    /// <see cref="InTestRun.RunIdValue"/> directly (via <c>InTestId.ForTest</c>), and
+    /// <c>InTestId.ForTest</c> throws <see cref="ArgumentException"/> on a null/whitespace run id —
+    /// the field's own unset default — so this must be given a real value for the call under test
+    /// to reach <see cref="WarnSwallowedClientException"/> at all, rather than failing earlier for
+    /// a reason that has nothing to do with what this test proves.</summary>
+    private static readonly PropertyInfo InTestRunRunIdValueProperty =
+        typeof(InTestRun).GetProperty(nameof(InTestRun.RunIdValue), BindingFlags.Public | BindingFlags.Static)!;
+
+    /// <summary>
+    /// [restore-one-arg-begintest]: proves the one-argument <c>BeginTest(string?)</c> compatibility
+    /// overload reproduces the <em>exact</em> old observable behaviour of a caller that supplies no
+    /// diagnostics sink at all — not merely that the overload compiles and can be called. Before
+    /// <c>[warn-on-swallowed-exception]</c> added the two-argument <c>BeginTest(string?, IRunDiagnostics)</c>,
+    /// a swallowed client exception inside <see cref="ApiTestCore.WarnSwallowedClientException"/>
+    /// left no trace anywhere — <c>_diagnostics</c> was null, and that method's own
+    /// <c>_diagnostics?.Warn(...)</c> already made that a silent no-op. This test drives the real
+    /// production <c>BeginTest(string?)</c> body (not a hand-simulated stand-in), then triggers
+    /// <see cref="ApiTestCore.WarnSwallowedClientException"/> the same way a generated
+    /// client-routed case's second catch would, and asserts only that neither call throws — there is
+    /// no diagnostics sink to assert warnings or notes against, because the entire point of the old
+    /// one-argument signature is that none was ever supplied. "Doesn't throw" is the old behaviour;
+    /// anything else (a warning surfacing somewhere, an exception propagating) would be new, wrong
+    /// behaviour this overload must not introduce.
+    /// <para>
+    /// <see cref="InTestRun.Root"/> and <see cref="InTestRun.RunIdValue"/> are process-wide static
+    /// state this test must set (via <see cref="InTestRunRootProperty"/>/<see cref="InTestRunRunIdValueProperty"/>)
+    /// for <c>BeginTest</c> to have anything real to call into — captured and restored in a
+    /// <c>finally</c> so this test's mutation cannot leak into whichever test the assembly's
+    /// <c>[assembly: DoNotParallelize]</c> ordering runs next, the same before/after-reset shape
+    /// <c>TestHostTests</c> already uses for <c>InTestRun.RetainedFixtureContext</c> and
+    /// <c>ApiTestBaseAuthTests</c> already uses for <see cref="InTestRun.TokenProvider"/>. The
+    /// registered service collection is deliberately minimal — only <see cref="InTestClients.Api"/>,
+    /// the one named client <c>BeginTest</c> resolves — well short of the full, heavy
+    /// <c>InTestRun.InitializeAsync</c> weight this file's own top-level doc already explains this
+    /// class is never given an in-process harness for.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void BeginTestOneArgOverloadNeverThrowsAndLeavesASwallowedExceptionSilentlyDiscarded()
+    {
+        var previousRoot = InTestRun.Root;
+        var previousRunIdValue = InTestRun.RunIdValue;
+        var previousTokenProvider = InTestRun.TokenProvider;
+
+        var services = new ServiceCollection();
+        services.AddHttpClient(InTestClients.Api);
+        using var provider = services.BuildServiceProvider();
+
+        InTestRunRootProperty.SetValue(null, provider);
+        InTestRunRunIdValueProperty.SetValue(null, "test-run");
+        InTestRun.TokenProvider = null;
+
+        try
+        {
+            var subject = new TestableApiTestCore();
+
+            Should.NotThrow(() => subject.ExposedBeginTestOneArg("Some Test"));
+            Should.NotThrow(() => subject.ExposedWarnSwallowedClientException(new InvalidOperationException("boom")));
+
+            subject.ExposedEndTest();
+        }
+        finally
+        {
+            InTestRunRootProperty.SetValue(null, previousRoot);
+            InTestRunRunIdValueProperty.SetValue(null, previousRunIdValue);
+            InTestRun.TokenProvider = previousTokenProvider;
+        }
+    }
+
+    /// <summary>A single named identity — enough to make the ambient-identity assertion below
+    /// non-trivial. <see cref="ApiTestBaseAuthTests.FakeTokenProvider"/> is the same shape, but
+    /// private to that file, so this is a narrower duplicate rather than a shared dependency
+    /// across files that otherwise have no reason to know about each other.</summary>
+    private sealed class FakeTokenProvider(params string[] identityNames) : ITestTokenProvider
+    {
+        public IReadOnlyList<TestIdentity> Identities { get; } = identityNames.Select(n => new TestIdentity(n)).ToArray();
+
+        public Task<string> GetTokenAsync(string audience, string? identity = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("not exercised by this test");
+    }
+
+    /// <summary>
+    /// [restore-one-arg-begintest]: the equivalence half of this overload's contract, distinct from
+    /// the never-throws test above. That test proves the one-argument overload does not blow up;
+    /// this one proves it leaves behind exactly the same per-test state <c>ApiTestBase.ApiTestInitialize</c>
+    /// already relies on from the two-argument form — <see cref="ApiTestCore.TestId"/>, the ambient
+    /// capture slot <see cref="ResponseCaptureHandler"/> writes into, and the ambient default
+    /// identity <see cref="ApiTestCore.ResolveDefaultIdentity"/> computes — rather than merely
+    /// asserting the call site compiles and survives. A caller migrating from the pre-diagnostics
+    /// one-argument signature must see identical downstream behaviour, not just an absence of
+    /// exceptions.
+    /// <para>
+    /// Drives the real, production two-argument <c>BeginTest(string?, IRunDiagnostics)"/> once with
+    /// a <see cref="FakeRunDiagnostics"/> sink to establish the baseline, tears that test down, then
+    /// drives the real one-argument overload and compares. Both runs use the same
+    /// <paramref name="testDisplayName" />-equivalent literal and the same <see cref="InTestRun.RunIdValue"/>,
+    /// so <see cref="ApiTestCore.TestId"/> is expected to come out byte-for-byte identical — a
+    /// divergence there would mean the one-argument overload is not simply forwarding to the
+    /// two-argument body with a swapped-out sink, which is exactly the regression this test exists
+    /// to catch.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void BeginTestOneArgOverloadSetsUpPerTestStateIdenticallyToTheTwoArgFormWithARealSink()
+    {
+        var previousRoot = InTestRun.Root;
+        var previousRunIdValue = InTestRun.RunIdValue;
+        var previousTokenProvider = InTestRun.TokenProvider;
+
+        var services = new ServiceCollection();
+        services.AddHttpClient(InTestClients.Api);
+        using var provider = services.BuildServiceProvider();
+
+        InTestRunRootProperty.SetValue(null, provider);
+        InTestRunRunIdValueProperty.SetValue(null, "test-run");
+        InTestRun.TokenProvider = new FakeTokenProvider("primary-user");
+
+        try
+        {
+            // Baseline: the two-argument form, with a real (non-null) diagnostics sink — the shape
+            // every caller this repository controls actually uses.
+            var baselineDiagnostics = new FakeRunDiagnostics();
+            var baseline = new TestableApiTestCore();
+            baseline.ExposedBeginTest("Some Test", baselineDiagnostics);
+
+            var baselineTestId = baseline.ExposedTestId;
+            var baselineIdentity = InTestAmbient.Identity.Value;
+            var baselineSlotExists = InTestAmbient.LastCapturedResponse.Value is not null;
+            baseline.ExposedEndTest();
+
+            // Subject: the one-argument compatibility overload under test, same display name and
+            // same static InTestRun state, so any difference below is attributable only to the
+            // overload itself, not to a changed environment between the two calls.
+            var subject = new TestableApiTestCore();
+            subject.ExposedBeginTestOneArg("Some Test");
+
+            subject.ExposedTestId.ShouldBe(baselineTestId);
+            InTestAmbient.Identity.Value.ShouldBe(baselineIdentity);
+            baselineIdentity.ShouldBe("primary-user"); // sanity: the comparison above isn't vacuous
+            InTestAmbient.LastCapturedResponse.Value.ShouldNotBeNull();
+            (InTestAmbient.LastCapturedResponse.Value is not null).ShouldBe(baselineSlotExists);
+
+            subject.ExposedEndTest();
+        }
+        finally
+        {
+            InTestRunRootProperty.SetValue(null, previousRoot);
+            InTestRunRunIdValueProperty.SetValue(null, previousRunIdValue);
+            InTestRun.TokenProvider = previousTokenProvider;
+        }
     }
 }

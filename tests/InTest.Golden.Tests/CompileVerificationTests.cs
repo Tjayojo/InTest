@@ -289,36 +289,53 @@ public class CompileVerificationTests
     }
 
     /// <summary>
-    /// The third instance of one recurring defect on this PR: a generated shape asserted only as
-    /// text, with nothing compiling it. <c>ClientCallPlannerTests</c>'
-    /// <c>DerivesTheExpressionForGetOrderByIdWithNSwag</c> and
-    /// <c>ResolveAppliesTheNSwagConventionWhenAnOperationIdWithNoUnderscoreIsPresent</c> both pin
-    /// <see cref="Planning.ClientCallPlanner.BuildNSwagConvention"/>'s output as a string; nothing
-    /// before this test ever built it. Its shape is materially different from Kiota's — a flat
-    /// <c>{Method}(args)</c> directly on the configured client type, not a
-    /// <c>.Api.Segment[idx].VerbAsync()</c> builder chain — so <see cref="GeneratedProjectCompiles"/>
-    /// and every Kiota-shaped fake client in <c>GeneratedSuiteExecutionTests</c> give it no coverage
-    /// at all.
+    /// A second layer on the same recurring defect this file exists to close: a generated shape
+    /// asserted only as text, with nothing compiling it. <c>ClientCallPlannerTests</c> pins
+    /// <see cref="Planning.ClientCallPlanner.BuildNSwagConvention"/>'s argument order as a string
+    /// assertion; before this test, nothing had ever built a project against it, which is exactly
+    /// how a wrong argument order shipped and stayed green on this branch.
+    /// <see cref="Planning.ClientCallPlanner.BuildNSwagConvention"/>'s own doc comment records the
+    /// measured defect this test exists to catch a regression of: NSwag binds a generated method's
+    /// positional path-parameter arguments in the spec's declared <c>parameters</c>-array order, not
+    /// path-template order — the convention originally shipped assuming the opposite. The measured
+    /// reproduction there (nswag 14.7.1) is a path <c>/customers/{customerId}/orders/{orderId}</c>
+    /// whose <c>parameters</c> array declares <c>orderId</c> before <c>customerId</c>; the generated
+    /// client emits <c>GetCustomerOrderAsync(System.Guid orderId, System.Guid customerId, ...)</c> —
+    /// declared order and path-template order disagree, and because both parameters happened to
+    /// share a type (<c>Guid</c>), the wrong-order call still compiled, silently asserting against
+    /// the wrong resource instead of failing loudly. That is precisely the gap a compile-verification
+    /// test cannot close by reproducing the bug verbatim: a same-typed reproduction compiles under
+    /// either argument order, so only a string assertion — never the compiler — could ever have
+    /// caught a regression back to path-template order.
     /// <para>
-    /// Deliberately exercises a path parameter declared <c>format: uuid</c>, not the bare
-    /// <c>type: string</c> <c>orders.json</c> normally carries — mirroring real nswag 14.7.1 output
-    /// for a uuid-formatted path parameter (measured, see <c>BuildNSwagConvention</c>'s own doc
-    /// comment): a strongly-typed <c>System.Guid</c> parameter, with a sibling overload omitting
-    /// the cancellation token. The fake client below carries both overloads, so this test also
-    /// proves <c>cancellationToken:</c>-by-name selects the token-carrying one rather than merely
-    /// happening to compile against a single method — the same targeting
-    /// <c>BuildNSwagConvention</c>'s doc comment claims but that no compiled test had checked.
+    /// This test therefore deliberately does not reuse the real bug's same-typed shape. It reuses the
+    /// same operation and the same declared-order-inverts-path-order arrangement — <c>orderId</c>
+    /// declared first, <c>customerId</c> second, while the path template itself orders
+    /// <c>customerId</c> before <c>orderId</c> — but gives the two parameters two <i>different</i>
+    /// <see cref="Planning.PathParameterKind"/> values instead of both being
+    /// <see cref="Planning.PathParameterKind.Guid"/>: <c>orderId</c> is declared <c>type: string,
+    /// format: uuid</c> (<see cref="Planning.PathParameterKind.Guid"/>), <c>customerId</c> is a bare
+    /// <c>type: integer</c> with no <c>format</c> (<see cref="Planning.PathParameterKind.Integer"/> —
+    /// absent or non-<c>int64</c> format still resolves to <c>Integer</c>, per
+    /// <c>TestPlanBuilder.ResolvePathParameterKind</c>'s own doc comment, the same fact
+    /// <see cref="GeneratedProjectWithIntegerAndLongPathParametersCompiles"/> relies on for its own
+    /// bare-<c>integer</c> case). With two different types, a regression back to path-template order
+    /// can no longer bind any overload of the fake client below at all — passing a
+    /// <c>Guid.Parse(...)</c> result where the fake client declares <c>int customerId</c>, or vice
+    /// versa, is a real CS1503 argument-type mismatch, not a silently-compiling swap. Only a type
+    /// mismatch can turn an ordering regression into a build failure, which is the entire point of a
+    /// compile-verification test — the real, same-typed bug could never have been caught this way.
     /// </para>
     /// <para>
-    /// No <c>client-map.json</c> here — unlike
-    /// <see cref="GeneratedProjectWithASelfClosingClientMapOverrideCompiles"/>, which proves an
-    /// <i>override</i> compiles, this test proves <see cref="Planning.ClientCallPlanner.BuildNSwagConvention"/>'s
-    /// own <i>derived</i> expression compiles: both operations in the rewritten spec below qualify
-    /// for the convention on their own (a declared, underscore-free <c>operationId</c>, no query
-    /// parameters, no request body — <c>[nswag-needs-operationid]</c>'s gates), so
-    /// <c>ClientCallPlanner.Resolve</c> derives both call expressions with nothing to override.
-    /// <c>security</c> is dropped from the rewritten spec entirely — irrelevant to what this test
-    /// proves, and the fake client below has no auth-case surface to match it against.
+    /// <c>listOrders</c> (no path parameter, unrelated to the ordering fix) stays in the spec for the
+    /// same reason it was already here: it is the second operation that independently qualifies for
+    /// the NSwag convention (no query parameter, no request body, an underscore-free declared
+    /// <c>operationId</c>), preserving the "two qualifying operations both reach the renderer through
+    /// <see cref="Planning.ClientCallPlanner.Resolve"/> with nothing to override" coverage without a
+    /// second near-duplicate test. The fake client's token-carrying/non-token-carrying overload pair
+    /// on <c>GetCustomerOrderAsync</c> preserves this file's other piece of NSwag coverage too:
+    /// <c>cancellationToken:</c>-by-name still has to select the right overload out of two, now
+    /// against a two-parameter signature instead of one.
     /// </para>
     /// </summary>
     [TestMethod]
@@ -326,10 +343,14 @@ public class CompileVerificationTests
     {
         var root = CreateProject("orders.json");
 
-        // orders.json's own id parameter is a bare `type: string`, which resolves to
-        // PathParameterKind.String and needs no .Parse(...) wrapper — this test needs
-        // PathParameterKind.Guid instead, so the copied spec is overwritten with a `format: uuid`
-        // variant, same operations and schema otherwise.
+        // orders.json's own id parameter is a bare `type: string` on a single-path-parameter
+        // operation, which can never distinguish declared order from path-template order — this
+        // test needs two path parameters of two different PathParameterKind values, declared in an
+        // order that inverts the path template's own order, so the copied spec is overwritten with
+        // getCustomerOrder: orderId (format: uuid -> Guid) declared first, customerId (bare integer
+        // -> Integer) declared second, while the path template itself orders customerId before
+        // orderId. listOrders is kept as the second, no-path-parameter operation — see this
+        // method's own doc comment for why.
         File.WriteAllText(Path.Combine(root, "orders.json"), """
                                                               {
                                                                 "openapi": "3.0.3",
@@ -343,11 +364,14 @@ public class CompileVerificationTests
                                                                         "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } }
                                                                     }
                                                                   },
-                                                                  "/orders/{id}": {
+                                                                  "/customers/{customerId}/orders/{orderId}": {
                                                                     "get": {
-                                                                      "operationId": "getOrderById",
+                                                                      "operationId": "getCustomerOrder",
                                                                       "tags": ["Orders"],
-                                                                      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+                                                                      "parameters": [
+                                                                        { "name": "orderId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+                                                                        { "name": "customerId", "in": "path", "required": true, "schema": { "type": "integer" } }
+                                                                      ],
                                                                       "responses": {
                                                                         "200": { "description": "ok", "content": { "application/json": {
                                                                           "schema": { "$ref": "#/components/schemas/Order" } } } },
@@ -379,20 +403,25 @@ public class CompileVerificationTests
                                                                 "client": { "kind": "nswag", "typeName": "Orders.NSwagClient.OrdersClient" } }
                                                               """);
 
-        // Mirrors real nswag 14.7.1 output (measured, see BuildNSwagConvention's own doc comment):
-        // the operation the derived call actually targets, plus a sibling overload omitting the
-        // token, plus the second qualifying operation's own no-path-parameter shape. Only the call
-        // shapes ClientCallPlanner.BuildNSwagConvention derives for this spec's two operations need
-        // to exist for this test's project to compile.
+        // Written in real NSwag declared-order (measured, see BuildNSwagConvention's own doc
+        // comment): orderId (Guid) before customerId (int), matching the spec's own parameters
+        // array above, not the path template's customerId-before-orderId order. A regression in
+        // ClientCallPlanner back to path-template order would try to pass a Guid.Parse(...) result
+        // where this signature declares int customerId (and an int.Parse(...) result where it
+        // declares System.Guid orderId) — neither overload below can bind that call, so the
+        // regression fails the build (CS1503) rather than compiling with a silently swapped
+        // argument order. The token-carrying/non-token-carrying overload pair on
+        // GetCustomerOrderAsync preserves the cancellationToken-by-name overload-targeting coverage
+        // the original single-parameter version of this test already had.
         File.WriteAllText(Path.Combine(root, "FakeNSwagOrdersClient.cs"), """
                                                                            namespace Orders.NSwagClient;
 
                                                                            public sealed class OrdersClient
                                                                            {
-                                                                               public Task<object?> GetOrderByIdAsync(System.Guid id)
+                                                                               public Task<object?> GetCustomerOrderAsync(System.Guid orderId, int customerId)
                                                                                    => throw new NotImplementedException();
 
-                                                                               public Task<object?> GetOrderByIdAsync(System.Guid id, CancellationToken cancellationToken)
+                                                                               public Task<object?> GetCustomerOrderAsync(System.Guid orderId, int customerId, CancellationToken cancellationToken)
                                                                                    => throw new NotImplementedException();
 
                                                                                public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
@@ -406,12 +435,13 @@ public class CompileVerificationTests
 
         // Pins the premise before the compile assertion is allowed to mean anything (the same
         // discipline every other test in this file follows): the NSwag convention must actually
-        // have been derived, substituted with a Guid.Parse conversion, and reached the renderer —
-        // not merely "the project happened to build".
+        // have been derived in the spec's declared parameter order — orderId before customerId,
+        // each with its own .Parse conversion — and reached the renderer, not merely "the project
+        // happened to build".
         var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
         generated.ShouldContain(
-        "await ApiClient<Orders.NSwagClient.OrdersClient>().GetOrderByIdAsync(Guid.Parse(FixtureParameter(\"getOrderById\", \"id\")), cancellationToken: TestContext.CancellationToken);",
-        customMessage: "the NSwag convention-derived call did not reach the renderer with its Guid.Parse conversion applied");
+        "await ApiClient<Orders.NSwagClient.OrdersClient>().GetCustomerOrderAsync(Guid.Parse(FixtureParameter(\"getCustomerOrder\", \"orderId\")), int.Parse(FixtureParameter(\"getCustomerOrder\", \"customerId\")), cancellationToken: TestContext.CancellationToken);",
+        customMessage: "the NSwag convention-derived call did not reach the renderer in the spec's declared parameter order — a regression back to path-template order would either produce this wrong text or fail to compile against the fake client's (Guid, int) signature");
 
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
 

@@ -194,21 +194,27 @@ public static class ClientCallPlanner
     /// can make it throw.
     /// </para>
     /// <para>
-    /// <b>No path-parameter-kind gate — deliberately absent, not an oversight.</b>
-    /// <c>[typed-path-parameters]</c> asked whether this method needs a fifth gate withholding
-    /// convention when a path parameter resolves to a kind outside <c>PathParameterKind</c>'s four
-    /// members. It does not, and cannot: <see cref="TestPlanBuilder"/>'s own
-    /// <c>ResolvePathParameterKind</c> is exhaustive over every schema shape it can see — anything
-    /// it does not specifically recognize (a declared type this enum has no member for, or none
-    /// declared at all) already falls through to <see cref="PathParameterKind.String"/> rather
-    /// than some fifth, unmapped value. There is no "unsupported kind" for this method to detect,
-    /// so adding a gate for one would be dead code guarding against a state the type system and
-    /// <see cref="TestPlanBuilder"/>'s own resolution logic already make unreachable. This applies
-    /// identically to NSwag's convention: <see cref="BuildNSwagConvention"/> leaves every
-    /// <c>{param}</c> placeholder for <c>TemplateRenderer</c> to substitute exactly as
-    /// <see cref="BuildKiotaConvention"/> does, so the same per-kind conversion
-    /// (<c>WrapForClientCall</c>) applies to both without either convention needing to know a
-    /// parameter's kind itself.
+    /// <b>The path-parameter-kind gate — corrected finding, not the original design.</b> This
+    /// method's own doc comment used to say a fifth gate for an "unsupported path-parameter kind"
+    /// was impossible to need, reasoning that <c>TestPlanBuilder.ResolvePathParameterKind</c> is
+    /// exhaustive over every schema shape it can see and therefore always lands on one of
+    /// <see cref="PathParameterKind"/>'s four members. That conflated "always returns something"
+    /// with "always returns the right thing": a real kiota 1.34.1 client types a
+    /// <c>date-time</c>-formatted string parameter as <c>this[DateTimeOffset]</c> and a
+    /// <c>number</c>-typed one as <c>this[double]</c> — neither is <see cref="PathParameterKind.String"/>
+    /// or <see cref="PathParameterKind.Integer"/>, but the old exhaustive-by-fallback mapping
+    /// silently filed both under one of those two anyway, producing a bare-string splice that binds
+    /// the deprecated <c>this[string]</c> overload in the first case and an <c>int.Parse(...)</c>
+    /// that throws <see cref="FormatException"/> at runtime on a non-integral fixture value like
+    /// <c>"1.5"</c> in the second. See <see cref="PathParameterKind"/>'s own doc comment for the
+    /// full measured evidence. <c>TestPlanBuilder.ResolvePathParameterKind</c> now returns
+    /// <c>PathParameterKind?</c>, <see langword="null"/> for any shape outside the four typable
+    /// ones, and <paramref name="hasUntypablePathParameter"/> — computed once by
+    /// <see cref="TestPlanBuilder"/> from that same per-parameter list, never re-derived here — is
+    /// exactly the fifth gate this comment used to say could never be needed: any operation with at
+    /// least one untypable path parameter withholds convention, for both Kiota and NSwag alike,
+    /// since <c>TemplateRenderer.WrapForClientCall</c>'s per-kind conversion is the one mechanism
+    /// both conventions' <c>{param}</c> placeholders share.
     /// </para>
     /// </summary>
     public static Resolution Resolve(
@@ -217,13 +223,16 @@ public static class ClientCallPlanner
         bool hasOperationId,
         string httpMethod,
         string pathTemplate,
+        IReadOnlyList<string> declaredPathParameterOrder,
         bool hasQueryParameters,
         bool hasRequestBody,
+        bool hasUntypablePathParameter,
         IReadOnlyDictionary<string, string> overrides)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operationKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(httpMethod);
         ArgumentException.ThrowIfNullOrWhiteSpace(pathTemplate);
+        ArgumentNullException.ThrowIfNull(declaredPathParameterOrder);
         ArgumentNullException.ThrowIfNull(overrides);
 
         if (overrides.TryGetValue(operationKey, out var overrideExpression))
@@ -260,6 +269,27 @@ public static class ClientCallPlanner
             "to route it through the client");
         }
 
+        // [nswag-path-parameter-order]: a third NSwag-only gate, for the same reason as the two
+        // above — this planner cannot trust an argument order it cannot fully derive. Kiota is
+        // unaffected: BuildKiotaConvention derives its indexer placeholders from the path
+        // template's own structure, never from declaredPathParameterOrder, so a mismatch here
+        // cannot affect it.
+        if (kind == ClientKind.NSwag)
+        {
+            var declaredNames = new HashSet<string>(declaredPathParameterOrder, StringComparer.Ordinal);
+            var undeclared = PathTemplatePlaceholderNames(pathTemplate)
+                .FirstOrDefault(name => !declaredNames.Contains(name));
+
+            if (undeclared is not null)
+            {
+                return new Resolution(null,
+                $"has a path parameter ('{undeclared}') in its path template with no matching " +
+                "'in: path' entry in the declared parameters, so the NSwag convention cannot " +
+                $"determine its declared argument order — add an entry to {ClientCallMap.FileName} " +
+                "to route it through the client");
+            }
+        }
+
         if (hasQueryParameters || hasRequestBody)
         {
             var reason = (hasQueryParameters, hasRequestBody) switch
@@ -274,9 +304,21 @@ public static class ClientCallPlanner
             $"to {ClientCallMap.FileName} to route it through the client");
         }
 
+        // [typed-path-parameters], corrected: applies to both Kiota and NSwag equally, since
+        // TemplateRenderer.WrapForClientCall's per-kind conversion is what both conventions'
+        // {param} placeholders share — see this method's own doc comment above for the measured
+        // evidence and the reasoning this gate corrects.
+        if (hasUntypablePathParameter)
+        {
+            return new Resolution(null,
+            $"has a path parameter whose declared schema has no client-side type conversion " +
+            $"InTest can produce ([typed-path-parameters]) — add an entry to {ClientCallMap.FileName} " +
+            "to route it through the client");
+        }
+
         if (kind == ClientKind.NSwag)
         {
-            return new Resolution(BuildNSwagConvention(pathTemplate, operationKey), null);
+            return new Resolution(BuildNSwagConvention(pathTemplate, operationKey, declaredPathParameterOrder), null);
         }
 
         // Checked ahead of the call rather than caught around it: BuildKiotaConvention's throw is
@@ -375,13 +417,33 @@ public static class ClientCallPlanner
     /// own doc comment on this type puts it plainly: "the configured client type IS the receiver".
     /// </para>
     /// <para>
-    /// <paramref name="pathTemplate"/> contributes only its <c>{param}</c> segments, taken in path
-    /// order (the same order <see cref="TestCasePlan.PathParameterNames"/> and
-    /// <see cref="TestCasePlan.PathParameterKinds"/> are built in) and left placeholder-intact —
-    /// <c>{id}</c>, not a resolved value — for <c>TemplateRenderer.BuildClientCallExpression</c> to
-    /// substitute exactly as it already does for <see cref="BuildKiotaConvention"/>'s output, one
-    /// implementation of path-parameter fixture resolution shared by both conventions rather than a
-    /// second one invented here. The cancellation token is spliced in by name
+    /// <b>Argument order — corrected finding, not the original design.</b> This doc comment used to
+    /// claim <paramref name="pathTemplate"/> alone supplies the argument order, "the same order
+    /// <c>TestCasePlan.PathParameterNames</c> ... [is] built in" — i.e. path-template order. That
+    /// is wrong: NSwag binds a generated method's positional path-parameter arguments in the
+    /// spec's declared <c>parameters</c>-array order, not path-template order, and every piece of
+    /// evidence this convention originally shipped on had at most one path parameter — a shape
+    /// where the two orders are indistinguishable by construction. Measured directly (nswag
+    /// 14.7.1): a path <c>/customers/{customerId}/orders/{orderId}</c> whose <c>parameters</c>
+    /// array declares <c>orderId</c> before <c>customerId</c> generates
+    /// <c>GetCustomerOrderAsync(System.Guid orderId, System.Guid customerId, ...)</c> — path order
+    /// and declared order disagree, and because both parameters happen to share a type the
+    /// wrong-order call still compiles, silently asserting against the wrong resource.
+    /// <paramref name="declaredPathParameterOrder"/> — <c>TestPlanBuilder.DeclaredPathParameterOrder</c>,
+    /// computed once from <c>operation.Parameters</c> and carried rather than re-derived here
+    /// (<c>[nswag-path-parameter-order]</c>) — is the actual argument order; <paramref
+    /// name="pathTemplate"/> now contributes only the *set* of placeholder names (via
+    /// <see cref="PathTemplatePlaceholderNames"/>) used to filter that order down to the
+    /// parameters this path template actually declares, left placeholder-intact — <c>{id}</c>, not
+    /// a resolved value — for <c>TemplateRenderer.BuildClientCallExpression</c> to substitute
+    /// exactly as it already does for <see cref="BuildKiotaConvention"/>'s output, one
+    /// implementation of path-parameter fixture resolution shared by both conventions. Kiota is
+    /// unaffected by this correction — <see cref="BuildKiotaConvention"/> derives its indexer
+    /// placeholders from the path template's own structure, a builder chain that is structurally
+    /// path-ordered by construction, and never reads a declared order at all.
+    /// </para>
+    /// <para>
+    /// The cancellation token is spliced in by name
     /// (<c>cancellationToken: TestContext.CancellationToken</c>), not appended positionally or left
     /// for the renderer to add — measured directly: NSwag emits the token-carrying overload as a
     /// distinct sibling method (<c>GetOrderByIdAsync(Guid id)</c> alongside
@@ -394,19 +456,41 @@ public static class ClientCallPlanner
     /// method's own trailing <c>')'</c> is the call's real, final one, not an override's.
     /// </para>
     /// </summary>
-    public static string BuildNSwagConvention(string pathTemplate, string operationId)
+    public static string BuildNSwagConvention(
+        string pathTemplate, string operationId, IReadOnlyList<string> declaredPathParameterOrder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pathTemplate);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        ArgumentNullException.ThrowIfNull(declaredPathParameterOrder);
 
         var methodName = CSharpIdentifier.ToPascalCase(operationId) + "Async";
 
-        var arguments = pathTemplate
-            .Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Where(segment => segment.Length >= 2 && segment[0] == '{' && segment[^1] == '}')
+        // Filtered to this path template's own placeholders (a defensive no-op in the reachable,
+        // gated-by-Resolve case, where every placeholder is already known to be declared) rather
+        // than spliced verbatim — declaredPathParameterOrder is the operation's whole `in: path`
+        // parameter list, and a caller bypassing Resolve's own gate (a direct unit test, e.g.)
+        // should not get a declared-but-unused name's placeholder into the argument list.
+        var placeholders = new HashSet<string>(PathTemplatePlaceholderNames(pathTemplate), StringComparer.Ordinal);
+
+        var arguments = declaredPathParameterOrder
+            .Where(placeholders.Contains)
+            .Select(name => $"{{{name}}}")
             .ToList();
         arguments.Add("cancellationToken: TestContext.CancellationToken");
 
         return $"{methodName}({string.Join(", ", arguments)})";
     }
+
+    /// <summary>
+    /// Every <c>{param}</c> path-template segment's bare name (no braces), in path-template order —
+    /// the same segment scan <see cref="BuildKiotaConvention"/> performs inline for its own
+    /// purpose, factored out here so <see cref="Resolve"/>'s <c>[nswag-path-parameter-order]</c>
+    /// gate and <see cref="BuildNSwagConvention"/>'s own filtering share one implementation of
+    /// "which names does this path template declare" rather than each re-splitting the string.
+    /// </summary>
+    private static IEnumerable<string> PathTemplatePlaceholderNames(string pathTemplate)
+        => pathTemplate
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Where(segment => segment.Length >= 2 && segment[0] == '{' && segment[^1] == '}')
+            .Select(segment => segment[1..^1]);
 }

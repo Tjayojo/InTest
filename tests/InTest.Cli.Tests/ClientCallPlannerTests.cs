@@ -15,6 +15,7 @@ namespace InTest.Cli.Tests;
 public class ClientCallPlannerTests
 {
     private static readonly Dictionary<string, string> NoOverrides = new(StringComparer.Ordinal);
+    private static readonly List<string> NoDeclaredPathParameters = [];
 
     // ---- BuildKiotaConvention: the four Orders.Api operations that qualify for a convention
     // guess at all (CaseRole.Success, no query parameters, no request body) — GET /api/orders and
@@ -80,22 +81,47 @@ public class ClientCallPlannerTests
     {
         // {PascalCase(operationId)}Async — no builder chain, no verb-derived naming: the
         // configured client type IS the receiver, so the method sits directly on it.
-        ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById")
+        ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById", ["id"])
             .ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
     }
 
     [TestMethod]
     public void DerivesTheExpressionForListCustomersWithNSwagAndNoPathParameter()
     {
-        ClientCallPlanner.BuildNSwagConvention("/api/customers", "listCustomers")
+        ClientCallPlanner.BuildNSwagConvention("/api/customers", "listCustomers", NoDeclaredPathParameters)
             .ShouldBe("ListCustomersAsync(cancellationToken: TestContext.CancellationToken)");
     }
 
+    /// <summary>
+    /// <c>[nswag-path-parameter-order]</c> — the corrected finding, measured directly. Before the
+    /// fix, <c>BuildNSwagConvention</c> derived its argument order from the path template alone —
+    /// this test's own former name, <c>OrdersMultiplePathParametersInPathTemplateOrder</c>, pinned
+    /// exactly that wrong assumption (path order: <c>customerId, orderId</c>). Measured against nswag
+    /// 14.7.1 with a <c>parameters</c> array declaring <c>orderId</c> before <c>customerId</c>: the
+    /// generated method is <c>GetCustomerOrderAsync(System.Guid orderId, System.Guid customerId,
+    /// System.Threading.CancellationToken cancellationToken)</c> — declared order, not path order.
+    /// Both parameters are <c>Guid</c>, so the old, wrong order still compiled and would have
+    /// silently bound the two ids to the wrong resource.
+    /// </summary>
     [TestMethod]
-    public void OrdersMultiplePathParametersInPathTemplateOrder()
+    public void OrdersMultiplePathParametersInDeclaredOrderNotPathTemplateOrder()
     {
-        ClientCallPlanner.BuildNSwagConvention("/api/customers/{customerId}/orders/{orderId}", "getCustomerOrder")
-            .ShouldBe("GetCustomerOrderAsync({customerId}, {orderId}, cancellationToken: TestContext.CancellationToken)");
+        ClientCallPlanner.BuildNSwagConvention(
+            "/api/customers/{customerId}/orders/{orderId}", "getCustomerOrder", ["orderId", "customerId"])
+            .ShouldBe("GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: TestContext.CancellationToken)");
+    }
+
+    [TestMethod]
+    public void FiltersTheDeclaredOrderDownToThisPathTemplatesOwnPlaceholders()
+    {
+        // Defensive: declaredPathParameterOrder is an operation's whole `in: path` parameter list
+        // — ClientCallPlanner.Resolve's [nswag-path-parameter-order] gate already guarantees every
+        // path-template placeholder is declared before this method is ever reached in production,
+        // but nothing stops a caller (a direct unit test, e.g.) from handing this method a name
+        // that is declared but not present in the path template. That name must not leak into the
+        // argument list.
+        ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById", ["id", "unrelatedName"])
+            .ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
     }
 
     [TestMethod]
@@ -103,7 +129,7 @@ public class ClientCallPlannerTests
     {
         // TemplateRenderer.BuildClientCallExpression substitutes {id} the same way for both
         // conventions — this planner must never resolve it itself.
-        var expression = ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById");
+        var expression = ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById", ["id"]);
 
         expression.ShouldContain("{id}", Case.Sensitive);
     }
@@ -113,7 +139,7 @@ public class ClientCallPlannerTests
     {
         // Measured: unlike Kiota, NSwag's method name comes from operationId alone, never the
         // verb — DELETE and GET on the same operationId-less-of-verb-info shape derive identically.
-        ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "cancelOrder")
+        ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "cancelOrder", ["id"])
             .ShouldBe("CancelOrderAsync({id}, cancellationToken: TestContext.CancellationToken)");
     }
 
@@ -129,7 +155,8 @@ public class ClientCallPlannerTests
 
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, overrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, overrides);
 
         resolution.Expression.ShouldBe("Orders[{id}].GetAsync");
         resolution.UnresolvedReason.ShouldBeNull();
@@ -147,7 +174,8 @@ public class ClientCallPlannerTests
 
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "listOrders", hasOperationId: true, "GET", "/api/orders",
-            hasQueryParameters: true, hasRequestBody: false, overrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: true, hasRequestBody: false,
+            hasUntypablePathParameter: false, overrides);
 
         resolution.Expression.ShouldBe("Orders.GetAsync(rc => rc.QueryParameters.Status = OrderStatus.Placed)");
     }
@@ -162,7 +190,8 @@ public class ClientCallPlannerTests
 
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, overrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, overrides);
 
         resolution.Expression.ShouldNotBeNull();
     }
@@ -180,7 +209,8 @@ public class ClientCallPlannerTests
 
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "get_root", hasOperationId: false, "GET", "/",
-            hasQueryParameters: false, hasRequestBody: false, overrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, overrides);
 
         resolution.Expression.ShouldBe("PingAsync(cancellationToken: TestContext.CancellationToken)");
         resolution.UnresolvedReason.ShouldBeNull();
@@ -193,7 +223,8 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBe("Api.Orders[{id}].GetAsync");
         resolution.UnresolvedReason.ShouldBeNull();
@@ -207,9 +238,29 @@ public class ClientCallPlannerTests
         // or not the spec happens to declare an operationId.
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "get_api_orders_id", hasOperationId: false, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBe("Api.Orders[{id}].GetAsync");
+        resolution.UnresolvedReason.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// <c>[nswag-path-parameter-order]</c>: <see cref="ClientCallPlanner.BuildKiotaConvention"/>
+    /// derives its indexer placeholders from the path template's own structure alone — this proves
+    /// the Kiota convention is unaffected by a declared order that disagrees with path order,
+    /// unlike NSwag below.
+    /// </summary>
+    [TestMethod]
+    public void ResolveAppliesTheKiotaConventionRegardlessOfDeclaredPathParameterOrder()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.Kiota, "getCustomerOrder", hasOperationId: true, "GET",
+            "/api/customers/{customerId}/orders/{orderId}",
+            declaredPathParameterOrder: ["orderId", "customerId"], hasQueryParameters: false,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
+
+        resolution.Expression.ShouldBe("Api.Customers[{customerId}].Orders[{orderId}].GetAsync");
         resolution.UnresolvedReason.ShouldBeNull();
     }
 
@@ -220,9 +271,30 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        resolution.UnresolvedReason.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// <c>[nswag-path-parameter-order]</c>, the end-to-end proof: <see cref="ClientCallPlanner.Resolve"/>
+    /// itself — not only <see cref="ClientCallPlanner.BuildNSwagConvention"/> called directly —
+    /// derives an NSwag call in declared order, the same measured shape
+    /// <c>OrdersMultiplePathParametersInDeclaredOrderNotPathTemplateOrder</c> pins directly.
+    /// </summary>
+    [TestMethod]
+    public void ResolveAppliesTheNSwagConventionInDeclaredOrderNotPathTemplateOrder()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.NSwag, "getCustomerOrder", hasOperationId: true, "GET",
+            "/api/customers/{customerId}/orders/{orderId}",
+            declaredPathParameterOrder: ["orderId", "customerId"], hasQueryParameters: false,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
+
+        resolution.Expression.ShouldBe(
+            "GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: TestContext.CancellationToken)");
         resolution.UnresolvedReason.ShouldBeNull();
     }
 
@@ -234,7 +306,8 @@ public class ClientCallPlannerTests
         // parameters with no string overload — see ClientCallPlanner's own doc comment.
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "get_api_orders_id", hasOperationId: false, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
@@ -250,11 +323,32 @@ public class ClientCallPlannerTests
         // never a method on the single configured client.typeName.
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "Orders_GetById", hasOperationId: true, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
         resolution.UnresolvedReason.ShouldContain("'_'", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// <c>[nswag-path-parameter-order]</c>'s own withhold gate: a path-template placeholder with no
+    /// matching <c>in: path</c> entry among the declared parameters leaves this planner unable to
+    /// determine NSwag's real argument order, so it withholds rather than guessing at path-template
+    /// order — the exact wrong guess this whole finding corrects.
+    /// </summary>
+    [TestMethod]
+    public void ResolveWithholdsTheNSwagConventionWhenAPathTemplatePlaceholderHasNoDeclaredEntry()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.NSwag, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
+
+        resolution.Expression.ShouldBeNull();
+        resolution.UnresolvedReason.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldContain("'id'", Case.Sensitive);
         resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
     }
 
@@ -263,7 +357,8 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "listOrders", hasOperationId: true, "GET", "/api/orders",
-            hasQueryParameters: true, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: true,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
@@ -276,7 +371,8 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "createOrder", hasOperationId: true, "POST", "/api/orders",
-            hasQueryParameters: false, hasRequestBody: true, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
+            hasRequestBody: true, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
@@ -291,7 +387,8 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "listOrders", hasOperationId: true, "GET", "/api/orders",
-            hasQueryParameters: true, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: true,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
@@ -306,7 +403,8 @@ public class ClientCallPlannerTests
         // there is no compiling way to splice a raw fixture body in.
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "createOrder", hasOperationId: true, "POST", "/api/orders",
-            hasQueryParameters: false, hasRequestBody: true, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
+            hasRequestBody: true, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
@@ -319,12 +417,77 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "search", hasOperationId: true, "POST", "/api/orders/search",
-            hasQueryParameters: true, hasRequestBody: true, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: true,
+            hasRequestBody: true, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
         resolution.UnresolvedReason.ShouldContain("query parameters");
         resolution.UnresolvedReason.ShouldContain("request body");
+    }
+
+    // ---- Resolve: an untypable path-parameter kind withholds convention for both generators ---
+
+    /// <summary>
+    /// <c>[typed-path-parameters]</c>, corrected: a path parameter whose declared schema has no
+    /// client-side type conversion InTest can produce (e.g. <c>type: string, format: date-time</c>
+    /// or <c>type: number</c>) withholds the whole convention rather than letting the old,
+    /// corrected mapping silently misclassify it as <see cref="PathParameterKind.String"/> or
+    /// <see cref="PathParameterKind.Integer"/>. Applies to Kiota — the generator the original
+    /// measured defect (a bare string binding a deprecated indexer overload) was found against.
+    /// </summary>
+    [TestMethod]
+    public void ResolveWithholdsConventionForAnUntypablePathParameterKindOnKiota()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.Kiota, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: true, NoOverrides);
+
+        resolution.Expression.ShouldBeNull();
+        resolution.UnresolvedReason.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldContain("client-side type", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// The same gate applies to NSwag too — TemplateRenderer.WrapForClientCall's per-kind
+    /// conversion is generator-agnostic, so a fixture value wrapped through the wrong conversion
+    /// (or left unconverted against a strongly-typed NSwag parameter) is exactly as unsafe for
+    /// NSwag's own generated method parameters as it is for Kiota's indexer.
+    /// </summary>
+    [TestMethod]
+    public void ResolveWithholdsConventionForAnUntypablePathParameterKindOnNSwag()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.NSwag, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: true, NoOverrides);
+
+        resolution.Expression.ShouldBeNull();
+        resolution.UnresolvedReason.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldContain("client-side type", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
+    }
+
+    /// <summary>An override still wins outright for an untypable path-parameter kind — the same
+    /// override-runs-first guarantee every other gate on this type already gives; the adopter's own
+    /// expression is not re-validated against a kind this planner could not classify.</summary>
+    [TestMethod]
+    public void ResolveReturnsTheOverrideEvenForAnUntypablePathParameterKind()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["getOrderById"] = "GetOrderByIdAsync(DateTimeOffset.Parse(FixtureParameter(\"getOrderById\", \"id\")), cancellationToken: TestContext.CancellationToken)"
+        };
+
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.NSwag, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: true, overrides);
+
+        resolution.Expression.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldBeNull();
     }
 
     // ---- Resolve: an unsupported HTTP verb withholds convention instead of crashing ----------
@@ -345,7 +508,8 @@ public class ClientCallPlannerTests
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "ping", hasOperationId: true, "HEAD", "/api/ping",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
@@ -361,7 +525,8 @@ public class ClientCallPlannerTests
         // still resolves under NSwag as long as an underscore-free operationId is present.
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.NSwag, "pingApi", hasOperationId: true, "HEAD", "/api/ping",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
+            hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBe("PingApiAsync(cancellationToken: TestContext.CancellationToken)");
         resolution.UnresolvedReason.ShouldBeNull();
@@ -380,7 +545,8 @@ public class ClientCallPlannerTests
 
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "ping", hasOperationId: true, "HEAD", "/api/ping",
-            hasQueryParameters: false, hasRequestBody: false, overrides);
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
+            hasRequestBody: false, hasUntypablePathParameter: false, overrides);
 
         resolution.Expression.ShouldBe("Api.Ping.CustomAsync()");
         resolution.UnresolvedReason.ShouldBeNull();
@@ -395,7 +561,8 @@ public class ClientCallPlannerTests
         // could ever change this verdict: [refit-override-only] is permanent, not gated.
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Refit, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
-            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();

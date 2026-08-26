@@ -219,9 +219,17 @@ public sealed class TemplateRenderer
     /// (<see cref="BuildClientCallExpression"/>/<see cref="WrapForClientCall"/>), since
     /// <c>InTestUrl.Build</c> takes strings regardless of a path parameter's declared type.
     /// </summary>
-    private static string UnmatchableValueFor(PathParameterKind kind) => kind switch
+    private static string UnmatchableValueFor(PathParameterKind? kind) => kind switch
     {
         PathParameterKind.Integer or PathParameterKind.Long => "\"2147483647\"",
+        // Covers PathParameterKind.String, PathParameterKind.Guid, and null alike. Null is the
+        // corrected [typed-path-parameters] finding's "untypable" verdict (see
+        // TestPlanBuilder.ResolvePathParameterKind and PathParameterKind's own doc comment) — e.g.
+        // a date-time- or number-typed path parameter on a declared-error/auth case. This branch
+        // sends no real fixture value regardless (decision 6: an unmatchable id, always generated),
+        // so "untypable" has nothing to convert and falls back to the same well-typed-but-
+        // unmatchable GUID a plain string already used, exactly as it did before this field could
+        // distinguish "String" from "untypable" at all.
         _ => "Guid.NewGuid().ToString()"
     };
 
@@ -361,11 +369,19 @@ public sealed class TemplateRenderer
     /// kind that returns <paramref name="fixtureParameterCall"/> unwrapped; every other kind wraps
     /// it in the matching <c>.Parse(...)</c> call.
     /// </summary>
-    private static string WrapForClientCall(string fixtureParameterCall, PathParameterKind kind) => kind switch
+    private static string WrapForClientCall(string fixtureParameterCall, PathParameterKind? kind) => kind switch
     {
         PathParameterKind.Guid => $"Guid.Parse({fixtureParameterCall})",
         PathParameterKind.Integer => $"int.Parse({fixtureParameterCall})",
         PathParameterKind.Long => $"long.Parse({fixtureParameterCall})",
+        // PathParameterKind.String falls here unconditionally — always did. So, deliberately, does
+        // null: a convention-derived expression can never carry a null-kind {param} placeholder any
+        // more (ClientCallPlanner.Resolve withholds the whole convention when any path parameter is
+        // untypable — see that method's own doc comment), but a hand-written client-map.json
+        // override is the adopter's own C# and is not gated by Resolve at all (overrides win
+        // outright, unconditionally); an override that names an untypable-kind parameter gets the
+        // same bare, unwrapped splice a plain string always got, which is the adopter's problem to
+        // type-correct at their own next build, not this renderer's to guess a conversion for.
         _ => fixtureParameterCall
     };
 

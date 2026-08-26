@@ -43,6 +43,20 @@ goes in `Unreleased` and when it moves to a version heading.
   `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s `[lockfile-recovery]` for
   the measured detail and `docs/getting-started.md`'s "Typed client invocation (opt-in)" for the
   worked example.
+- `ApiTestCore.BeginTest` gained a second, optional-in-effect `IRunDiagnostics` parameter
+  (`[warn-on-swallowed-exception]`): a client-routed case whose `client-map.json` override issues
+  more than one call, where an earlier call already captured a response and a later one throws,
+  now reports that discarded exception's type and message through `Warn` instead of losing it
+  silently — the exact gap a reviewer raised, since the captured response can still satisfy the
+  test's own assertion and the run otherwise exits 0. `ApiTestBase.ApiTestInitialize` already calls
+  the two-argument form with a real per-test sink, so every case this repository ships gets the
+  warning for free. This is additive, not a break, at the `InTest.Runtime` package boundary a
+  hypothetical third-party xUnit/NUnit adapter sits on: the pre-existing one-argument
+  `BeginTest(string?)` survives as a compatibility overload, so a caller built against
+  `0.1.0-preview.1` keeps compiling and keeps running with the exact old silent-discard behaviour,
+  unchanged, until it migrates to the two-argument form to start receiving the warning.
+  **Migration:** none required; call the two-argument overload with your own `IRunDiagnostics` to
+  start seeing a swallowed second-call exception reported.
 
 ### Changed
 

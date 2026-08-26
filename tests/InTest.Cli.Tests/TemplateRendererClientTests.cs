@@ -214,6 +214,41 @@ public class TemplateRendererClientTests
         rendered.ShouldContain("Api.Orders[FixtureParameter(\"getOrderById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);");
     }
 
+    /// <summary>
+    /// <c>[typed-path-parameters]</c>, corrected: a <see langword="null"/> ("untypable") kind can
+    /// only reach this branch through a hand-written <c>client-map.json</c> override — production
+    /// planning ( <c>TestPlanBuilder</c> / <c>ClientCallPlanner.Resolve</c>) withholds the whole
+    /// convention when a path parameter is untypable, so a plan built by <c>TestPlanBuilder</c>
+    /// never carries a null-kind <c>{param}</c> placeholder in <c>ClientCallExpression</c>. An
+    /// override's own placeholder still needs *some* defined behaviour, though, since this is a
+    /// hand-built <see cref="TestCasePlan"/> bypassing that gate entirely (exactly what a
+    /// <c>client-map.json</c> override does) — it falls back to the same bare, unwrapped splice
+    /// <see cref="PathParameterKind.String"/> already gets, leaving type-correctness to the
+    /// adopter's own next build rather than this renderer guessing a conversion.
+    /// </summary>
+    [TestMethod]
+    public void SplicesAnUntypablePathParameterBareWithNoConversionWrapper()
+    {
+        var plan = new TestClassPlan("OrdersTests", "Orders",
+        [new TestCasePlan(
+            MethodName: "GetOrderById_Contract",
+            DisplayName: "Given Orders, when getOrderById, then 200",
+            OperationKey: "getOrderById",
+            OperationKeySynthesized: false,
+            HttpMethod: "GET",
+            PathTemplate: "/orders/{id}",
+            PathParameterNames: ["id"],
+            ExpectedStatus: 200,
+            SchemaKey: "Order",
+            Category: "Contract",
+            PathParameterKinds: [null],
+            ClientCallExpression: "Api.Orders[{id}].GetAsync")]);
+
+        var rendered = Render(plan);
+
+        rendered.ShouldContain("Api.Orders[FixtureParameter(\"getOrderById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);");
+    }
+
     [TestMethod]
     public void LeavesAPlaceholderFreeExpressionUntouchedApartFromTheTrailingArguments()
     {

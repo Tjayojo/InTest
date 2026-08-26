@@ -25,11 +25,29 @@ namespace InTest.Cli.Planning;
 /// <para>
 /// Deliberately narrow — see the typed-path-parameters task's own instruction not to
 /// speculatively add date/decimal/etc.: these four cover id-shaped path parameters, which is what
-/// path parameters overwhelmingly are, and <see cref="ClientCallPlanner"/> never needs a fifth
-/// "unsupported kind" gate as a result — every schema shape <see cref="TestPlanBuilder"/> can
-/// resolve a path parameter to already maps onto one of these four by construction
-/// (<see cref="TestPlanBuilder"/>'s own <c>ResolvePathParameterKinds</c> is exhaustive over its
-/// input, not partial).
+/// path parameters overwhelmingly are.
+/// </para>
+/// <para>
+/// <b>Corrected finding, not the original design.</b> This type's own doc comment used to claim
+/// <see cref="ClientCallPlanner"/> never needs a fifth "unsupported kind" gate, reasoning that
+/// <see cref="TestPlanBuilder"/>'s <c>ResolvePathParameterKind</c> is exhaustive over every schema
+/// shape it can see and therefore always lands on one of these four members. That conflated two
+/// different claims: the method is total (it always returns *something*), but it was not
+/// *correct* — a real kiota 1.34.1 client's per-parameter item-builder indexer is typed per the
+/// spec's declared <c>type</c>/<c>format</c> far more finely than this four-member enum
+/// distinguishes (measured directly: <c>type: string, format: date-time</c> gets
+/// <c>this[DateTimeOffset]</c>; <c>type: number, format: double</c> gets <c>this[double]</c>), and
+/// the totality-by-fallback-to-<see cref="String"/>/<see cref="Integer"/> behaviour that made the
+/// method total silently misrouted both of those into the wrong bucket — a bare string splice
+/// against a <c>DateTimeOffset</c> indexer (binding the deprecated <c>this[string]</c> overload)
+/// and an <c>int.Parse(...)</c> against a <c>double</c> fixture value (a runtime
+/// <see cref="FormatException"/> on any non-integral value such as <c>"1.5"</c>) respectively. Both
+/// measured against real generator output, not inferred from documentation — see the
+/// typed-client-invocation plan's `[typed-path-parameters]` section for the correction and the
+/// gate this now feeds. <c>ResolvePathParameterKind</c> now returns <c>PathParameterKind?</c>:
+/// <see langword="null"/> for any shape outside this enum's four members, and
+/// <see cref="ClientCallPlanner.Resolve"/> withholds convention when any path parameter resolves to
+/// <see langword="null"/>, exactly the fifth gate this comment used to say could never be needed.
 /// </para>
 /// </summary>
 public enum PathParameterKind

@@ -117,99 +117,123 @@ public sealed class ResponseCaptureHandler(Uri baseUrl) : DelegatingHandler
         // fact for why a fake client that reads via ReadAsStringAsync would not actually prove
         // re-readability). Reading the bytes here first, then replacing Content with a fresh
         // ByteArrayContent built from them, is what makes both this read and the client's possible.
-        var bytes = originalContent is null
-            ? []
-            : await originalContent.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-
-        var replacement = new ByteArrayContent(bytes);
-        if (originalContent is not null)
+        // Everything from here down that can observe originalContent — the byte read immediately
+        // below, most obviously, but in principle any statement through the return — is wrapped in
+        // try/finally specifically so the Dispose in the finally block runs on BOTH exits from this
+        // region: the ordinary one (falls through to `return response;`) and the exceptional one
+        // (ReadAsByteArrayAsync, or anything else in here, throws and unwinds). A plain statement at
+        // the bottom of the method, by contrast, only ever runs on the ordinary exit — an earlier
+        // version of this method had exactly that shape and its comment claimed the mid-stream-throw
+        // case was covered, which was false: an exception thrown out of ReadAsByteArrayAsync
+        // propagates straight out of SendAsync, and a statement positioned after that call, however
+        // it reads on the page, never gets control back to execute. finally is the one construct the
+        // CLR guarantees runs on both paths, which is exactly the guarantee this dispose needs.
+        try
         {
-            // Every header from the original Content.Headers is copied onto the replacement,
-            // Content-Encoding and Content-Length included — confirmed by direct experiment
-            // (ResponseCaptureHandlerTests.GzipEncodedContentRoundTripsCorrectlyWhenHeadersAreCopiedOntoTheReplacement)
-            // to round-trip correctly rather than corrupt anything, and here is why: IHttpClientFactory's
-            // default primary handler (SocketsHttpHandler) does not enable AutomaticDecompression,
-            // so nothing in this pipeline ever decompresses a gzip-encoded response — the bytes
-            // ReadAsByteArrayAsync just read above are already whatever the server actually sent
-            // on the wire, compressed or not, exactly the same bytes a downstream typed client's
-            // own ReadAsStreamAsync would have received had this handler never buffered them at
-            // all. Copying Content-Length is likewise a no-op rather than a hazard: ByteArrayContent's
-            // constructor already computes and sets its own Content-Length from bytes.Length, and
-            // TryAddWithoutValidation on an already-present single-value header replaces rather than
-            // duplicates it (HttpContentHeaders stores Content-Length as a single value, not a list),
-            // so the copied value simply overwrites the constructor's — and the two must be numerically
-            // identical anyway, since bytes.Length is exactly the length of the content the original
-            // Content-Length claimed. None of this means a gzip-encoded body is ever decompressed for
-            // schema validation purposes — CapturedResponse.Body above is the raw, still-compressed
-            // bytes decoded as if they were UTF-8 text when Content-Encoding: gzip is present, which
-            // is unusable for SchemaBundle.Validate. That is an existing limitation this handler does
-            // not introduce (ApiResponseAssertions.ReadBodyAsync has the identical gap for a raw-HTTP
-            // case, for the identical reason — AutomaticDecompression is off), not a new one worth
-            // solving here.
-            //
-            // Headers are copied onto the replacement BEFORE the body is read from it, below —
-            // deliberately, not just incidentally, because the body read needs whatever
-            // Content-Type/charset header the response actually carried, and that header only
-            // exists on replacement once this loop has run.
-            foreach (var header in originalContent.Headers)
+            var bytes = originalContent is null
+                ? []
+                : await originalContent.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+
+            var replacement = new ByteArrayContent(bytes);
+            if (originalContent is not null)
             {
-                replacement.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                // Every header from the original Content.Headers is copied onto the replacement,
+                // Content-Encoding and Content-Length included — confirmed by direct experiment
+                // (ResponseCaptureHandlerTests.GzipEncodedContentRoundTripsCorrectlyWhenHeadersAreCopiedOntoTheReplacement)
+                // to round-trip correctly rather than corrupt anything, and here is why: IHttpClientFactory's
+                // default primary handler (SocketsHttpHandler) does not enable AutomaticDecompression,
+                // so nothing in this pipeline ever decompresses a gzip-encoded response — the bytes
+                // ReadAsByteArrayAsync just read above are already whatever the server actually sent
+                // on the wire, compressed or not, exactly the same bytes a downstream typed client's
+                // own ReadAsStreamAsync would have received had this handler never buffered them at
+                // all. Copying Content-Length is likewise a no-op rather than a hazard: ByteArrayContent's
+                // constructor already computes and sets its own Content-Length from bytes.Length, and
+                // TryAddWithoutValidation on an already-present single-value header replaces rather than
+                // duplicates it (HttpContentHeaders stores Content-Length as a single value, not a list),
+                // so the copied value simply overwrites the constructor's — and the two must be numerically
+                // identical anyway, since bytes.Length is exactly the length of the content the original
+                // Content-Length claimed. None of this means a gzip-encoded body is ever decompressed for
+                // schema validation purposes — CapturedResponse.Body above is the raw, still-compressed
+                // bytes decoded as if they were UTF-8 text when Content-Encoding: gzip is present, which
+                // is unusable for SchemaBundle.Validate. That is an existing limitation this handler does
+                // not introduce (ApiResponseAssertions.ReadBodyAsync has the identical gap for a raw-HTTP
+                // case, for the identical reason — AutomaticDecompression is off), not a new one worth
+                // solving here.
+                //
+                // Headers are copied onto the replacement BEFORE the body is read from it, below —
+                // deliberately, not just incidentally, because the body read needs whatever
+                // Content-Type/charset header the response actually carried, and that header only
+                // exists on replacement once this loop has run.
+                foreach (var header in originalContent.Headers)
+                {
+                    replacement.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
             }
+
+            // Read via replacement.ReadAsStringAsync(), NOT Encoding.UTF8.GetString(bytes) — those are
+            // not the same operation, and a comment here once claimed they were parity with
+            // ApiResponseAssertions.ReadBodyAsync's own ReadAsStringAsync for a raw-HTTP case. They are
+            // not: confirmed by direct experiment on net10.0, for the bytes EF BB BF (a UTF-8 BOM)
+            // followed by {"state":"ok"}, Encoding.UTF8.GetString produces a string whose first
+            // character is U+FEFF (length 15) — which JsonDocument.Parse then rejects with "'0xEF' is
+            // an invalid start of a value" — while ByteArrayContent.ReadAsStringAsync strips the BOM
+            // and produces a string starting at U+007B '{' (length 14), which parses cleanly.
+            // ReadAsStringAsync also honours a charset parameter on Content-Type when one is present,
+            // which GetString does not consult at all. An API that emits a UTF-8 BOM (common outside
+            // ASP.NET Core, which never emits one) would therefore fail every client-routed case with a
+            // bogus schema-validation error while its raw-HTTP sibling — which genuinely does go
+            // through ReadAsStringAsync, via ApiResponseAssertions.ReadBodyAsync — passed. Reading from
+            // replacement rather than originalContent because replacement is the one whose headers
+            // (charset included) were populated just above; originalContent's headers are also intact
+            // at this point; either would work for the header lookup, but replacement is what
+            // downstream code retains, so reading from the same object keeps this reasoned about in one
+            // place rather than two.
+            var body = await replacement.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            // Mutates the slot's own field rather than reassigning InTestAmbient.LastCapturedResponse
+            // itself — the two are not interchangeable. See InTestAmbient.LastCapturedResponse's own
+            // doc for the direct-experiment evidence: a plain AsyncLocal reassignment made here, this
+            // deep inside an awaited call, would revert the instant control returns to whatever test
+            // method awaited the typed client call that led here, because that is exactly how
+            // ExecutionContext capture/restore behaves across a genuinely-suspending await. Mutating
+            // the CapturedResponseSlot object that ApiTestCore.BeginTest already flowed down into this
+            // handler is ordinary heap mutation, not dependent on that propagation at all, so it is
+            // what actually survives. A null slot means no test's BeginTest is currently active for
+            // this async flow (fixtures or readiness issuing a request during AssemblyInitialize, say)
+            // — nothing to stash into, and not an error, mirroring how AuthHandler already treats a
+            // null Identity override as ordinary rather than exceptional.
+            if (InTestAmbient.LastCapturedResponse.Value is { } slot)
+            {
+                slot.Value = new CapturedResponse(
+                    (int)response.StatusCode, body, request.Method.Method, request.RequestUri?.ToString());
+            }
+
+            response.Content = replacement;
+
+            return response;
         }
-
-        // Read via replacement.ReadAsStringAsync(), NOT Encoding.UTF8.GetString(bytes) — those are
-        // not the same operation, and a comment here once claimed they were parity with
-        // ApiResponseAssertions.ReadBodyAsync's own ReadAsStringAsync for a raw-HTTP case. They are
-        // not: confirmed by direct experiment on net10.0, for the bytes EF BB BF (a UTF-8 BOM)
-        // followed by {"state":"ok"}, Encoding.UTF8.GetString produces a string whose first
-        // character is U+FEFF (length 15) — which JsonDocument.Parse then rejects with "'0xEF' is
-        // an invalid start of a value" — while ByteArrayContent.ReadAsStringAsync strips the BOM
-        // and produces a string starting at U+007B '{' (length 14), which parses cleanly.
-        // ReadAsStringAsync also honours a charset parameter on Content-Type when one is present,
-        // which GetString does not consult at all. An API that emits a UTF-8 BOM (common outside
-        // ASP.NET Core, which never emits one) would therefore fail every client-routed case with a
-        // bogus schema-validation error while its raw-HTTP sibling — which genuinely does go
-        // through ReadAsStringAsync, via ApiResponseAssertions.ReadBodyAsync — passed. Reading from
-        // replacement rather than originalContent because replacement is the one whose headers
-        // (charset included) were populated just above; originalContent's headers are also intact
-        // at this point; either would work for the header lookup, but replacement is what
-        // downstream code retains, so reading from the same object keeps this reasoned about in one
-        // place rather than two.
-        var body = await replacement.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        // Mutates the slot's own field rather than reassigning InTestAmbient.LastCapturedResponse
-        // itself — the two are not interchangeable. See InTestAmbient.LastCapturedResponse's own
-        // doc for the direct-experiment evidence: a plain AsyncLocal reassignment made here, this
-        // deep inside an awaited call, would revert the instant control returns to whatever test
-        // method awaited the typed client call that led here, because that is exactly how
-        // ExecutionContext capture/restore behaves across a genuinely-suspending await. Mutating
-        // the CapturedResponseSlot object that ApiTestCore.BeginTest already flowed down into this
-        // handler is ordinary heap mutation, not dependent on that propagation at all, so it is
-        // what actually survives. A null slot means no test's BeginTest is currently active for
-        // this async flow (fixtures or readiness issuing a request during AssemblyInitialize, say)
-        // — nothing to stash into, and not an error, mirroring how AuthHandler already treats a
-        // null Identity override as ordinary rather than exceptional.
-        if (InTestAmbient.LastCapturedResponse.Value is { } slot)
+        finally
         {
-            slot.Value = new CapturedResponse(
-                (int)response.StatusCode, body, request.Method.Method, request.RequestUri?.ToString());
+            // Dispose the ORIGINAL content, not the replacement now sitting in response.Content —
+            // HttpResponseMessage.Dispose() only disposes whatever Content is current at the time it
+            // is called, which on the ordinary path is the replacement; the original StreamContent
+            // this handler drains above would otherwise never be disposed at all, since nothing else
+            // holds a reference to it once response.Content is overwritten. This lives in a finally
+            // block, not a plain statement after `response.Content = replacement;`, specifically so it
+            // also runs when originalContent.ReadAsByteArrayAsync above throws mid-stream (a truncated
+            // body, a dropped connection): a plain trailing statement is unreachable on that path — the
+            // exception unwinds straight out of the try block and past where such a statement would
+            // sit — while a finally block is the one construct the CLR runs regardless of whether the
+            // try block completed normally or is currently unwinding an exception. On the exceptional
+            // path response.Content is never reassigned, so originalContent is still the same
+            // still-undrained StreamContent it was on entry; disposing it here is what returns its
+            // connection rather than leaving it held indefinitely. On the ordinary path this runs
+            // exactly once, after `return response;` has already evaluated its operand (a `return`
+            // inside a try schedules the finally to run before control actually leaves the method), so
+            // there is no double-dispose of either originalContent (only ever referenced here) or
+            // replacement (never disposed here at all — it is now response.Content and is the caller's
+            // to dispose via the returned HttpResponseMessage).
+            originalContent?.Dispose();
         }
-
-        response.Content = replacement;
-
-        // Dispose the ORIGINAL content, not the replacement now sitting in response.Content —
-        // HttpResponseMessage.Dispose() only disposes whatever Content is current at the time it is
-        // called, which by then is the replacement; the original StreamContent this handler already
-        // fully drained above would otherwise never be disposed at all, since nothing else holds a
-        // reference to it once response.Content is overwritten. Benign in the common case —
-        // ReadAsByteArrayAsync above drains the underlying stream to EOF, and a fully-drained
-        // response stream already returns its connection to the pool on its own — but a response
-        // whose read throws mid-stream (a truncated body, a dropped connection) would leave that
-        // undisposed StreamContent holding a connection indefinitely. Disposing explicitly here
-        // costs nothing in the common case and closes that gap in the uncommon one; do not delete
-        // this as pointless just because it rarely does anything observable.
-        originalContent?.Dispose();
-
-        return response;
     }
 }

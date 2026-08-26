@@ -144,12 +144,23 @@ public static class TestPlanBuilder
                 var queryParameterNames = QueryParameters(operation);
                 var hasRequestBody = FixtureComposer.HasJsonBodyToCompose(operation);
 
+                // [typed-path-parameters]/[nswag-path-parameter-order]: computed once here, ahead
+                // of both ResolveClientCall (which needs them to decide the client-invocation
+                // verdict) and the TestCasePlan constructed below (which carries them) — the same
+                // "compute once, carry everywhere" discipline QueryParameterNames/HasRequestBody
+                // above already follow. pathParameterKinds's elements are nullable
+                // (PathParameterKind?) per the corrected [typed-path-parameters] finding: not every
+                // schema shape a real client generator types is one of this enum's four members.
+                var pathParameterKinds = ResolvePathParameterKinds(operation, pathParameterNames);
+                var declaredPathParameterOrder = DeclaredPathParameterOrder(operation);
+
                 // [success-only]: this is the only site in Build that ever resolves a client call
                 // — DeclaredError and Auth cases (TryPlanDeclaredNotFound, PlanAuthCases below)
                 // never call ClientCallPlanner at all, regardless of `client`, because they exist
                 // to exercise the API's own behaviour against an unmatchable id, not the client's.
                 var clientCallExpression = ResolveClientCall(
-                    client, key, httpMethod, path, queryParameterNames.Count > 0, hasRequestBody, notes);
+                    client, key, httpMethod, path, declaredPathParameterOrder, queryParameterNames.Count > 0,
+                    hasRequestBody, pathParameterKinds.Any(k => k is null), notes);
 
                 draft.Add((tag, new TestCasePlan(
                     MethodName: methodName,
@@ -175,8 +186,14 @@ public static class TestPlanBuilder
                     // fixture's string value to the declared type before splicing it into Kiota's
                     // item-builder indexer needs to know that type per parameter, and this is the
                     // single source of truth for it (ResolvePathParameterKinds), not a second
-                    // re-derivation in the renderer.
-                    PathParameterKinds: ResolvePathParameterKinds(operation, pathParameterNames),
+                    // re-derivation in the renderer. Reused from the local computed above rather
+                    // than calling ResolvePathParameterKinds a second time here.
+                    PathParameterKinds: pathParameterKinds,
+                    // [nswag-path-parameter-order]: carried for the same reason ClientCallExpression
+                    // itself is — a later reader of this plan (or a future consumer beyond
+                    // ResolveClientCall) should not have to re-derive the spec's declared parameter
+                    // order from the operation a second time.
+                    DeclaredPathParameterOrder: declaredPathParameterOrder,
                     ClientCallExpression: clientCallExpression)));
 
                 // Declared-error and auth cases only exist below this point — a call-site fact,
@@ -392,10 +409,24 @@ public static class TestPlanBuilder
     /// <c>operationId</c> — rather than this method (or <see cref="ClientCallPlanner"/>)
     /// re-deriving it from the operation a second time.
     /// </para>
+    /// <para>
+    /// <paramref name="declaredPathParameterOrder"/> and <paramref name="hasUntypablePathParameter"/>
+    /// are the same "caller computes once, callee never re-derives" idiom already applied to
+    /// <paramref name="hasQueryParameters"/>/<paramref name="hasRequestBody"/> above, extended to
+    /// two corrected findings: <c>[nswag-path-parameter-order]</c> (NSwag binds a generated
+    /// method's positional arguments in the spec's declared <c>parameters</c>-array order, not
+    /// path-template order — <see cref="ClientCallPlanner.BuildNSwagConvention"/>'s own doc comment
+    /// has the measured evidence) and the corrected <c>[typed-path-parameters]</c> finding (some
+    /// path-parameter schema shapes have no client-side conversion InTest can produce at all —
+    /// <see cref="PathParameterKind"/>'s own doc comment has the measured evidence). Both are
+    /// computed once in <see cref="Build"/> from the same <c>operation.Parameters</c> read
+    /// <c>PathParameterKinds</c> already performs, not re-read here.
+    /// </para>
     /// </summary>
     private static string? ResolveClientCall(
         ClientPlanningConfig? client, OperationKey key, string httpMethod, string path,
-        bool hasQueryParameters, bool hasRequestBody, List<CoverageNote> notes)
+        IReadOnlyList<string> declaredPathParameterOrder, bool hasQueryParameters, bool hasRequestBody,
+        bool hasUntypablePathParameter, List<CoverageNote> notes)
     {
         if (client is null)
         {
@@ -403,8 +434,8 @@ public static class TestPlanBuilder
         }
 
         var resolution = ClientCallPlanner.Resolve(
-            client.Kind, key.Value, !key.Synthesized, httpMethod, path, hasQueryParameters, hasRequestBody,
-            client.Overrides);
+            client.Kind, key.Value, !key.Synthesized, httpMethod, path, declaredPathParameterOrder,
+            hasQueryParameters, hasRequestBody, hasUntypablePathParameter, client.Overrides);
 
         if (resolution.Expression is null && resolution.UnresolvedReason is not null)
         {
@@ -487,7 +518,7 @@ public static class TestPlanBuilder
     private static TestCasePlan FixtureFreeCase(
         OperationKey key, string httpMethod, string path, string tag, IReadOnlyList<string> pathParameterNames,
         string methodName, int expectedStatus, string? schemaKey, CaseRole role,
-        IReadOnlyList<PathParameterKind> pathParameterKinds, IdentitySlot slot = IdentitySlot.Default,
+        IReadOnlyList<PathParameterKind?> pathParameterKinds, IdentitySlot slot = IdentitySlot.Default,
         IReadOnlyList<string>? requiredScopes = null) => new(
             MethodName: methodName,
             DisplayName: $"Given {tag}, when {key.Value}, then {expectedStatus}",
@@ -608,7 +639,7 @@ public static class TestPlanBuilder
             .ToList();
 
     /// <summary>
-    /// One <see cref="PathParameterKind"/> per entry in <paramref name="pathParameterNames"/>,
+    /// One <see cref="PathParameterKind"/>? per entry in <paramref name="pathParameterNames"/>,
     /// same order — originally the spec data <see cref="TemplateRenderer"/> needed to render a
     /// well-typed unmatchable value for a declared-error/auth case (decision 6, and the review
     /// finding above <see cref="TryPlanDeclaredNotFound"/>'s call site); <c>[typed-path-parameters]</c>
@@ -616,18 +647,22 @@ public static class TestPlanBuilder
     /// because the client-routed branch needs the same per-parameter kind to convert a fixture's
     /// <c>string</c> value to the type Kiota's item-builder indexer actually declares.
     /// <para>
-    /// Format-aware, not type-alone, per <c>[typed-path-parameters]</c>: a bare <c>type: integer</c>
-    /// (no <c>format</c>, or any format other than <c>int64</c> — <c>int32</c> included) still
-    /// resolves to <see cref="PathParameterKind.Integer"/>, exactly as before this change;
-    /// <c>type: integer, format: int64</c> is new and resolves to <see cref="PathParameterKind.Long"/>;
-    /// <c>type: string, format: uuid</c> is also new and resolves to <see cref="PathParameterKind.Guid"/>
-    /// (previously indistinguishable from a plain string, since only "numeric or not" mattered
-    /// before the client-routed branch existed). Every other declared type, or no path parameter
-    /// schema declared at all, resolves to <see cref="PathParameterKind.String"/>, which keeps
-    /// rendering the fresh GUID this code already used before either finding.
+    /// <b>Corrected finding — element type is <c>PathParameterKind?</c>, not <c>PathParameterKind</c>.</b>
+    /// See <see cref="ResolvePathParameterKind"/>'s own doc comment for the measured evidence and
+    /// <see cref="PathParameterKind"/>'s own doc comment for the fuller correction: this method used
+    /// to fall every unrecognized shape through to <see cref="PathParameterKind.String"/> (or, via
+    /// the old <c>IsNumericType</c> helper, collapse <c>type: number</c> into
+    /// <see cref="PathParameterKind.Integer"/> alongside genuine <c>type: integer</c>), which reads
+    /// as "exhaustive" but was silently wrong for both — a real kiota 1.34.1 client types a
+    /// <c>date-time</c>-formatted string parameter as <c>this[DateTimeOffset]</c>, not
+    /// <c>this[string]</c>, and a <c>number</c>-typed parameter as <c>this[double]</c>, not
+    /// <c>this[int]</c>. <see langword="null"/> now means exactly that: this shape has no
+    /// client-side conversion InTest can produce, and <see cref="ClientCallPlanner.Resolve"/>
+    /// withholds convention for the whole operation when any element here is
+    /// <see langword="null"/>.
     /// </para>
     /// </summary>
-    private static IReadOnlyList<PathParameterKind> ResolvePathParameterKinds(
+    private static IReadOnlyList<PathParameterKind?> ResolvePathParameterKinds(
         OpenApiOperation operation, IReadOnlyList<string> pathParameterNames)
     {
         var declared = (operation.Parameters ?? [])
@@ -641,32 +676,85 @@ public static class TestPlanBuilder
 
     /// <summary>
     /// The per-parameter classification <see cref="ResolvePathParameterKinds"/> maps each declared
-    /// path parameter schema through — see that method's own doc comment for the four-way mapping
-    /// this implements. <see cref="IsNumericType"/> is reused rather than reimplemented (CLAUDE.md's
-    /// "re-deriving is the recurring defect" rule) for the "numeric at all" question; only which
-    /// numeric or string sub-kind — <c>format</c> — is new logic.
+    /// path parameter schema through. Only four shapes are typable, matching
+    /// <see cref="PathParameterKind"/>'s own four members exactly: <c>type: string</c> with no
+    /// <c>format</c> declared at all (<see cref="PathParameterKind.String"/>); <c>type: string,
+    /// format: uuid</c> (<see cref="PathParameterKind.Guid"/>); <c>type: integer, format: int64</c>
+    /// (<see cref="PathParameterKind.Long"/>); and <c>type: integer</c> with any other or absent
+    /// format, <c>int32</c> included (<see cref="PathParameterKind.Integer"/>). No schema declared
+    /// at all for a path parameter also resolves to <see cref="PathParameterKind.String"/> — there
+    /// is nothing to classify, and a fresh GUID has always been well-typed for an untyped
+    /// parameter.
+    /// <para>
+    /// Everything else returns <see langword="null"/>, not a same-looking fallback member —
+    /// <c>type: number</c> (any format, <c>double</c> included), a <c>type: string</c> with a
+    /// format other than <c>uuid</c> (<c>date-time</c>, <c>date</c>, <c>byte</c>, or any
+    /// unrecognized value), <c>type: boolean</c>, and any other declared type. Measured directly
+    /// against real kiota 1.34.1 output: <c>type: string, format: date-time</c> generates a
+    /// <c>this[DateTimeOffset]</c> item-builder indexer, and <c>type: number, format: double</c>
+    /// generates <c>this[double]</c> — neither is a <see cref="PathParameterKind.String"/> or
+    /// <see cref="PathParameterKind.Integer"/> in disguise, and treating either as one used to
+    /// silently bind the wrong (in the first case, deprecated) overload or produce a runtime
+    /// <see cref="FormatException"/> (in the second, via <c>int.Parse("1.5")</c>). This method
+    /// previously used an <c>IsNumericType</c> helper that matched <c>integer</c> and
+    /// <c>number</c> together for "numeric at all" before picking a sub-kind from <c>format</c> —
+    /// that helper is exactly what conflated the two; it has been removed rather than kept and
+    /// worked around, since nothing else in this file needs "integer or number" as a single
+    /// question any more.
+    /// </para>
     /// </summary>
-    private static PathParameterKind ResolvePathParameterKind(IOpenApiSchema? schema)
+    private static PathParameterKind? ResolvePathParameterKind(IOpenApiSchema? schema)
     {
         if (schema?.Type is not { } type)
         {
             return PathParameterKind.String;
         }
 
-        if (IsNumericType(schema))
+        if (type.HasFlag(JsonSchemaType.String))
+        {
+            if (string.IsNullOrEmpty(schema.Format))
+            {
+                return PathParameterKind.String;
+            }
+
+            return string.Equals(schema.Format, "uuid", StringComparison.Ordinal)
+                ? PathParameterKind.Guid
+                : null;
+        }
+
+        if (type.HasFlag(JsonSchemaType.Integer))
         {
             return string.Equals(schema.Format, "int64", StringComparison.Ordinal)
                 ? PathParameterKind.Long
                 : PathParameterKind.Integer;
         }
 
-        return type.HasFlag(JsonSchemaType.String) && string.Equals(schema.Format, "uuid", StringComparison.Ordinal)
-            ? PathParameterKind.Guid
-            : PathParameterKind.String;
+        // type: number (double/float/no format) and every other declared type (boolean, array,
+        // object, ...) — no member of PathParameterKind fits any of them.
+        return null;
     }
 
-    private static bool IsNumericType(IOpenApiSchema? schema)
-        => schema?.Type is { } type && (type.HasFlag(JsonSchemaType.Integer) || type.HasFlag(JsonSchemaType.Number));
+    /// <summary>
+    /// <c>[nswag-path-parameter-order]</c>: every <c>in: path</c> parameter's name, in the order
+    /// the spec's own <c>operation.Parameters</c> declares them — deliberately not re-sorted to
+    /// the path template's own order the way <see cref="PathParameters"/> (path-template order) or
+    /// <see cref="ResolvePathParameterKinds"/>
+    /// (path-template order, keyed by name) both are. <see cref="ClientCallPlanner.BuildNSwagConvention"/>
+    /// is the sole consumer: NSwag binds a generated method's positional path-parameter arguments
+    /// in this declared order, not path-template order, and the two are only guaranteed to agree
+    /// when an operation has at most one path parameter — every piece of evidence
+    /// <c>BuildNSwagConvention</c> originally shipped on. Measured directly (nswag 14.7.1): a path
+    /// <c>/customers/{customerId}/orders/{orderId}</c> whose <c>parameters</c> array declares
+    /// <c>orderId</c> before <c>customerId</c> generates
+    /// <c>GetCustomerOrderAsync(System.Guid orderId, System.Guid customerId, ...)</c> — the two
+    /// orders disagree, and because both parameters share a type the wrong-order call still
+    /// compiles, silently asserting against the wrong resource.
+    /// </summary>
+    private static IReadOnlyList<string> DeclaredPathParameterOrder(OpenApiOperation operation)
+        => (operation.Parameters ?? [])
+            .Where(p => p.In == ParameterLocation.Path)
+            .Select(p => p.Name!)
+            .ToList();
 
     private static IReadOnlyList<string> PathParameters(string path)
     {

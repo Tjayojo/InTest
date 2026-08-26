@@ -44,11 +44,25 @@ INTEST_UPDATE_GOLDEN=1 dotnet test tests/InTest.Golden.Tests --filter "FullyQual
 `InTest.Golden.Tests` shells out to `dotnet build` and `dotnet test` on scaffolded temp projects
 and runs generated suites against an in-process HTTP stub. It is slow and it is the only suite
 that proves generated code both compiles *and* runs — do not skip it when changing the template,
-the renderer, or the scaffold. **Measured locally, 2026-08-26, several runs: ~3m9s–3m17s** — a
-tool's default command timeout (commonly ~2 minutes) cuts this off mid-flight, which reads as a
-hang rather than a slow-but-healthy run; pass an explicit timeout well past 3m17s (see the `golden`
-CI figure below for how much further it can run under load) rather than shortening the command or
-assuming it stalled.
+the renderer, or the scaffold. **Measured locally, 2026-08-26, two consecutive runs: ~3m49s–3m50s
+warm — but ~9m43s from a *fresh worktree*, and both numbers are real.** The gap is the whole reason
+this figure needs a qualifier rather than a value: the temp projects these tests scaffold each run a
+real `dotnet build`, so a cold NuGet cache and cold obj/bin pay full restore-and-compile cost on
+every one of them, while a warm repeat reuses all of it. Quote which one you measured, or the next
+person reasonably concludes the doc is wrong.
+This is a budget, not a fact: every `CompileVerificationTests` (and most `GeneratedSuiteExecutionTests`)
+case shells out to a real `dotnet build` (some also `dotnet test`) on a freshly scaffolded temp
+project, so the suite's wall-clock time grows roughly linearly with the number of generated-code
+shapes under test — it has no fixed ceiling the way an in-process suite would. It has grown before:
+this doc quoted ~90–107s at one point, then ~3m9s–3m17s after that was corrected, and now
+~3m49s–3m50s, each step tracking real cases added (this branch alone added three new
+`CompileVerificationTests` cases and substantially grew `GeneratedSuiteExecutionTests`). Expect the
+next reader's own measurement to be higher still if more shapes have been added since — treat
+whatever figure is quoted here as a floor to size a timeout against, not a number to assert against.
+A tool's default command timeout (commonly ~2 minutes) cuts this off mid-flight, which reads as a
+hang rather than a slow-but-healthy run; pass an explicit timeout well past the figure above (see
+the `golden` CI figure below for how much further it can run under load) rather than shortening the
+command or assuming it stalled.
 
 Running the sample APIs requires specific environment variables (ports, issuer/authority pairing,
 `ASPNETCORE_ENVIRONMENT=Development`). See `samples/README.md`; getting them wrong produces
@@ -69,11 +83,11 @@ CI (`.github/workflows/build-and-test.yml`, push to `main` and every pull reques
 (Architecture + Cli + Runtime; a prior measurement recorded ~33.5–35.5s cold-cache, but CI itself
 has since measured **~1m26s–1m46s** — trust the CI figure over the cold-cache one, since it is what
 actually gates a PR), `golden` (Golden alone, kept in its own parallel job so it cannot delay
-`fast`'s verdict — CI measured **~3m6s/3m12s on ubuntu-latest and ~4m14s/4m18s on
-windows-latest**, consistent with (and, on Windows, well past) the ~3m9s–3m17s measured locally
-above; part of the growth since the ~90–107s this doc once quoted is this repository's own added
-test volume over time, but not enough of it to explain a 2–3x gap — the older figure was simply
-wrong or measured under conditions this doc no longer knows), and `dogfood`
+`fast`'s verdict — CI last measured **~3m6s/3m12s on ubuntu-latest and ~4m14s/4m18s on
+windows-latest**, from before this branch's own `CompileVerificationTests`/`GeneratedSuiteExecutionTests`
+growth landed, so treat those as stale in the same direction and by roughly the same proportion as
+the local figure above grew — expect CI to have climbed too, not just the local number; re-measure
+from an actual CI run rather than assuming), and `dogfood`
 (`scripts/ci/dogfood.ps1`: `init` → `generate` → `fixtures repair` → `generate` →
 `generate --check` against the three sample specs under `samples/`, no live API — static only).
 Reproduce `fast`/`golden` locally with the `dotnet test` invocations above; reproduce `dogfood`

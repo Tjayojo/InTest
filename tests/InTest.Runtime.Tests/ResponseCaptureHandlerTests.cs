@@ -60,6 +60,54 @@ public class ResponseCaptureHandlerTests
     }
 
     /// <summary>
+    /// Answers with a caller-supplied <see cref="HttpContent"/> verbatim, rather than wrapping a
+    /// byte array the way <see cref="StreamRespondingHandler"/> does — needed by
+    /// <see cref="DisposesOriginalContentEvenWhenReadingItThrows"/> below, which must hand
+    /// <see cref="ResponseCaptureHandler"/> a specific <see cref="ThrowingHttpContent"/> instance
+    /// and keep its own reference to that same instance afterward so it can inspect
+    /// <see cref="ThrowingHttpContent.Disposed"/> once the send completes.
+    /// </summary>
+    private sealed class ContentRespondingHandler(HttpContent content) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+    }
+
+    /// <summary>
+    /// A response body that throws partway through being read, standing in for a truncated body or
+    /// a connection dropped mid-stream on the live network. <see cref="HttpContent"/>'s own
+    /// public read methods (<c>ReadAsByteArrayAsync</c> included, which is exactly what
+    /// <see cref="ResponseCaptureHandler.SendAsync"/> calls on <c>originalContent</c>) are documented
+    /// as funneling through <see cref="SerializeToStreamAsync(Stream, TransportContext?)"/> /
+    /// its cancellable overload to actually produce bytes, so throwing from both overloads here
+    /// reproduces a mid-read failure regardless of which one the runtime happens to pick.
+    /// <see cref="Disposed"/> records whether this instance was ever disposed, which is the one
+    /// fact <see cref="DisposesOriginalContentEvenWhenReadingItThrows"/> exists to check.
+    /// </summary>
+    private sealed class ThrowingHttpContent : HttpContent
+    {
+        public bool Disposed { get; private set; }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => throw new IOException("simulated truncated body / dropped connection");
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+            => throw new IOException("simulated truncated body / dropped connection");
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
     /// Stands in for <c>ApiTestCore.BeginTest</c> assigning a fresh <see cref="CapturedResponseSlot"/>
     /// before a test's requests run — required per <see cref="InTestAmbient.LastCapturedResponse"/>'s
     /// own doc: a plain <see cref="AsyncLocal{T}"/> reassignment made inside
@@ -214,6 +262,48 @@ public class ResponseCaptureHandlerTests
         // The gap this test also confirms, named in this method's own doc: the captured Body is
         // not decompressed, so it is not the original JSON text for a compressed response.
         slot.Value!.Value.Body.ShouldNotBe(originalText);
+    }
+
+    /// <summary>
+    /// Proves the fix for the disposal gap named in the task brief: before this change,
+    /// <c>originalContent?.Dispose()</c> sat on the straight-line path after
+    /// <c>await originalContent.ReadAsByteArrayAsync(...)</c>, so it only ever ran when that read
+    /// completed without throwing — exactly the case the deleted comment on that line called
+    /// "benign", since a fully-drained stream already returns its connection to the pool on its own.
+    /// A read that throws mid-stream (this test's <see cref="ThrowingHttpContent"/>, standing in for
+    /// a truncated body or a dropped connection) unwinds straight out of
+    /// <see cref="ResponseCaptureHandler.SendAsync"/> before that trailing statement is ever reached,
+    /// so <c>originalContent</c> was never disposed on that path — the connection it held stays held
+    /// indefinitely, which is precisely the "uncommon gap" the old comment claimed was already
+    /// closed. Under the pre-fix code this test's final assertion would fail:
+    /// <see cref="ThrowingHttpContent.Disposed"/> would still be <see langword="false"/> after the
+    /// send throws. Under the fix (the dispose moved into a <c>finally</c> block wrapping the whole
+    /// read-and-replace region) it runs on this exceptional path too, so this assertion passes.
+    /// </summary>
+    [TestMethod]
+    public async Task DisposesOriginalContentEvenWhenReadingItThrows()
+    {
+        var throwingContent = new ThrowingHttpContent();
+        var inner = new ContentRespondingHandler(throwingContent);
+        using var handler = new ResponseCaptureHandler(ConfiguredBaseUrl) { InnerHandler = inner };
+        using var invoker = new HttpMessageInvoker(handler);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("https://h.invalid/api/orders/7"));
+
+        // Confirmed by direct experiment on net10.0: HttpContent.ReadAsByteArrayAsync does not let
+        // an exception from SerializeToStreamAsync propagate bare — its internal buffering
+        // (LoadIntoBufferAsync) catches it and rethrows as HttpRequestException, with the original
+        // exception attached as InnerException. So the mid-read failure this test simulates via
+        // ThrowingHttpContent's IOException still reaches ResponseCaptureHandler.SendAsync as an
+        // exception — which is all the fix under test needs, since the finally block disposes
+        // originalContent regardless of which exception type unwinds through it — but the type the
+        // caller (invoker.SendAsync here) actually observes is HttpRequestException, not the bare
+        // IOException.
+        var ex = await Should.ThrowAsync<HttpRequestException>(() => invoker.SendAsync(request, CancellationToken.None));
+        ex.InnerException.ShouldBeOfType<IOException>();
+
+        // The load-bearing assertion: originalContent (this same throwingContent instance) was
+        // disposed even though reading it threw before response.Content was ever reassigned.
+        throwingContent.Disposed.ShouldBeTrue();
     }
 
     [TestMethod]

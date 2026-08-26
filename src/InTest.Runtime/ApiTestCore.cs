@@ -110,6 +110,96 @@ public abstract class ApiTestCore
     protected HttpClient Client { get; private set; } = null!;
 
     /// <summary>
+    /// A silent, do-nothing <see cref="IRunDiagnostics"/> — the private, internal-only implementation
+    /// <see cref="IRunDiagnostics"/>'s own doc says is deliberately absent from the shipped surface
+    /// ("Deliberately no <c>RunDiagnostics.Null</c> or other shipped convenience implementation
+    /// here... a test-local double is enough until a real caller needs otherwise"). This one is not
+    /// that shipped convenience: it is never public, never returned, never exposed anywhere outside
+    /// this class, and exists solely so <see cref="BeginTest(string?)"/> — the one-argument
+    /// compatibility overload below — has something non-null to hand the two-argument
+    /// <see cref="BeginTest(string?, IRunDiagnostics)"/> without changing what a caller supplying no
+    /// diagnostics sink actually observes. See <see cref="BeginTest(string?)"/>'s own doc for why a
+    /// null object is the right shape here rather than an optional parameter.
+    /// <para>
+    /// This overload's arrival is exactly the "real caller" <see cref="IRunDiagnostics"/>'s own doc
+    /// contemplates as the condition for eventually shipping a convenience null implementation — but
+    /// arriving does not by itself change the answer. This type still has no reason to expose itself
+    /// as public API: nothing outside <see cref="BeginTest(string?)"/> constructs or references it, so
+    /// it stays private here rather than being promoted onto <see cref="IRunDiagnostics"/> as a
+    /// shipped <c>.Null</c> member. A second real caller wanting the same no-op would be the actual
+    /// trigger for that promotion; one does not exist yet.
+    /// </para>
+    /// </summary>
+    private sealed class NullDiagnostics : IRunDiagnostics
+    {
+        /// <summary>The only instance this type is ever constructed as — one shared, stateless
+        /// no-op is all any caller could ever need from it.</summary>
+        public static readonly NullDiagnostics Instance = new();
+
+        public void Note(string message)
+        {
+            // Deliberately empty: this is the discard behaviour the old one-argument BeginTest
+            // already had by construction, before diagnostics existed as a concept at all — there
+            // was no sink to write routine progress to, so there is still none now.
+        }
+
+        public void Warn(string message)
+        {
+            // Deliberately empty: this is what makes BeginTest(string?) reproduce the old
+            // one-argument BeginTest's observable behaviour exactly. Before [warn-on-swallowed-exception]
+            // introduced WarnSwallowedClientException, a swallowed client exception left no trace at
+            // all — _diagnostics was simply null, and WarnSwallowedClientException's own `_diagnostics?.Warn(...)`
+            // already treats a null sink as a silent no-op. Routing Warn through this empty method
+            // instead of leaving _diagnostics null reproduces that exact silence while still letting
+            // the two-argument BeginTest's non-null guard (ArgumentNullException.ThrowIfNull) pass.
+        }
+    }
+
+    /// <summary>
+    /// Compatibility overload: exists only so that code compiled against the pre-<c>[warn-on-swallowed-exception]</c>
+    /// one-argument <c>BeginTest(string?)</c> signature — a hypothetical third-party xUnit/NUnit
+    /// adapter, or any other caller outside this repository that already built against
+    /// <c>InTest.Runtime</c> before <see cref="BeginTest(string?, IRunDiagnostics)"/> gained its
+    /// second parameter — keeps compiling and keeps running, unchanged, against the version of
+    /// <c>InTest.Runtime</c> that ships this file. <c>InTest.Runtime</c>
+    /// <c>0.1.0-preview.1</c> is already published to nuget.org (CLAUDE.md's "What this is"), so
+    /// adding a required parameter to an existing public method is a source break at that package
+    /// boundary; this overload is the fix.
+    /// <para>
+    /// <b>Not the preferred call for new code inside this repository.</b>
+    /// <see cref="ApiTestBase.ApiTestInitialize"/> keeps calling the two-argument
+    /// <see cref="BeginTest(string?, IRunDiagnostics)"/> with a real
+    /// <c>TestHost.TestContextDiagnostics</c> sink, unchanged by this overload's existence — every
+    /// caller this repository controls already has a live per-test diagnostics sink to supply and
+    /// should keep supplying it, so <c>[warn-on-swallowed-exception]</c> reaches the operator on
+    /// every path this repository ships. This overload exists purely for callers this repository
+    /// does <em>not</em> control, who compiled before that sink existed to supply.
+    /// </para>
+    /// <para>
+    /// <b>Why a private null-object <see cref="IRunDiagnostics"/> rather than making
+    /// <c>diagnostics</c> an optional parameter with a default value on the existing method.</b> An
+    /// optional parameter is a source-compatible change, not a binary-compatible one: the default
+    /// value is substituted by the <em>caller's compiler</em> at the call site, baked into that
+    /// caller's own IL at compile time — it is not part of the callee's method signature at all.
+    /// An already-compiled caller's IL already contains a direct call instruction to a one-argument
+    /// <c>BeginTest(string)</c> method token; IL call-site resolution matches that token against the
+    /// callee assembly's actual set of declared overloads at load time, and a two-argument method
+    /// with a default value on its second parameter is still, in IL, a single method that requires
+    /// two arguments — no one-argument overload exists for that call site to bind to, so the
+    /// existing caller fails to load (a <see cref="MissingMethodException"/>) rather than silently
+    /// picking up the default. Only a genuinely separate, declared one-argument overload — this
+    /// method — creates the second IL method token an old caller's call site can still resolve
+    /// against. Restoring the exact old <em>observable behaviour</em> through that overload, via
+    /// <see cref="NullDiagnostics"/>, rather than reasoning about what a default argument value
+    /// would have produced, is what makes this method more than "compiles": see this method's own
+    /// body and <see cref="NullDiagnostics"/> for how.
+    /// </para>
+    /// </summary>
+    /// <param name="testDisplayName">Forwarded unchanged to <see cref="BeginTest(string?, IRunDiagnostics)"/>
+    /// — see that overload's own parameter doc.</param>
+    protected void BeginTest(string? testDisplayName) => BeginTest(testDisplayName, NullDiagnostics.Instance);
+
+    /// <summary>
     /// Starts one test's scope: a fresh DI scope, the resolved <see cref="TestId"/>, this test's
     /// own diagnostics sink, the ambient identity a request authenticates as by default, and the
     /// <see cref="Client"/> generated request-sending methods use. The body of what used to be
