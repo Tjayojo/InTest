@@ -73,6 +73,22 @@ public static class ConfigLoader
         "It must be the test framework generated tests target. Supported today: \"mstest\". " +
         "InTest is designed to support additional frameworks (§3) but only ships MSTest so far.";
 
+    // The optional "client" section (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md,
+    // `[convention-plus-override]`). Unlike every rule above, this section is allowed to be
+    // entirely absent — see ReadOptionalClientConfig's own doc comment for why that is optional
+    // while the two fields inside it, once the section itself is present, are not.
+    private const string ClientSectionRule =
+        "When present, it must declare client.kind (\"kiota\", \"nswag\" or \"refit\") and " +
+        "client.typeName (the generated client's fully-qualified C# type name) together — for " +
+        "example \"client\": { \"kind\": \"kiota\", \"typeName\": \"Orders.ApiClient.OrdersApiClient\" }.";
+
+    private const string ClientKindRule =
+        "It must be the generator that produced the client: \"kiota\", \"nswag\" or \"refit\".";
+
+    private const string ClientTypeNameRule =
+        "It must be the generated client's fully-qualified C# type name — for example " +
+        "\"Orders.ApiClient.OrdersApiClient\".";
+
     public static LoadedConfig Load(string projectRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
@@ -170,8 +186,73 @@ public static class ConfigLoader
         }
 
         var framework = RequireSupportedFramework(project);
+        var client = ReadOptionalClientConfig(root);
 
-        return new LoadedConfig(specSource, rootNamespace, testBaseClass, framework, intestVersion, specSourceIsUrl);
+        return new LoadedConfig(specSource, rootNamespace, testBaseClass, framework, intestVersion, specSourceIsUrl, client);
+    }
+
+    /// <summary>
+    /// The optional "client" section that opts a project into routing generated Success cases
+    /// through an adopter-owned, pre-generated API client instead of raw HTTP. Absent entirely →
+    /// <see langword="null"/>, and every downstream behaviour is unchanged — §5's "config grows by
+    /// addition" already covers an unrecognised key
+    /// (<c>ConfigLoaderTests.IgnoresSettingsItDoesNotRead</c>), and an absent, recognised-but-optional
+    /// section is the same shape one field earlier: <see cref="ReadOptionalIntestVersion"/> already
+    /// established that pattern for <c>intestVersion</c>.
+    /// <para>
+    /// Mirrors <see cref="ReadOptionalIntestVersion"/> in structure — <c>TryGetProperty</c>
+    /// early-null, a <c>ValueKind</c> check, a named rule string, a <see cref="ConfigLoadException"/>
+    /// naming the dotted setting — but diverges once the section itself is present:
+    /// <c>intestVersion</c> has nothing else inside it that could be half-written, while a
+    /// <c>client</c> section can name a <c>kind</c> without a <c>typeName</c> (or vice versa), and
+    /// <c>ClientCallPlanner</c> needs both to resolve anything at all. Calling
+    /// <see cref="RequireString"/> for each field, rather than hand-rolling a bespoke
+    /// "which one is missing" branch, gets that naming for free — whichever field
+    /// <c>RequireString</c> cannot find throws first, naming exactly that dotted setting
+    /// ("intest.json has no client.kind." / "…has no client.typeName."), and cannot drift from the
+    /// message every other required-string setting on this surface already uses.
+    /// </para>
+    /// </summary>
+    private static LoadedClientConfig? ReadOptionalClientConfig(JsonElement root)
+    {
+        if (!root.TryGetProperty("client", out var declared))
+        {
+            return null;
+        }
+
+        if (declared.ValueKind != JsonValueKind.Object)
+        {
+            throw new ConfigLoadException(
+            $"client in {FileName} is {Describe(declared.ValueKind)}, not an object: " +
+            $"{Quote(declared)}. {ClientSectionRule}");
+        }
+
+        var kind = RequireString(declared, "client.kind", "kind", ClientKindRule);
+        if (kind is not ("kiota" or "nswag" or "refit"))
+        {
+            // Ordinal-exact lowercase, the same discipline RequireSupportedFramework applies to
+            // project.framework and for the same reason: adopter-facing JSON, not a C# identifier
+            // with case-insensitive lookup — no other spelling reaches Planning.ClientKind.
+            throw new ConfigLoadException(
+            $"client.kind in {FileName} is \"{kind}\", which intest does not support. {ClientKindRule}");
+        }
+
+        var typeName = RequireString(declared, "client.typeName", "typeName", ClientTypeNameRule);
+
+        // typeName reaches mstest-class.scriban in reference position
+        // (ApiClient<Orders.ApiClient.OrdersApiClient>()), not inside a string literal — the same
+        // reasoning that governs project.rootNamespace and project.testBaseClass above. No
+        // escaping construct makes an invalid identifier resolve there, so it is refused here
+        // rather than emitted and left to fail the adopter's build with a message that never
+        // mentions intest.json at all.
+        if (!CSharpIdentifier.TryValidateDottedName(typeName, "client.typeName", out var typeNameReason))
+        {
+            throw new ConfigLoadException(
+            $"{typeNameReason} Change client.typeName in {FileName} — for example " +
+            "\"Orders.ApiClient.OrdersApiClient\".");
+        }
+
+        return new LoadedClientConfig(kind, typeName);
     }
 
     /// <summary>

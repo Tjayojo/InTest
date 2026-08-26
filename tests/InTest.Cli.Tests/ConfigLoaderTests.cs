@@ -787,4 +787,151 @@ public class ConfigLoaderTests
         reason.ShouldContain("empty");
         reason.ShouldNotContain("not a string");
     }
+
+    // ---- client (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md) --------
+    // Optional, absent by default — every fixture above this section declares no `client` at all
+    // and must keep loading exactly as before. Once declared, `kind` and `typeName` are both
+    // required together, the same "half-finished edit is not a smaller valid config" rule
+    // project.framework already established for a required setting on this surface.
+
+    [TestMethod]
+    public void LoadsAConfigWithNoClientSectionAsNullClient()
+    {
+        WriteConfig(Valid);
+
+        ConfigLoader.Load(_root).Client.ShouldBeNull();
+    }
+
+    [TestMethod]
+    public void LoadsAValidClientSection()
+    {
+        WriteConfig("""
+                    { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                      "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                   "framework": "mstest" },
+                      "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                    """);
+
+        var client = ConfigLoader.Load(_root).Client;
+
+        client.ShouldNotBeNull();
+        client.Kind.ShouldBe("kiota");
+        client.TypeName.ShouldBe("Orders.ApiClient.OrdersApiClient");
+    }
+
+    [TestMethod]
+    [DataRow("nswag")]
+    [DataRow("refit")]
+    public void LoadsEveryOtherSupportedClientKind(string kind)
+    {
+        WriteConfig($$"""
+                      { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                        "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                     "framework": "mstest" },
+                        "client": { "kind": "{{kind}}", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                      """);
+
+        ConfigLoader.Load(_root).Client!.Kind.ShouldBe(kind);
+    }
+
+    [TestMethod]
+    public void ExplainsAClientSectionThatIsNotAnObject()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": "kiota" }
+                               """);
+
+        reason.ShouldContain("client", Case.Sensitive);
+        reason.ShouldContain("object");
+    }
+
+    [TestMethod]
+    public void ExplainsAClientSectionMissingKind()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": { "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                               """);
+
+        reason.ShouldContain("client.kind", Case.Sensitive);
+        reason.ShouldNotContain("typeName");
+    }
+
+    [TestMethod]
+    public void ExplainsAClientSectionMissingTypeName()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": { "kind": "kiota" } }
+                               """);
+
+        reason.ShouldContain("client.typeName", Case.Sensitive);
+    }
+
+    [TestMethod]
+    public void ExplainsAnUnsupportedClientKind()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": { "kind": "swagger-codegen", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                               """);
+
+        reason.ShouldContain("swagger-codegen", Case.Sensitive);
+        reason.ShouldContain("kiota", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// Ordinal-exact, matching <see cref="RefusesAnUppercaseSpellingOfTheSupportedFramework"/>:
+    /// adopter-facing JSON, not a case-insensitive C# identifier lookup.
+    /// </summary>
+    [TestMethod]
+    public void RefusesAnUppercaseSpellingOfAClientKind()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": { "kind": "Kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                               """);
+
+        reason.ShouldContain("Kiota", Case.Sensitive);
+        reason.ShouldContain("kiota", Case.Sensitive);
+    }
+
+    [TestMethod]
+    public void ExplainsAClientTypeNameThatIsNotAValidCSharpName()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": { "kind": "kiota", "typeName": "Orders.ApiClient; public class Injected { } //" } }
+                               """);
+
+        reason.ShouldContain("client.typeName", Case.Sensitive);
+        reason.ShouldContain("Change client.typeName in intest.json", Case.Sensitive);
+    }
+
+    [TestMethod]
+    public void ExplainsAClientKindThatIsNotAString()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "mstest" },
+                                 "client": { "kind": 7, "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                               """);
+
+        reason.ShouldContain("client.kind", Case.Sensitive);
+        reason.ShouldContain("string");
+    }
 }

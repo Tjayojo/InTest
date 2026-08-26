@@ -68,7 +68,21 @@ public sealed record TestCasePlan(
     // against a status the API is correct to return, because it gets compared against every
     // requirement's scopes rather than just the one the identity actually satisfies. Every sample
     // spec today declares exactly one requirement, so this gap is real but untriggered, not safe.
-    IReadOnlyList<string>? RequiredScopes = null)
+    IReadOnlyList<string>? RequiredScopes = null,
+    // The verdict ClientCallPlanner.Resolve computed for this case, carried rather than
+    // re-derived downstream (CLAUDE.md's recurring-defect warning, same as every other carried
+    // verdict on this record) — stage 3's renderer splices this expression bare rather than
+    // re-consulting client-map.json or re-running the Kiota convention per render. Null in every
+    // case that predates this field (every existing call site, none of which had a client to
+    // resolve against) and in every case this plan ever withholds a client call for: every
+    // DeclaredError and Auth case unconditionally ([success-only] — TestPlanBuilder never even
+    // attempts a resolution for those roles, regardless of config), and any Success case that
+    // either declared no `client` config, matched no override, or failed one of
+    // ClientCallPlanner.Resolve's gates (a non-Kiota kind, a query parameter, or a request body) —
+    // TestPlanBuilder emits a CoverageNote pointing at client-map.json in that last case rather
+    // than reporting the operation as unsupported, since its raw-HTTP Success case still generated
+    // and still runs.
+    string? ClientCallExpression = null)
 {
     // Collection-typed record parameters cannot default to a non-constant expression
     // (Array.Empty<string>() is not a compile-time constant) directly in the parameter list, so

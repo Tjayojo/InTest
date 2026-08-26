@@ -1218,4 +1218,208 @@ public class TestPlanBuilderTests
         mutated.RequiredScopes.ShouldNotBeNull();
         mutated.RequiredScopes.ShouldBeEmpty();
     }
+
+    // --- ClientCallExpression wiring (typed-client-invocation plan, [convention-and-config]). ---
+    // TestPlanBuilder.Build's client parameter is optional and defaults to null, so every test
+    // above this region already covers "absent client leaves everything unchanged" implicitly —
+    // none of them pass one. These pass a ClientPlanningConfig explicitly.
+
+    private static readonly IReadOnlyDictionary<string, string> NoOverrides =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    private static readonly ClientPlanningConfig KiotaClient =
+        new(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", NoOverrides);
+
+    private const string SpecWithAQueryParameter = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders": {
+          "get": {
+            "operationId": "listOrders",
+            "tags": ["Orders"],
+            "parameters": [{ "name": "status", "in": "query", "required": false, "schema": { "type": "string" } }],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    private const string SpecWithARequestBody = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders": {
+          "post": {
+            "operationId": "createOrder",
+            "tags": ["Orders"],
+            "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } },
+            "responses": { "201": { "description": "created", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithNoClientConfigured()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsSetForAQualifyingSuccessCase()
+    {
+        // getOrderById: GET /orders/{id} — Success, no query parameters, no request body.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBe("Orders[{id}].GetAsync");
+        plan.Notes.ShouldBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullForADeclaredErrorCaseRegardlessOfConfig()
+    {
+        // [success-only]: TryPlanDeclaredNotFound never even attempts a resolution — it must stay
+        // null with a client configured, exactly as it already is with none.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecDeclaring404)).Document, KiotaClient);
+        var notFound = plan.Classes.SelectMany(c => c.Cases).Single(c => c.Role == CaseRole.DeclaredError);
+
+        notFound.ClientCallExpression.ShouldBeNull();
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullForAuthCasesRegardlessOfConfig()
+    {
+        // [success-only]: PlanAuthCases never even attempts a resolution either.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecDeclaringSecurity)).Document, KiotaClient);
+        var authCases = plan.Classes.SelectMany(c => c.Cases).Where(c => c.Role == CaseRole.Auth).ToList();
+
+        authCases.ShouldNotBeEmpty();
+        authCases.ShouldAllBe(c => c.ClientCallExpression == null);
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForAQueryParameterSuccessCase()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithAQueryParameter)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "listOrders");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "listOrders" &&
+            n.Reason.Contains("query parameters") && n.Reason.Contains("client-map.json", StringComparison.Ordinal),
+            "a withheld convention must point the adopter at the override map, not report the operation as unsupported");
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForARequestBodySuccessCase()
+    {
+        // Measured finding: Kiota's PostAsync takes a typed model object, not a JSON string.
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithARequestBody)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "createOrder");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "createOrder" &&
+            n.Reason.Contains("request body") && n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ClientCallExpressionIsNullWithANoteForANonKiotaKind()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" && n.Reason.Contains("NSwag", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task AnOverrideBypassesTheQueryParameterGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["listOrders"] = "Orders.GetAsync(rc => rc.QueryParameters.Status = status)"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithAQueryParameter)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "listOrders");
+
+        success.ClientCallExpression.ShouldBe("Orders.GetAsync(rc => rc.QueryParameters.Status = status)");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "listOrders");
+    }
+
+    [TestMethod]
+    public async Task AnOverrideBypassesTheRequestBodyGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["createOrder"] = "Orders.PostAsync(new CreateOrderRequest())"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithARequestBody)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "createOrder");
+
+        success.ClientCallExpression.ShouldBe("Orders.PostAsync(new CreateOrderRequest())");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "createOrder");
+    }
+
+    [TestMethod]
+    public async Task AnOverrideBypassesTheNonKiotaKindGate()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["getOrderById"] = "OrdersGETAsync(Guid.Parse(FixtureParameter(\"getOrderById\", \"id\")))"
+        };
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBe("OrdersGETAsync(Guid.Parse(FixtureParameter(\"getOrderById\", \"id\")))");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
+    }
+
+    [TestMethod]
+    public async Task AStaleOverrideKeyYieldsANote()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["noSuchOperation"] = "Foo.GetAsync()"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+
+        plan.Notes.ShouldContain(n => n.OperationKey == "noSuchOperation" && n.Reason.Contains("stale"));
+    }
+
+    [TestMethod]
+    public async Task AnOverrideThatMatchesARealOperationIsNotReportedAsStale()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["getOrderById"] = "Orders[{id}].GetAsync"
+        };
+        var client = new ClientPlanningConfig(ClientKind.Kiota, "Orders.ApiClient.OrdersApiClient", overrides);
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
+
+        plan.Notes.ShouldNotContain(n => n.Reason.Contains("stale"));
+    }
 }

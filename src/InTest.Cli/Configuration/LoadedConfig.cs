@@ -43,10 +43,19 @@ namespace InTest.Cli.Configuration;
 /// once; everything else reads the answer.
 /// </para>
 /// </param>
+/// <param name="Client">
+/// The validated "client" section, or <see langword="null"/> when <c>intest.json</c> declares
+/// none — the common case today, and the one every existing config exercises. Optional by design,
+/// not by omission: absence must leave every existing behaviour byte-identical (the
+/// typed-client-invocation plan's opening line), so this is the one field on <see cref="LoadedConfig"/>
+/// downstream code is expected to null-check rather than trust as always-present, the same way
+/// <see cref="IntestVersion"/> already is.
+/// </param>
 public sealed record LoadedConfig(
     string SpecSource,
     string RootNamespace,
     string TestBaseClass,
     string Framework,
     string? IntestVersion,
-    bool SpecSourceIsUrl);
+    bool SpecSourceIsUrl,
+    LoadedClientConfig? Client = null);

@@ -1,3 +1,4 @@
+using InTest.Cli.Clients;
 using InTest.Cli.Fixtures;
 using InTest.Cli.Naming;
 using InTest.Cli.Spec;
@@ -36,7 +37,15 @@ public static class TestPlanBuilder
     /// rather than a gap.</summary>
     private static readonly HashSet<int> BodilessStatuses = [204, 205, 304];
 
-    public static TestPlan Build(OpenApiDocument document)
+    /// <param name="client">
+    /// The typed-client-invocation opt-in — kind, typeName and the adopter's override map — or
+    /// <see langword="null"/> when the project declares no <c>client</c> section, the default and
+    /// today's only exercised path. One optional parameter, per
+    /// <see cref="ClientPlanningConfig"/>'s own doc comment, not three loose ones; every existing
+    /// call site (<c>GenerateCommand</c>, <c>FixturesRepairCommand</c>, every test that calls
+    /// <c>Build(document)</c>) compiles unchanged because it defaults to null.
+    /// </param>
+    public static TestPlan Build(OpenApiDocument document, ClientPlanningConfig? client = null)
     {
         ArgumentNullException.ThrowIfNull(document);
 
@@ -44,12 +53,19 @@ public static class TestPlanBuilder
         var notes = new List<CoverageNote>();
         var draft = new List<(string Tag, TestCasePlan Case)>();
         var proposedNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Every operation key seen in this document, skipped or not — the ground truth
+        // StaleClientOverrideNotes checks client.Overrides against once the main loop finishes.
+        // Populated regardless of skip: an override naming an operation this document still
+        // declares is never stale even if that operation happens to generate no case today, and
+        // conflating "skipped" with "does not exist" would misreport the former as the latter.
+        var allOperationKeys = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var (path, pathItem) in document.Paths.OrderBy(p => p.Key, StringComparer.Ordinal))
         {
             foreach (var (method, operation) in (pathItem.Operations ?? []).OrderBy(o => o.Key.Method, StringComparer.Ordinal))
             {
                 var key = OperationKey.Resolve(operation.OperationId, method.Method, path);
+                allOperationKeys.Add(key.Value);
 
                 // Delegated to the composer rather than reproduced here: it alone knows which
                 // parameters it actually emits a value for (an optional query parameter with an
@@ -125,6 +141,16 @@ public static class TestPlanBuilder
                 var methodName = CSharpIdentifier.ToPascalCase(key.Value) + "_Contract";
                 proposedNames[CaseIdentity(key.Value, CaseRole.Success, status)] = methodName;
 
+                var queryParameterNames = QueryParameters(operation);
+                var hasRequestBody = FixtureComposer.HasJsonBodyToCompose(operation);
+
+                // [success-only]: this is the only site in Build that ever resolves a client call
+                // — DeclaredError and Auth cases (TryPlanDeclaredNotFound, PlanAuthCases below)
+                // never call ClientCallPlanner at all, regardless of `client`, because they exist
+                // to exercise the API's own behaviour against an unmatchable id, not the client's.
+                var clientCallExpression = ResolveClientCall(
+                    client, key.Value, httpMethod, path, queryParameterNames.Count > 0, hasRequestBody, notes);
+
                 draft.Add((tag, new TestCasePlan(
                     MethodName: methodName,
                     DisplayName: $"Given {tag}, when {key.Value}, then {status}",
@@ -138,8 +164,9 @@ public static class TestPlanBuilder
                     Category: ContractCategory,
                     Role: CaseRole.Success,
                     NeedsFixture: needsFixture,
-                    QueryParameterNames: QueryParameters(operation),
-                    HasRequestBody: FixtureComposer.HasJsonBodyToCompose(operation))));
+                    QueryParameterNames: queryParameterNames,
+                    HasRequestBody: hasRequestBody,
+                    ClientCallExpression: clientCallExpression)));
 
                 // Declared-error and auth cases only exist below this point — a call-site fact,
                 // not only a comment (Task 10 item 5): both helpers run once the success case
@@ -155,6 +182,24 @@ public static class TestPlanBuilder
                 {
                     draft.Add((tag, authCase));
                 }
+            }
+        }
+
+        // Deliberately unlike fixture drift: FixtureComposer can independently reconstruct ground
+        // truth from the spec and diff a fixture against it, but an override exists *because*
+        // convention already failed — there is no second derivable answer for a stale key to be
+        // compared against. The only check available is "does the key even exist in this document
+        // any more", so a stale entry gets a note (softer than fixture drift's generate-blocking
+        // refusal), not a skip and not an exit-1 gate.
+        if (client is not null)
+        {
+            foreach (var staleKey in client.Overrides.Keys
+                         .Where(k => !allOperationKeys.Contains(k))
+                         .OrderBy(k => k, StringComparer.Ordinal))
+            {
+                notes.Add(new CoverageNote(staleKey,
+                    $"{ClientCallMap.FileName} overrides this operation key, but no operation in " +
+                    "the current spec has it — the entry is stale and covers nothing"));
             }
         }
 
@@ -318,6 +363,36 @@ public static class TestPlanBuilder
         }
 
         return [];
+    }
+
+    /// <summary>
+    /// The Success case's client-invocation verdict — <see cref="ClientCallPlanner.Resolve"/>'s
+    /// result, turned into the pair this call site needs: the expression itself (or
+    /// <see langword="null"/>), with any withheld reason already folded into <paramref name="notes"/>
+    /// as a <see cref="CoverageNote"/> rather than handed back for the caller to decide what to do
+    /// with. <paramref name="client"/> being <see langword="null"/> (no `client` section declared)
+    /// short-circuits before ever touching <see cref="ClientCallPlanner"/> — the common path today,
+    /// and the one every existing golden fixture and test exercises, so it must add zero overhead
+    /// and zero notes.
+    /// </summary>
+    private static string? ResolveClientCall(
+        ClientPlanningConfig? client, string operationKey, string httpMethod, string path,
+        bool hasQueryParameters, bool hasRequestBody, List<CoverageNote> notes)
+    {
+        if (client is null)
+        {
+            return null;
+        }
+
+        var resolution = ClientCallPlanner.Resolve(
+            client.Kind, operationKey, httpMethod, path, hasQueryParameters, hasRequestBody, client.Overrides);
+
+        if (resolution.Expression is null && resolution.UnresolvedReason is not null)
+        {
+            notes.Add(new CoverageNote(operationKey, resolution.UnresolvedReason));
+        }
+
+        return resolution.Expression;
     }
 
     /// <summary>
