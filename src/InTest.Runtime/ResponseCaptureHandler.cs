@@ -1,6 +1,4 @@
-﻿using System.Text;
-
-namespace InTest.Runtime;
+﻿namespace InTest.Runtime;
 
 /// <summary>
 /// [capture-not-deserialize] — this handler is the feature's whole viability. A client-routed
@@ -72,23 +70,45 @@ public sealed class ResponseCaptureHandler(Uri baseUrl) : DelegatingHandler
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Compared via GetLeftPart(UriPartial.Authority), not the bare Authority property, because
+        // Authority is host+port only and cannot see a scheme downgrade: confirmed by direct
+        // experiment, new Uri("https://api.example.com/").Authority and
+        // new Uri("http://api.example.com/").Authority are both "api.example.com" (and stay equal
+        // with explicit :443/:80 appended), while GetLeftPart(UriPartial.Authority) returns
+        // "https://api.example.com" for the first and "http://api.example.com" for the second — the
+        // distinction this check exists to make. Without this, a Kiota client built with
+        // BaseUrl = "http://…" against an Api:BaseUrl of "https://…" would build an absolute URI,
+        // bypass HttpClient.BaseAddress, pass the (bare-Authority) check, and go out in plaintext —
+        // with AuthHandler having already attached the bearer token upstream of this handler, so the
+        // token itself would be what leaked over the downgraded scheme.
         if (request.RequestUri is { IsAbsoluteUri: true } uri &&
-            !string.Equals(uri.Authority, _baseUrl.Authority, StringComparison.OrdinalIgnoreCase))
+            !string.Equals(
+                uri.GetLeftPart(UriPartial.Authority),
+                _baseUrl.GetLeftPart(UriPartial.Authority),
+                StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 "[client-rides-the-api-pipeline]: the outgoing request's authority " +
-                $"'{uri.Authority}' does not match the configured Api:BaseUrl authority " +
-                $"'{_baseUrl.Authority}'. Your typed client was constructed with its own base URL " +
-                "that disagrees with Api:BaseUrl. HttpClient.BaseAddress only governs a *relative* " +
-                "request URI — a typed client (Kiota, NSwag, Refit) that builds absolute request " +
-                "URIs from its own configured base silently bypasses Api:BaseUrl entirely, so the " +
-                "request still went through this pipeline (auth header, run id, capture) but landed " +
-                "on the wrong host. Construct the client over " +
-                "IHttpClientFactory.CreateClient(InTestClients.Api) and point its own base URL at " +
-                "the same address as Api:BaseUrl.");
+                $"'{uri.GetLeftPart(UriPartial.Authority)}' does not match the configured " +
+                $"Api:BaseUrl authority '{_baseUrl.GetLeftPart(UriPartial.Authority)}'. Your typed " +
+                "client was constructed with its own base URL that disagrees with Api:BaseUrl. " +
+                "HttpClient.BaseAddress only governs a *relative* request URI — a typed client " +
+                "(Kiota, NSwag, Refit) that builds absolute request URIs from its own configured " +
+                "base silently bypasses Api:BaseUrl entirely, so the request still went through " +
+                "this pipeline (auth header, run id, capture) but landed on the wrong host or " +
+                "scheme. Construct the client over IHttpClientFactory.CreateClient(InTestClients.Api) " +
+                "and point its own base URL at the same address as Api:BaseUrl.");
         }
 
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        // Captured before this handler does anything else to response.Content. Two things below
+        // both need the *original* HttpContent, not whatever ends up in response.Content by the
+        // time they run: the byte read just below, and the disposal at the very end of this method
+        // (see that Dispose call's own comment for why it must be the original, not the
+        // replacement — HttpResponseMessage.Dispose only disposes whatever Content is current at
+        // dispose time).
+        var originalContent = response.Content;
 
         // Buffered into a byte array rather than left as the network's own StreamContent: a
         // network stream can only be read once, and the whole point of this handler is that a
@@ -97,38 +117,12 @@ public sealed class ResponseCaptureHandler(Uri baseUrl) : DelegatingHandler
         // fact for why a fake client that reads via ReadAsStringAsync would not actually prove
         // re-readability). Reading the bytes here first, then replacing Content with a fresh
         // ByteArrayContent built from them, is what makes both this read and the client's possible.
-        var bytes = response.Content is null
+        var bytes = originalContent is null
             ? []
-            : await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-
-        // Decoded as UTF-8 unconditionally, matching ApiResponseAssertions.ReadBodyAsync's own
-        // ReadAsStringAsync for a raw-HTTP case: neither this handler nor that existing method
-        // consults Content-Encoding to decide whether to decompress first. That is not an oversight
-        // specific to this change — see the Content-Encoding remarks a few lines down for the
-        // confirmed reason it is already the existing behavior this handler simply does not
-        // regress.
-        var body = Encoding.UTF8.GetString(bytes);
-
-        // Mutates the slot's own field rather than reassigning InTestAmbient.LastCapturedResponse
-        // itself — the two are not interchangeable. See InTestAmbient.LastCapturedResponse's own
-        // doc for the direct-experiment evidence: a plain AsyncLocal reassignment made here, this
-        // deep inside an awaited call, would revert the instant control returns to whatever test
-        // method awaited the typed client call that led here, because that is exactly how
-        // ExecutionContext capture/restore behaves across a genuinely-suspending await. Mutating
-        // the CapturedResponseSlot object that ApiTestCore.BeginTest already flowed down into this
-        // handler is ordinary heap mutation, not dependent on that propagation at all, so it is
-        // what actually survives. A null slot means no test's BeginTest is currently active for
-        // this async flow (fixtures or readiness issuing a request during AssemblyInitialize, say)
-        // — nothing to stash into, and not an error, mirroring how AuthHandler already treats a
-        // null Identity override as ordinary rather than exceptional.
-        if (InTestAmbient.LastCapturedResponse.Value is { } slot)
-        {
-            slot.Value = new CapturedResponse(
-                (int)response.StatusCode, body, request.Method.Method, request.RequestUri?.ToString());
-        }
+            : await originalContent.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
 
         var replacement = new ByteArrayContent(bytes);
-        if (response.Content is not null)
+        if (originalContent is not null)
         {
             // Every header from the original Content.Headers is copied onto the replacement,
             // Content-Encoding and Content-Length included — confirmed by direct experiment
@@ -152,13 +146,70 @@ public sealed class ResponseCaptureHandler(Uri baseUrl) : DelegatingHandler
             // not introduce (ApiResponseAssertions.ReadBodyAsync has the identical gap for a raw-HTTP
             // case, for the identical reason — AutomaticDecompression is off), not a new one worth
             // solving here.
-            foreach (var header in response.Content.Headers)
+            //
+            // Headers are copied onto the replacement BEFORE the body is read from it, below —
+            // deliberately, not just incidentally, because the body read needs whatever
+            // Content-Type/charset header the response actually carried, and that header only
+            // exists on replacement once this loop has run.
+            foreach (var header in originalContent.Headers)
             {
                 replacement.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
         }
 
+        // Read via replacement.ReadAsStringAsync(), NOT Encoding.UTF8.GetString(bytes) — those are
+        // not the same operation, and a comment here once claimed they were parity with
+        // ApiResponseAssertions.ReadBodyAsync's own ReadAsStringAsync for a raw-HTTP case. They are
+        // not: confirmed by direct experiment on net10.0, for the bytes EF BB BF (a UTF-8 BOM)
+        // followed by {"state":"ok"}, Encoding.UTF8.GetString produces a string whose first
+        // character is U+FEFF (length 15) — which JsonDocument.Parse then rejects with "'0xEF' is
+        // an invalid start of a value" — while ByteArrayContent.ReadAsStringAsync strips the BOM
+        // and produces a string starting at U+007B '{' (length 14), which parses cleanly.
+        // ReadAsStringAsync also honours a charset parameter on Content-Type when one is present,
+        // which GetString does not consult at all. An API that emits a UTF-8 BOM (common outside
+        // ASP.NET Core, which never emits one) would therefore fail every client-routed case with a
+        // bogus schema-validation error while its raw-HTTP sibling — which genuinely does go
+        // through ReadAsStringAsync, via ApiResponseAssertions.ReadBodyAsync — passed. Reading from
+        // replacement rather than originalContent because replacement is the one whose headers
+        // (charset included) were populated just above; originalContent's headers are also intact
+        // at this point; either would work for the header lookup, but replacement is what
+        // downstream code retains, so reading from the same object keeps this reasoned about in one
+        // place rather than two.
+        var body = await replacement.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        // Mutates the slot's own field rather than reassigning InTestAmbient.LastCapturedResponse
+        // itself — the two are not interchangeable. See InTestAmbient.LastCapturedResponse's own
+        // doc for the direct-experiment evidence: a plain AsyncLocal reassignment made here, this
+        // deep inside an awaited call, would revert the instant control returns to whatever test
+        // method awaited the typed client call that led here, because that is exactly how
+        // ExecutionContext capture/restore behaves across a genuinely-suspending await. Mutating
+        // the CapturedResponseSlot object that ApiTestCore.BeginTest already flowed down into this
+        // handler is ordinary heap mutation, not dependent on that propagation at all, so it is
+        // what actually survives. A null slot means no test's BeginTest is currently active for
+        // this async flow (fixtures or readiness issuing a request during AssemblyInitialize, say)
+        // — nothing to stash into, and not an error, mirroring how AuthHandler already treats a
+        // null Identity override as ordinary rather than exceptional.
+        if (InTestAmbient.LastCapturedResponse.Value is { } slot)
+        {
+            slot.Value = new CapturedResponse(
+                (int)response.StatusCode, body, request.Method.Method, request.RequestUri?.ToString());
+        }
+
         response.Content = replacement;
+
+        // Dispose the ORIGINAL content, not the replacement now sitting in response.Content —
+        // HttpResponseMessage.Dispose() only disposes whatever Content is current at the time it is
+        // called, which by then is the replacement; the original StreamContent this handler already
+        // fully drained above would otherwise never be disposed at all, since nothing else holds a
+        // reference to it once response.Content is overwritten. Benign in the common case —
+        // ReadAsByteArrayAsync above drains the underlying stream to EOF, and a fully-drained
+        // response stream already returns its connection to the pool on its own — but a response
+        // whose read throws mid-stream (a truncated body, a dropped connection) would leave that
+        // undisposed StreamContent holding a connection indefinitely. Disposing explicitly here
+        // costs nothing in the common case and closes that gap in the uncommon one; do not delete
+        // this as pointless just because it rarely does anything observable.
+        originalContent?.Dispose();
+
         return response;
     }
 }

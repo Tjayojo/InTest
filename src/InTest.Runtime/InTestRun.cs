@@ -478,16 +478,36 @@ public static class InTestRun
     /// <see cref="ClientCaptureEnabled"/> for <see cref="RegisterInTestClients"/>'s
     /// <c>captureEnabled</c> parameter ([capture-is-opt-in], new).
     /// <para>
-    /// <see cref="ClientCaptureEnabled"/> defaults to false for every shape other than a literal
-    /// JSON <c>true</c> — absent property, explicit <c>false</c>, or no file at all (every suite
-    /// generated before this task existed, and every suite whose <c>client</c> config resolved no
-    /// case to a client-routed call) — matching this task's brief verbatim ("absent/false → false")
-    /// rather than treating a missing key as an error. A generated project's spec-paths.json is
-    /// rewritten wholesale by every <c>generate</c> run, so there is no drift for this to guard
-    /// against the way fixtures' own drift check exists for; a stale value simply cannot occur.
+    /// <see cref="ClientCaptureEnabled"/> defaults to false when the property is <em>absent</em> —
+    /// every suite generated before this task existed, and every suite whose <c>client</c> config
+    /// resolved no case to a client-routed call — matching this task's brief verbatim
+    /// ("absent → false") rather than treating a missing key as an error. A generated project's
+    /// spec-paths.json is rewritten wholesale by every <c>generate</c> run, so there is no drift for
+    /// an absent-vs-present value to guard against the way fixtures' own drift check exists for; a
+    /// stale absence simply cannot occur.
+    /// </para>
+    /// <para>
+    /// A <em>present but non-boolean</em> <c>clientCaptureEnabled</c> — a string <c>"true"</c>, a
+    /// number, an object — is deliberately not folded into that same "default to false" leniency,
+    /// even though an earlier version of this method did exactly that (read: ValueKind != True,
+    /// therefore false, no distinction from "absent"). <c>spec-paths.json</c> is generator-owned
+    /// (CLAUDE.md's ownership table: <c>Generated/</c> is "written by generate ... never touched by
+    /// humans"), so a present-and-malformed value can only mean the file was hand-edited or
+    /// corrupted — never a legitimate generate output — and reading it as false anyway produces a
+    /// misleading failure downstream: capture silently never attaches, and the eventual error an
+    /// adopter sees is <c>ApiTestCore.LastCapturedResponse</c>'s own [client-rides-the-api-pipeline]
+    /// message telling them to construct their client over
+    /// <c>IHttpClientFactory.CreateClient(InTestClients.Api)</c> — a remedy that does not fix this
+    /// cause, since that registration was already correct, and sends the adopter to re-check
+    /// something that was never wrong. So this shape throws instead, naming the file path, the
+    /// offending value, and the fact that the file is generator-owned and must not be hand-edited —
+    /// consistent with CLAUDE.md's "fail loudly" directive ("Missing fixture data becomes an
+    /// obvious TODO: sentinel and a red test. Never substitute plausible defaults that let a suite
+    /// pass while asserting nothing" — the same shape of mistake this silent-false default would
+    /// otherwise be).
     /// </para>
     /// </summary>
-    private static (string? OperationPathPrefix, bool ClientCaptureEnabled) ReadSpecPaths()
+    internal static (string? OperationPathPrefix, bool ClientCaptureEnabled) ReadSpecPaths()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "spec-paths.json");
         if (!File.Exists(path))
@@ -495,18 +515,45 @@ public static class InTestRun
             return (null, false);
         }
 
-        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        return ParseSpecPaths(path, File.ReadAllText(path));
+    }
+
+    /// <summary>
+    /// The parse itself, split out from <see cref="ReadSpecPaths"/> — the same "internal,
+    /// dependency-free seam" shape <see cref="ResolveAudience"/> and <see cref="RegisterInTestClients"/>
+    /// already use elsewhere in this class — so <c>InTest.Runtime.Tests</c> can exercise every
+    /// <c>clientCaptureEnabled</c> shape (absent, <c>true</c>, <c>false</c>, malformed) against
+    /// literal JSON text directly, rather than needing a real file under
+    /// <see cref="AppContext.BaseDirectory"/> to drive each case. <paramref name="path"/> is passed
+    /// through only for the malformed-value exception message below; it is never read from disk
+    /// here.
+    /// </summary>
+    internal static (string? OperationPathPrefix, bool ClientCaptureEnabled) ParseSpecPaths(string path, string json)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
         var operationPathPrefix = document.RootElement.TryGetProperty("operationPathPrefix", out var prefixValue)
             ? prefixValue.GetString()
             : null;
 
-        // ValueKind == True rather than GetBoolean(), so a malformed value (a string "true", say)
-        // reads as false rather than throwing InvalidOperationException out of AssemblyInitialize —
-        // this flag gates a purely additive opt-in, so the safer failure mode for a shape this
-        // method does not recognize is "capture stays off," not "the whole run refuses to start."
-        var clientCaptureEnabled =
-            document.RootElement.TryGetProperty("clientCaptureEnabled", out var captureValue) &&
-            captureValue.ValueKind == System.Text.Json.JsonValueKind.True;
+        // Absent property -> false (see ReadSpecPaths's own doc, "absent → false"). Present and
+        // JsonValueKind.True/False -> that literal boolean. Present and anything else (string,
+        // number, object, array, null) -> a hard error naming the file, the offending raw value, and
+        // the generator-ownership reason a human should never have been able to produce this shape
+        // in the first place (see ReadSpecPaths's own doc, second paragraph, for why silently
+        // defaulting to false here — as an earlier version of this method did — produces a
+        // misleading downstream failure instead of this one, correct-cause error).
+        var clientCaptureEnabled = document.RootElement.TryGetProperty("clientCaptureEnabled", out var captureValue)
+            ? captureValue.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                _ => throw new InvalidOperationException(
+                    $"InTest: '{path}' has a malformed 'clientCaptureEnabled' value: " +
+                    $"{captureValue.GetRawText()}. Expected a JSON boolean (true or false). " +
+                    "spec-paths.json is written by 'generate' and is generator-owned — it must not " +
+                    "be hand-edited. Re-run 'intest generate' to regenerate it."),
+            }
+            : false;
 
         return (operationPathPrefix, clientCaptureEnabled);
     }

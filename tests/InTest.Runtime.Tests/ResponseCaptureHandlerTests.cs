@@ -240,6 +240,67 @@ public class ResponseCaptureHandlerTests
     }
 
     /// <summary>
+    /// Finding A: <c>Uri.Authority</c> is host+port only, so a scheme downgrade — a typed client
+    /// built with <c>BaseUrl = "http://…"</c> against a configured <c>https://…</c> — is invisible
+    /// to a bare-Authority comparison. Confirmed by direct experiment:
+    /// <c>new Uri("https://h.invalid/").Authority</c> and <c>new Uri("http://h.invalid/").Authority</c>
+    /// are both <c>"h.invalid"</c>. The handler must compare
+    /// <c>GetLeftPart(UriPartial.Authority)</c> instead, which differs between the two schemes, so
+    /// this same-host-different-scheme request must still throw — the whole point being that
+    /// <see cref="AuthHandler"/> has already attached the bearer token upstream of this handler by
+    /// the time a plaintext http request would go out.
+    /// </summary>
+    [TestMethod]
+    public async Task ThrowsWhenAnAbsoluteRequestUriMatchesTheAuthorityButDowngradesTheScheme()
+    {
+        using var invoker = BuildInvoker([], configuredBaseUrl: new Uri("https://h.invalid/api/"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("http://h.invalid/api/orders/7"));
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+        () => invoker.SendAsync(request, CancellationToken.None));
+
+        ex.Message.ShouldContain("[client-rides-the-api-pipeline]");
+        ex.Message.ShouldContain("https://h.invalid");
+        ex.Message.ShouldContain("http://h.invalid");
+    }
+
+    /// <summary>
+    /// Finding B: the captured body must be read the same way
+    /// <c>ApiResponseAssertions.ReadBodyAsync</c> reads a raw-HTTP response —
+    /// <c>ReadAsStringAsync</c>, not <c>Encoding.UTF8.GetString</c> — because those two are not
+    /// equivalent for a body carrying a UTF-8 BOM. Confirmed by direct experiment on net10.0: for
+    /// the bytes <c>EF BB BF</c> + <c>{"state":"ok"}</c>, <c>Encoding.UTF8.GetString</c> leaves a
+    /// leading <c>U+FEFF</c> that makes <c>JsonDocument.Parse</c> throw ("'0xEF' is an invalid start
+    /// of a value"), while <c>ByteArrayContent.ReadAsStringAsync</c> strips the preamble and parses
+    /// cleanly. This test proves the captured <see cref="CapturedResponse.Body"/> is the
+    /// BOM-stripped text and genuinely parses as JSON — not merely that no exception was thrown.
+    /// </summary>
+    [TestMethod]
+    public async Task CapturedBodyStripsAUtf8BomAndParsesAsJson()
+    {
+        byte[] bom = [0xEF, 0xBB, 0xBF];
+        var withBom = bom.Concat(Encoding.UTF8.GetBytes("""{"state":"ok"}""")).ToArray();
+
+        using var invoker = BuildInvoker(withBom, headers: [("Content-Type", "application/json")]);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("https://h.invalid/api/orders/7"));
+        var slot = InTestAmbient.LastCapturedResponse.Value!;
+
+        using var response = await invoker.SendAsync(request, CancellationToken.None);
+
+        var captured = slot.Value;
+        captured.ShouldNotBeNull();
+
+        // A leading BOM (Encoding.UTF8.GetString's old behavior) would leave U+FEFF as the first
+        // character, so Body would not start with '{' and JsonDocument.Parse would throw "'0xEF'
+        // is an invalid start of a value" exactly as measured. Both assertions below fail loudly
+        // under the old Encoding.UTF8.GetString behavior and pass under ReadAsStringAsync.
+        captured!.Value.Body.ShouldBe("""{"state":"ok"}""");
+
+        using var parsed = System.Text.Json.JsonDocument.Parse(captured.Value.Body);
+        parsed.RootElement.GetProperty("state").GetString().ShouldBe("ok");
+    }
+
+    /// <summary>
     /// A relative request URI is unaffected by the authority check — <c>HttpClient.BaseAddress</c>
     /// governs it unconditionally, the same as every raw-HTTP case already relies on, so there is
     /// no second authority for it to disagree with. Sent through a bare <see cref="HttpMessageInvoker"/>
