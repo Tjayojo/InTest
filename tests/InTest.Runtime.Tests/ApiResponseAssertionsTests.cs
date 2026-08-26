@@ -104,4 +104,45 @@ public class ApiResponseAssertionsTests
 
         ex.Message.ShouldContain("#/id");
     }
+
+    /// <summary>
+    /// [stage-3b]: the client-routed counterpart of <see cref="StatusOnly_SkipsSchemaValidation"/> —
+    /// closes the gap <c>ApiResponseAssertions</c>'s own class-level doc (its
+    /// <see cref="ApiResponseAssertions.ShouldMatchCapturedStatusAsync"/> summary) names: a
+    /// client-routed case whose declared response carries no schema (bodiless 204/205/304, or any
+    /// <c>client-map.json</c> override) previously had no captured-response assertion to call at
+    /// all, so <c>TemplateRenderer</c> fell back to raw HTTP rather than route it through the
+    /// client. No body needed here, matching a real bodiless response.
+    /// </summary>
+    [TestMethod]
+    public async Task Captured_StatusOnly_SkipsSchemaValidation()
+    {
+        var captured = new CapturedResponse(204, "", "DELETE", "https://h/api/orders/7");
+
+        await Should.NotThrowAsync(() => ApiResponseAssertions.ShouldMatchCapturedStatusAsync(
+            captured, 204, "run-1-test", TimeSpan.Zero));
+    }
+
+    [TestMethod]
+    public async Task Captured_StatusOnly_Fails_WithMethodUrlExpectedActualElapsedRunIdAndBody_OnStatusMismatch()
+    {
+        var captured = new CapturedResponse(503, """{"error":"upstream timeout"}""", "DELETE", "https://h/api/orders/7");
+
+        var ex = await Should.ThrowAsync<ContractAssertionException>(() =>
+            ApiResponseAssertions.ShouldMatchCapturedStatusAsync(
+                captured, 204, "run-1-test", TimeSpan.FromMilliseconds(1204)));
+
+        ex.Message.ShouldContain("DELETE https://h/api/orders/7");
+        ex.Message.ShouldContain("expected 204, got 503");
+        ex.Message.ShouldContain("1,204ms");
+        ex.Message.ShouldContain("run-1-test");
+        ex.Message.ShouldContain("upstream timeout");
+
+        // Status-only: no schema was ever consulted, so the failure message must carry no
+        // "Schema:" section at all — the same distinction StatusOnly_SkipsSchemaValidation's raw-
+        // HTTP counterpart proves is unnecessary to assert on the passing side, but which matters
+        // here: a "Schema:" line leaking in would mean this accidentally called the *Contract*
+        // overload instead.
+        ex.Message.ShouldNotContain("Schema:");
+    }
 }

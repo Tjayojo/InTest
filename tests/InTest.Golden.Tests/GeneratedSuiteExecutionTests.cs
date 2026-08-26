@@ -359,6 +359,37 @@ public class GeneratedSuiteExecutionTests
                                                           }
                                                           """;
 
+    /// <summary>
+    /// [stage-3b]'s golden proof: a client-routed Success case whose declared response carries no
+    /// schema (bodiless 204 — the same shape <see cref="SpecWithItemsLifecycle"/>'s <c>deleteItem</c>
+    /// uses) must still be routed through the client and assert only status
+    /// (<c>ApiResponseAssertions.ShouldMatchCapturedStatusAsync</c>), never fall back to raw HTTP
+    /// the way it silently did before that method existed (see that class's own doc comment and
+    /// <c>TemplateRenderer.BuildClientCallExpression</c>'s doc for the full account of the gap this
+    /// closes). Deliberately simpler than <see cref="SpecWithItemsLifecycle"/>: no path parameter
+    /// and no request body, so decision 1 composes no fixture at all — this test needs none of that
+    /// spec's seeding-fixture machinery, because the point here is which assertion the template
+    /// emits, not another end-to-end proof that a fixture-backed delete works (already covered by
+    /// <c>TheGeneratedSuitePassesTwiceAgainstTheSameStore</c>).
+    /// </summary>
+    private const string SpecWithBodilessClientRoutedOperation = """
+                                                                  {
+                                                                    "openapi": "3.0.3",
+                                                                    "info": { "title": "Stub", "version": "1.0" },
+                                                                    "paths": {
+                                                                      "/api/ping": {
+                                                                        "get": {
+                                                                          "operationId": "ping",
+                                                                          "tags": ["Status"],
+                                                                          "responses": {
+                                                                            "204": { "description": "No Content" }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                  """;
+
     private string _root = null!;
     private GoldenApiStub _stub = null!;
 
@@ -827,6 +858,128 @@ public class GeneratedSuiteExecutionTests
 
         _stub.ReceivedPaths.ShouldContain("/api/status",
         $"the generated client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
+
+    /// <summary>
+    /// [stage-3b]'s decisive positive proof, against generated code: <c>ping</c>'s only Success
+    /// response is a bodiless 204 (<see cref="SpecWithBodilessClientRoutedOperation"/>), so its
+    /// generated <c>Ping_Contract</c> case has a null <c>SchemaKey</c> — exactly the shape that used
+    /// to fall back to raw HTTP before <c>ApiResponseAssertions.ShouldMatchCapturedStatusAsync</c>
+    /// existed. Asserts on the generated source directly (client call present, status-only
+    /// assertion present, no raw-HTTP shape at all) before ever building, then proves the routed
+    /// call still passes over the wire against a genuine 204 from <see cref="GoldenApiStub"/>.
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedBodilessSuccessCaseAssertsStatusOnlyAndPasses()
+    {
+        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation);
+
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
+        var generatedText = File.ReadAllText(generatedFile);
+
+        generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
+        customMessage: "[stage-3b]: a schema-less client-routed case must still route through the " +
+                       "client, never fall back to raw HTTP");
+        generatedText.ShouldContain("Api.Ping.GetAsync(cancellationToken: TestContext.CancellationToken)");
+        generatedText.ShouldContain("ShouldMatchCapturedStatusAsync(",
+        customMessage: "a bodiless declared response has no schema to validate — the generated case " +
+                       "must call the status-only captured assertion, not ShouldMatchCapturedContractAsync");
+        generatedText.ShouldNotContain("ShouldMatchCapturedContractAsync(");
+        generatedText.ShouldNotContain("new HttpRequestMessage(");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~Ping_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("Ping_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"Ping_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        $"Ping_Contract should pass against a genuine 204 response, routed through the client:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        _stub.ReceivedPaths.ShouldContain("/api/ping",
+        $"the client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
+
+    /// <summary>
+    /// The negative half of [stage-3b]'s live proof, alongside
+    /// <see cref="GeneratedClientRoutedBodilessSuccessCaseAssertsStatusOnlyAndPasses"/>: a
+    /// generated status-only client-routed case must genuinely surface InTest's own status-mismatch
+    /// verdict (<c>ContractAssertionException</c>, expected-vs-actual in the message) when the live
+    /// response disagrees with the declared 204 — not merely compile and pass vacuously.
+    /// <see cref="GoldenApiStub.OverridePingStatus"/> answers 200 instead, which does not throw from
+    /// <see cref="GoldenTypedClientSources.FakeOrdersApiClient"/>'s own success-status check (200 is
+    /// still a 2xx), so any failure here can only come from
+    /// <c>ApiResponseAssertions.ShouldMatchCapturedStatusAsync</c> itself.
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedBodilessSuccessCaseFailsOnAStatusMismatch()
+    {
+        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation);
+
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        _stub.OverridePingStatus(200);
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~Ping_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("Ping_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"Ping_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        $"Ping_Contract should fail against a 200 response when 204 was declared:{Environment.NewLine}{test.Output}");
+
+        var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
+            .Select(e => e.Value).FirstOrDefault() ?? "";
+
+        failureText.ShouldContain("expected 204, got 200",
+        customMessage: $"Ping_Contract did not fail with InTest's own expected-vs-actual status message:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(1, test.Output);
+
+        _stub.ReceivedPaths.ShouldContain("/api/ping",
+        $"the client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
     }
 
     /// <summary>

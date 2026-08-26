@@ -260,6 +260,16 @@ internal static class GoldenTypedClientSources
     /// still compile, silently losing the proof that the by-name call this renderer emits is
     /// actually necessary.
     /// </para>
+    /// <para>
+    /// [stage-3b]: <see cref="FakePingRequestBuilder.GetAsync"/> is this file's second operation,
+    /// added alongside <see cref="FakeStatusRequestBuilder"/> rather than replacing it — every
+    /// existing golden test against <c>Api.Status.GetAsync</c> stays unaffected. It answers
+    /// <c>GET /api/ping</c>, a bodiless-204 operation
+    /// (<c>GeneratedSuiteExecutionTests.SpecWithBodilessClientRoutedOperation</c>), and deliberately
+    /// returns a bare <see cref="Task"/> rather than <c>Task&lt;T&gt;</c>: there is no schema, so
+    /// nothing here has anything to deserialize — mirroring a real Kiota client's own <c>void</c>-
+    /// content-type verb methods, which return <see cref="Task"/> too.
+    /// </para>
     /// </summary>
     public const string FakeOrdersApiClient = """
     using System.Net.Http;
@@ -277,6 +287,31 @@ internal static class GoldenTypedClientSources
     public sealed class FakeApiRequestBuilder(HttpClient httpClient)
     {
         public FakeStatusRequestBuilder Status { get; } = new(httpClient);
+        public FakePingRequestBuilder Ping { get; } = new(httpClient);
+    }
+
+    /// <summary>[stage-3b]: GET /api/ping, a bodiless-204 operation — see FakeOrdersApiClient's own
+    /// doc comment (GoldenTypedClientSources.FakeOrdersApiClient) for why this returns a bare
+    /// Task rather than Task&lt;T&gt;.</summary>
+    public sealed class FakePingRequestBuilder(HttpClient httpClient)
+    {
+        public async Task GetAsync(
+            Action<FakeRequestConfiguration>? requestConfiguration = default, CancellationToken cancellationToken = default)
+        {
+            using var response = await httpClient.GetAsync("/api/ping", cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new FakeApiException((int)response.StatusCode);
+            }
+
+            // No stream to read at all — unlike FakeStatusRequestBuilder.GetAsync, a bodiless
+            // operation has nothing for this fake to deserialize. A genuinely 2xx-but-mismatched
+            // status (204 declared, 200 actually returned) still reaches ApiResponseAssertions.
+            // ShouldMatchCapturedStatusAsync via ResponseCaptureHandler's already-stashed capture —
+            // this method's own IsSuccessStatusCode check has no way to see the mismatch, on
+            // purpose: mirroring a real generated client, which would not either.
+        }
     }
 
     public sealed class FakeStatusRequestBuilder(HttpClient httpClient)

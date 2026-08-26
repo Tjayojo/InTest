@@ -50,9 +50,14 @@ public partial class {{ class_name }} : {{ base_class }}
         catch (Exception) { /* the captured response is the verdict */ }
         stopwatch.Stop();
 
+{{~ if tc.schema_key_literal ~}}
         await ApiResponseAssertions.ShouldMatchCapturedContractAsync(
             LastCapturedResponse, {{ tc.expected_status }}, "{{ tc.schema_key_literal }}", Schemas, TestId, stopwatch.Elapsed,
             TestContext.CancellationToken);
+{{~ else ~}}
+        await ApiResponseAssertions.ShouldMatchCapturedStatusAsync(
+            LastCapturedResponse, {{ tc.expected_status }}, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+{{~ end ~}}
 {{~ else ~}}
         using var request = new HttpRequestMessage(
             HttpMethod.{{ tc.http_method_pascal }},

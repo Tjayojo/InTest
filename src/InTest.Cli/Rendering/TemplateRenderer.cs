@@ -244,46 +244,36 @@ public sealed class TemplateRenderer
     /// <para>
     /// Returns <see langword="null"/> — which turns the template's whole
     /// <c>{{ if tc.client_call_expression }}</c> branch off, falling back to today's raw-HTTP
-    /// shape — for two reasons, neither reachable by construction from <c>TestPlanBuilder</c>
-    /// today but both real enough to guard explicitly rather than assume can't happen:
-    /// </para>
-    /// <list type="bullet">
-    /// <item><paramref name="clientTypeName"/> is null: no <c>client</c> config reached
-    /// <see cref="RenderClass"/> at all. In production <c>TestPlanBuilder</c> only ever sets
-    /// <see cref="TestCasePlan.ClientCallExpression"/> when <c>GenerateCommand</c> supplied a
+    /// shape — only when <paramref name="clientTypeName"/> is null: no <c>client</c> config
+    /// reached <see cref="RenderClass"/> at all. In production <c>TestPlanBuilder</c> only ever
+    /// sets <see cref="TestCasePlan.ClientCallExpression"/> when <c>GenerateCommand</c> supplied a
     /// <c>ClientPlanningConfig</c>, and <c>GenerateCommand</c> only ever does that from the same
     /// <c>LoadedClientConfig</c> that supplies <paramref name="clientTypeName"/> — so the two are
     /// always both-null or both-set together there. This guard is for the shape, not a reachable
     /// production gap: a test that constructs a <see cref="TestCasePlan"/> directly, bypassing
     /// <c>TestPlanBuilder</c>, must not be able to render a bare <c>ApiClient&lt;null&gt;()</c> by
-    /// skipping it.</item>
-    /// <item><see cref="TestCasePlan.SchemaKey"/> is null: a bodiless Success response (204/205/304,
-    /// or any response declaring no schema at all). This one <b>is</b> reachable today —
-    /// <c>samples/Orders.Api</c>'s cancel-order <c>DELETE</c> returns 204 with a path parameter, no
-    /// query parameters and no request body, exactly the shape
-    /// <see cref="Planning.ClientCallPlanner"/>'s Kiota convention resolves — and
-    /// <c>client-map.json</c>'s override path bypasses every one of <c>ClientCallPlanner.Resolve</c>'s
-    /// own gates by design (that method's own doc comment: "no gate below applies to it"), so an
-    /// override can point a bodiless operation at the client too, regardless of convention.
-    /// <c>ApiResponseAssertions.ShouldMatchCapturedContractAsync</c> (<c>src/InTest.Runtime</c>)
-    /// takes a non-blank <c>schemaKey</c> and throws on one that is blank or unregistered
-    /// (<c>ArgumentException</c> / <c>KeyNotFoundException</c>, via <c>SchemaBundle.Validate</c>) —
-    /// there is no captured-response counterpart of <c>ShouldMatchStatusAsync</c> to fall back to
-    /// yet, and adding one is a <c>src/InTest.Runtime</c> change this task's brief explicitly
-    /// scopes out ("if you need it, STOP and report rather than adding it"). Falling back to the
-    /// raw-HTTP branch here is the same fail-safe-default idiom this file's other helpers already
-    /// choose whenever a case's shape was not anticipated (<see cref="PathArguments"/>,
-    /// <see cref="QueryExpression"/> and <c>emits_fixture_lookup</c> in <see cref="RenderClass"/>
-    /// all fail toward "do the safe, already-proven thing" rather than emit code guaranteed to
-    /// throw at run time) — a schema-less client-routed case still gets fully tested, just over
-    /// raw HTTP exactly as it always has been, instead of a generated case that would call
-    /// <c>ShouldMatchCapturedContractAsync</c> and crash on every run regardless of what the API
-    /// answers.</item>
-    /// </list>
+    /// skipping it.
+    /// </para>
+    /// <para>
+    /// [stage-3b]: <see cref="TestCasePlan.SchemaKey"/> being null — a bodiless Success response
+    /// (204/205/304, or any response declaring no schema at all; reachable today via
+    /// <c>samples/Orders.Api</c>'s cancel-order <c>DELETE</c>, and via any <c>client-map.json</c>
+    /// override, which bypasses every one of <c>ClientCallPlanner.Resolve</c>'s own gates by
+    /// design) — used to also fall back to raw HTTP here, because
+    /// <c>ApiResponseAssertions</c> had no captured-response counterpart of
+    /// <c>ShouldMatchStatusAsync</c> to call instead of the schema-validating
+    /// <c>ShouldMatchCapturedContractAsync</c>. That was safe but wrong in intent: an adopter who
+    /// opted a case into client routing got silent raw HTTP instead, with no signal. Now that
+    /// <c>ShouldMatchCapturedStatusAsync</c> exists, a client-routed case is routed through the
+    /// client unconditionally — <see cref="RenderClass"/>'s <c>schema_key_literal</c> is what
+    /// decides, per case, which of the two captured-response assertions the template emits,
+    /// mirroring the raw-HTTP branch's own long-standing choice between
+    /// <c>ShouldMatchContractAsync</c> and <c>ShouldMatchStatusAsync</c>.
+    /// </para>
     /// </summary>
     private static string? BuildClientCallExpression(TestCasePlan plan, string? clientTypeName)
     {
-        if (clientTypeName is null || plan.ClientCallExpression is null || plan.SchemaKey is null)
+        if (clientTypeName is null || plan.ClientCallExpression is null)
         {
             return null;
         }

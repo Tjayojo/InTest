@@ -208,20 +208,22 @@ public class TemplateRendererClientTests
     }
 
     [TestMethod]
-    public void FallsBackToRawHttpWhenTheCaseHasNoSchemaKeyEvenIfAClientCallWasResolved()
+    public void RoutesThroughTheClientAndAssertsStatusOnlyWhenTheCaseHasNoSchemaKey()
     {
-        // TemplateRenderer.BuildClientCallExpression's own doc comment: a bodiless Success
-        // response (204/205/304, or any response declaring no schema) has nothing
-        // ShouldMatchCapturedContractAsync could validate — it takes a non-blank schemaKey and
-        // throws otherwise — and no captured-response counterpart of ShouldMatchStatusAsync exists
-        // in src/InTest.Runtime yet. Falling back to raw HTTP here is deliberate: the case still
-        // renders and still runs, it just does not exercise the typed client.
+        // [stage-3b]: a bodiless Success response (204/205/304, or any response declaring no
+        // schema — reachable via any client-map.json override too) used to fall back to raw HTTP
+        // here, because ApiResponseAssertions had no captured-response counterpart of
+        // ShouldMatchStatusAsync to call instead of the schema-validating
+        // ShouldMatchCapturedContractAsync. Now that ShouldMatchCapturedStatusAsync exists, a
+        // client-routed case is routed through the client unconditionally — this schema-less case
+        // must still call the client and assert only status, never fall back to raw HTTP.
         var rendered = Render(PlanWithClientCall(schemaKey: null));
 
-        rendered.ShouldNotContain("ApiClient<");
-        rendered.ShouldNotContain("LastCapturedResponse");
-        rendered.ShouldContain("new HttpRequestMessage(");
-        rendered.ShouldContain("ShouldMatchStatusAsync(");
+        rendered.ShouldContain($"ApiClient<{ClientTypeName}>()");
+        rendered.ShouldContain("LastCapturedResponse");
+        rendered.ShouldContain("ShouldMatchCapturedStatusAsync(\r\n            LastCapturedResponse, 200, TestId, stopwatch.Elapsed, TestContext.CancellationToken);");
+        rendered.ShouldNotContain("new HttpRequestMessage(");
+        rendered.ShouldNotContain("ShouldMatchCapturedContractAsync(");
     }
 
     [TestMethod]

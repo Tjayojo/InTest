@@ -99,6 +99,40 @@ public static class ApiResponseAssertions
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// The client-routed counterpart of <see cref="ShouldMatchStatusAsync"/>, for the same reason
+    /// <see cref="ShouldMatchCapturedContractAsync"/> exists alongside <see cref="ShouldMatchContractAsync"/>:
+    /// a client-routed case whose declared response carries no schema (a bodiless 204/205/304, or
+    /// any <c>client-map.json</c> override — that override path bypasses every
+    /// client-call-planning gate by design, so it can point a schema-less operation at the client
+    /// too) still needs a captured-response assertion to call, or the template falls back to raw
+    /// HTTP for a case the adopter explicitly opted into routing through the client.
+    /// Status-only, deliberately: there is no schema to validate against when
+    /// <c>TestCasePlan.SchemaKey</c> is null, exactly mirroring why
+    /// <see cref="ShouldMatchStatusAsync"/> itself takes no <c>schemaKey</c> parameter.
+    /// <para>
+    /// Synchronous under the hood for the same reason as <see cref="ShouldMatchCapturedContractAsync"/>:
+    /// <see cref="CapturedResponse.Body"/> is already fully buffered by <see cref="ResponseCaptureHandler"/>,
+    /// so there is no I/O left to await. The <c>Async</c> suffix and <see cref="Task"/> return type
+    /// are kept anyway, matching this class's other methods.
+    /// </para>
+    /// </summary>
+    public static Task ShouldMatchCapturedStatusAsync(
+        CapturedResponse captured, int expectedStatus, string testId, TimeSpan elapsed,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (captured.Status == expectedStatus)
+        {
+            return Task.CompletedTask;
+        }
+
+        throw Failure(
+        captured.Status, captured.RequestMethod, captured.RequestUri,
+        expectedStatus, testId, elapsed, captured.Body, []);
+    }
+
     private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct)
     {
         if (response.Content is null)
