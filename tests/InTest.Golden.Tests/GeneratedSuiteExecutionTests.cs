@@ -770,6 +770,14 @@ public class GeneratedSuiteExecutionTests
     /// result in a local variable to assert on — the pinned template shape has no reason to — so
     /// this test's proof is that the request reached the stub and the case passed, not a second
     /// assertion on a return value nothing generated code retains.
+    /// <para>
+    /// Also the third of <c>[warn-on-swallowed-exception]</c>'s three verification scenarios: a
+    /// clean run — the typed client call throws nothing at all, second catch never entered — must
+    /// warn nothing. <see cref="GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture"/>
+    /// is this test's positive counterpart (a swallowed exception with a capture present warns);
+    /// <see cref="GeneratedClientRoutedCaseStillRethrowsWhenNothingWasCaptured"/> is the third
+    /// (a swallowed exception with no capture still rethrows, unchanged).
+    /// </para>
     /// </summary>
     [TestMethod]
     public async Task GeneratedClientRoutedSuccessCaseReceivesAConformingBody()
@@ -809,6 +817,13 @@ public class GeneratedSuiteExecutionTests
 
         _stub.ReceivedPaths.ShouldContain("/api/status",
         $"the generated client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+
+        // [warn-on-swallowed-exception], third verification scenario: a clean run — the typed
+        // client call throws nothing, so the second catch is never entered at all — must warn
+        // nothing. Nothing about WarnSwallowedClientException's own message text can appear here
+        // by construction if it was never called.
+        test.Output.ShouldNotContain("captured response is being used as the test's verdict",
+        customMessage: $"a clean run warned about a swallowed exception that never happened:{Environment.NewLine}{test.Output}");
     }
 
     /// <summary>
@@ -868,6 +883,153 @@ public class GeneratedSuiteExecutionTests
 
         _stub.ReceivedPaths.ShouldContain("/api/status",
         $"the generated client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
+
+    /// <summary>
+    /// <c>[warn-on-swallowed-exception]</c>'s decisive positive proof
+    /// (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md): the reviewer's exact
+    /// failure mode, live — a <c>client-map.json</c> override routing <c>getStatus</c> through
+    /// <see cref="GoldenTypedClientSources.FakeOrdersApiClient.GetStatusThenThrowAsync"/> instead of
+    /// the plain convention-derived call, which makes one real request (captured normally by
+    /// <c>ResponseCaptureHandler</c>) and then throws a synthetic <see cref="InvalidOperationException"/>
+    /// that never reaches the wire at all. Before <c>[warn-on-swallowed-exception]</c>, the second
+    /// catch's empty body discarded that exception outright — this test's negative half
+    /// (nothing in the trx failure text, because the case still passes) is exactly what made that
+    /// silent before. Its positive half is the actual proof: the exception's own type and message
+    /// must still reach an operator, through <c>TestContext.DisplayMessage</c> at
+    /// <see cref="MessageLevel.Warning"/>, on real process stdout — the same channel
+    /// <see cref="SkippedFixtureIsNotRunByALiveGeneratedSuite"/> already confirms survives a
+    /// <em>passing</em> run for the assembly-scoped diagnostics sink, now confirmed for the
+    /// per-test one <c>ApiTestBase.ApiTestInitialize</c> builds.
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture()
+    {
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+
+        // getStatus would otherwise qualify for the plain Kiota convention (Api.Status.GetAsync)
+        // the way every other test in this file relies on — this override exists purely to route
+        // it through GetStatusThenThrowAsync instead, the one call shape this test needs.
+        File.WriteAllText(Path.Combine(_root, "client-map.json"), """
+                                                                   { "overrides": {
+                                                                       "getStatus": "GetStatusThenThrowAsync(cancellationToken: TestContext.CancellationToken)"
+                                                                   } }
+                                                                   """);
+
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        // Pins the premise before anything downstream is allowed to mean something: the override
+        // must have actually reached the renderer, not merely "the project happened to build".
+        var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
+        File.ReadAllText(generatedFile).ShouldContain(
+        "await ApiClient<Stub.ApiTests.FakeOrdersApiClient>().GetStatusThenThrowAsync(cancellationToken: TestContext.CancellationToken);",
+        customMessage: "the client-map.json override for getStatus did not reach the renderer");
+
+        // A conforming body: the first, capturing call must succeed cleanly, so the only way this
+        // case can fail is the synthetic exception GetStatusThenThrowAsync throws afterward — the
+        // exact thing WarnSwallowedClientException must report without failing the test over it.
+        _stub.OverrideStatusResponse(200, """{"state":"ok"}""");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        $"GetStatus_Contract should still pass — the swallowed exception must be reported, not " +
+        $"fail the test:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        // The decisive proof: the swallowed exception's own type and message must reach real
+        // process output, rather than vanishing the way [warn-on-swallowed-exception] exists to
+        // prevent.
+        test.Output.ShouldContain(nameof(InvalidOperationException),
+        customMessage: $"the swallowed exception's type never reached process output:{Environment.NewLine}{test.Output}");
+        test.Output.ShouldContain("simulated failure after the first call already captured a response",
+        customMessage: $"the swallowed exception's message never reached process output:{Environment.NewLine}{test.Output}");
+
+        _stub.ReceivedPaths.ShouldContain("/api/status",
+        $"the first, capturing call never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
+
+    /// <summary>
+    /// The negative half of <c>[warn-on-swallowed-exception]</c>'s live proof: when nothing was
+    /// ever captured, the pinned shape's <em>first</em> catch — untouched by this task — must still
+    /// rethrow exactly as it always has, rather than <see cref="ApiTestCore.WarnSwallowedClientException"/>
+    /// ever being reached for it. Reuses <see cref="AttachThrowingHandlerToApiClient"/>, the same F10
+    /// regression guard <see cref="ReadinessProbeSurvivesAThrowingApiHandler"/> already uses for the
+    /// raw-HTTP path: <see cref="GoldenAuthHandlerSources.AlwaysThrowsHandler"/> throws on every
+    /// request before it ever reaches the wire, so <c>ResponseCaptureHandler</c> never runs and
+    /// <c>InTestAmbient.LastCapturedResponse.Value?.Value</c> stays null for the whole test — the
+    /// exact condition the first catch's filter exists to detect.
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedCaseStillRethrowsWhenNothingWasCaptured()
+    {
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        AttachThrowingHandlerToApiClient();
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
+        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        $"GetStatus_Contract should fail on the throwing handler's own exception, propagated " +
+        $"unchanged, not pass or report a mere warning:{Environment.NewLine}{test.Output}");
+
+        var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
+            .Select(e => e.Value).FirstOrDefault() ?? "";
+        failureText.ShouldContain("identity provider unreachable",
+        customMessage: $"GetStatus_Contract failed for an unexpected reason:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(1, test.Output);
+
+        // The negative half: nothing was captured, so WarnSwallowedClientException must never run
+        // for this case — the rethrown exception is the only thing that should reach the trx or
+        // process output, not a warning about a discarded one.
+        test.Output.ShouldNotContain("captured response is being used as the test's verdict",
+        customMessage: $"WarnSwallowedClientException ran even though nothing was ever captured:{Environment.NewLine}{test.Output}");
     }
 
     /// <summary>

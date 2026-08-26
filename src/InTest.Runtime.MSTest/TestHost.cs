@@ -139,6 +139,19 @@ public static class TestHost
     /// removes that trap entirely: there is no member left to silently no-op, because the
     /// interface only ever had the two methods this class actually implements.
     /// </para>
+    /// <para>
+    /// <c>[warn-on-swallowed-exception]</c>: a second call site now constructs this class —
+    /// <see cref="ApiTestBase.ApiTestInitialize"/>, wrapping that specific test's own per-test
+    /// <see cref="TestContext"/> rather than the assembly's, so <see cref="ApiTestCore.WarnSwallowedClientException"/>
+    /// can reach it. This class itself needed no change to support that: it already forwards
+    /// whichever <see cref="TestContext"/> it is constructed around, and nothing about its mapping
+    /// is specific to the assembly-scoped instance <see cref="InitializeAsync"/> happens to use.
+    /// The buffering behaviour described above is specific to <c>[AssemblyInitialize]</c>, though —
+    /// a per-test <see cref="TestContext.DisplayMessage"/> call is not read through that same
+    /// buffer-and-discard path, since VSTest always synthesises a result for the test that called
+    /// it, pass or fail, so a per-test <see cref="Warn"/> reaching the operator does not depend on
+    /// the specific VSTest quirk this class's own assembly-scoped use was written to route around.
+    /// </para>
     /// </summary>
     internal sealed class TestContextDiagnostics(TestContext context) : IRunDiagnostics
     {

@@ -1,8 +1,9 @@
 # Opt-in invocation through a team's pre-generated API client
 
 **Status: complete, 2026-08-26.** Five commits, in order, for the original stages below, plus
-Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`) and Task 7
-(`[nswag-needs-operationid]`) — seven commits total:
+Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`), Task 7
+(`[nswag-needs-operationid]`), Task 8 (`[nswag-compile-verification]`) and Task 9
+(`[warn-on-swallowed-exception]`) — nine commits total:
 
 | Stage | Commit | What it landed |
 |---|---|---|
@@ -13,7 +14,9 @@ Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`) and Task 7
 | fix — the schema-less gap | `19ab080` | A client-routed case with no response schema (a 204, or any `client-map.json` override) now still routes through the client instead of silently falling back to raw HTTP |
 | 5 — `[lockfile-recovery]` | `02af19d` | `intest init --client-lockfile <path>`: recovers `spec.source` — and, where the lockfile names one, a `client` section — from a client generator's own lockfile, for a team that owns a generated client but not the OpenAPI document it came from. Kiota only; NSwag was measured and scoped out. See `[lockfile-recovery]` below, which supersedes `[lockfile-configures]`'s "nothing reads them yet" |
 | 6 — `[typed-path-parameters]` | `1e15fd4` | A path parameter's fixture value is now converted to the type Kiota's per-parameter item-builder indexer actually declares (`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)`) before being spliced into a client-routed call, so the generated call binds the typed, non-obsolete indexer overload instead of the deprecated `this[string]` one. **Retires** the "Generator-version fragility" risk's dated finding below — see that risk entry, kept rather than deleted, for the closure note |
-| 7 — `[nswag-needs-operationid]` | *(this change, uncommitted)* | NSwag now gets a convention guess too, gated on the spec declaring an `operationId` with no `_` in it — measured directly against a real nswag 14.7.1 client, both for the happy path (`{PascalCase(operationId)}Async`) and for the underscore hazard (NSwag's default `operationGenerationMode` splits onto a different client class). **Partially reopens** the "NSwag convention derivation does not work" finding below — see that finding's own correction note, and `ClientCallPlanner`'s doc comment, for the full measured evidence. Refit gets no convention still, but its own reasoning is now recorded as a *permanent* limitation, distinct from NSwag's gated one, not lumped in with it |
+| 7 — `[nswag-needs-operationid]` | `2dedf4b` | NSwag now gets a convention guess too, gated on the spec declaring an `operationId` with no `_` in it — measured directly against a real nswag 14.7.1 client, both for the happy path (`{PascalCase(operationId)}Async`) and for the underscore hazard (NSwag's default `operationGenerationMode` splits onto a different client class). **Partially reopens** the "NSwag convention derivation does not work" finding below — see that finding's own correction note, and `ClientCallPlanner`'s doc comment, for the full measured evidence. Refit gets no convention still, but its own reasoning is now recorded as a *permanent* limitation, distinct from NSwag's gated one, not lumped in with it |
+| 8 — `[nswag-compile-verification]` | *(this change, uncommitted)* | The third instance of one recurring PR defect closed properly: NSwag's convention-derived call — materially different in shape from Kiota's (a flat `{Method}(args)` on the client type itself, not a builder-chain indexer) — was asserted only as a string in `ClientCallPlannerTests`, with nothing compiling it. A new `CompileVerificationTests` case builds a real project with an NSwag-derived call over a `format: uuid` path parameter, proving the `Guid.Parse(...)` conversion compiles against a strongly-typed parameter and that the token-carrying overload is selected by name. The audit this task's own review asked for also found a second, still-open gap: `int.Parse(...)`/`long.Parse(...)` path-parameter conversions are asserted only as text in `TemplateRendererClientTests`, never compiled anywhere — recorded below, not fixed here |
+| 9 — `[warn-on-swallowed-exception]` | *(this change, uncommitted)* | The pinned client-routed catch's second clause used to discard the client's own exception outright once a response was already captured — silent on the specific failure mode a reviewer raised: a `client-map.json` override issuing more than one call, where an earlier one captures and a later one fails before reaching the wire. A per-test `IRunDiagnostics` sink now flows through `ApiTestCore.BeginTest`/`ApiTestBase.ApiTestInitialize` (the same seam `testDisplayName` already uses), and the second catch calls the new `ApiTestCore.WarnSwallowedClientException(ex)`, which reports the exception's type and message at `Warn` — reaching the operator even on a run that otherwise passes |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
 tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
@@ -444,6 +447,138 @@ build-clean-under-that-flag result depended on the pragma; now it depends on not
 generated call binding the right overload, which is the actual claim this plan's risk section
 needed proven, not merely asserted.
 
+### `[nswag-compile-verification]` — Task 8: compile-verify the NSwag convention, and audit for the next instance of the same defect
+
+**What was built.** This is the third instance of one recurring defect on this PR: a generated
+shape asserted only as text, with nothing compiling it. Twice already the pattern produced a real
+bug that a string-rendering test could not catch — CS0149 (a self-closing override getting a
+second argument list appended) and CS0618-with-no-pragma (a bare `string` splice binding Kiota's
+deprecated indexer) — and both were closed the same way, by adding a real `dotnet build` over the
+generated shape rather than trusting the string assertion alone. `ClientCallPlannerTests`'
+`DerivesTheExpressionForGetOrderByIdWithNSwag` and
+`ResolveAppliesTheNSwagConventionWhenAnOperationIdWithNoUnderscoreIsPresent` pin
+`ClientCallPlanner.BuildNSwagConvention`'s output as a string; nothing before this task ever built
+it. Its shape is materially different from Kiota's — a flat `{Method}(args)` directly on the
+configured client type, not a `.Api.Segment[idx].VerbAsync()` builder chain — so
+`CompileVerificationTests.GeneratedProjectCompiles` and every Kiota-shaped fake client in
+`GeneratedSuiteExecutionTests` gave it no coverage at all.
+
+`CompileVerificationTests.GeneratedProjectWithAnNSwagConventionCallCompiles`
+(`tests/InTest.Golden.Tests/CompileVerificationTests.cs`) closes it, following the same "prefer
+the lighter harness that genuinely proves compilation" instruction this task was given: it rewrites
+`orders.json`'s `id` path parameter to `format: uuid` (so the call resolves to
+`PathParameterKind.Guid`, exercising `Guid.Parse(...)` against a real `System.Guid` parameter —
+mirroring measured nswag 14.7.1 output, `GetOrderByIdAsync(System.Guid id, ...)`), configures
+`client.kind: "nswag"` with no `client-map.json` override (so `ClientCallPlanner.Resolve` actually
+*derives* both operations' calls, rather than proving an override compiles the way
+`GeneratedProjectWithASelfClosingClientMapOverrideCompiles` already does), and writes a fake
+`OrdersClient` carrying both the token-carrying overload and a sibling overload omitting it —
+proving `cancellationToken:`-by-name selects the right one, the exact targeting
+`BuildNSwagConvention`'s own doc comment claims but that no compiled test had checked before this.
+`dotnet build` on the resulting project is the oracle.
+
+**The audit this task's own review asked for: check whether any other generated shape is still
+asserted only as text.** One was found, not fixed here — flagged rather than silently left, per
+the reviewer's explicit instruction to report rather than discover it in review a fourth time.
+`TemplateRendererClientTests.SplicesAnIntegerPathParameterThroughIntParse` and
+`SplicesALongPathParameterThroughLongParse` pin `int.Parse(FixtureParameter(...))` and
+`long.Parse(FixtureParameter(...))` as rendered strings; neither is a `[Guid]`-only concern the way
+`[typed-path-parameters]`'s own golden proof already covers (`PathParameterKind.Guid` splicing
+into a real `this[Guid]` Kiota indexer). No golden or compile-verification test anywhere builds a
+project with an `Integer`- or `Long`-kind client-routed path parameter, so whether
+`int.Parse(...)`/`long.Parse(...)` actually compiles against a real generator's typed indexer or
+method parameter — as opposed to merely rendering the expected substring — is unverified. This is
+lower-risk than the two closed defects (`int`/`long` conversions are simple, well-understood
+casts, not a receiver-shape mismatch like CS0149 or an overload-binding change like CS0618), but it
+is the same category of gap and is recorded here rather than assumed safe.
+
+**Verification.** `CompileVerificationTests.GeneratedProjectWithAnNSwagConventionCallCompiles`
+pins the generated line
+(`await ApiClient<Orders.NSwagClient.OrdersClient>().GetOrderByIdAsync(Guid.Parse(FixtureParameter("getOrderById", "id")), cancellationToken: TestContext.CancellationToken);`)
+before asserting `dotnet build` succeeds — the same "assert the premise before the compile
+assertion is allowed to mean anything" discipline every other test in that file already follows.
+
+### `[warn-on-swallowed-exception]` — Task 9: surface a swallowed post-capture exception through `IRunDiagnostics`
+
+**What was built.** `[captured-response-is-the-verdict]`'s pinned second catch used to discard the
+client's own exception outright once a response was already captured — correct that the captured
+response, not the client's exception, is the verdict, but silent on a real failure mode a reviewer
+raised: a `client-map.json` override that issues more than one call, where an earlier call reaches
+the wire and is captured and a later one fails before reaching it at all (a serialization error, a
+null argument, an adapter misconfiguration). Before this task, that second failure left no trace
+anywhere — the case reported whatever the first call's captured response was, with no way for an
+operator to learn a second call ever ran, let alone that it threw.
+
+`IRunDiagnostics` (`Note`/`Warn`) was previously wired only assembly-scoped, inside
+`TestHost.InitializeAsync`/`CleanupAsync` — nothing on `ApiTestCore` or `ApiTestBase` exposed a
+per-test diagnostics member, so a generated test body had no reachable sink to report into. The fix
+extends the same seam `testDisplayName` already uses: `ApiTestCore.BeginTest` gained a second
+required parameter, `IRunDiagnostics diagnostics`, stored in a new per-test field (`_diagnostics`,
+cleared by `EndTest` the same way `_testId` is) — the neutral layer still names nothing MSTest-
+specific. `ApiTestBase.ApiTestInitialize` supplies it by constructing a second
+`TestHost.TestContextDiagnostics` (the adapter class that already existed to forward
+`IRunDiagnostics` to a `TestContext`) around *this test's own* per-test `TestContext`, distinct
+from the assembly-scoped instance `TestHost.InitializeAsync` builds — the same adapter class,
+reused rather than duplicated, wrapping a different `TestContext` instance.
+
+`ApiTestCore.WarnSwallowedClientException(Exception exception)` is the new protected member a
+generated case's second catch calls instead of doing nothing: it reads `_diagnostics?.Warn(...)`
+with a message naming the exception's runtime type and its `Message`, and stating plainly that it
+was discarded because a captured response already stood as the verdict. `Warn`, not `Note` —
+`IRunDiagnostics.Warn`'s own doc is the exact contract this needs: it must reach the operator even
+on a run that otherwise passes and exits 0, which is precisely the shape of this defect (the
+captured response can easily still satisfy the test's own assertion). `mstest-class.scriban`'s
+second catch changed from an empty body (`{ /* the captured response is the verdict */ }`) to
+`{ WarnSwallowedClientException(ex); }` — the catch's own filter (`ex is not
+OperationCanceledException`) and the first catch's two-`?.`-guarded filter are both untouched;
+only what the second catch's body *does* with an exception it was always going to swallow changed.
+
+`_diagnostics` is read with `?.`, not the throwing pattern `TestId`/`LastCapturedResponse` both
+use: a missing sink here would only ever mean `BeginTest` was never called with one — unreachable
+through the shipped `ApiTestBase.ApiTestInitialize` — and this method already runs from inside a
+`catch` already handling one exception, so turning a missing diagnostics sink into a second,
+unrelated throw from there would replace the original exception's own message with a less useful
+one about plumbing this class already guarantees in every real path.
+
+**Measured, not assumed: a per-test `TestContext.DisplayMessage(Warning, ...)` call does reach
+real process stdout on a passing run**, the same way `TestHost.TestContextDiagnostics`'s doc
+already confirms for the assembly-scoped case — but through a different mechanism.
+`TestHost.TestContextDiagnostics`'s own doc explains that VSTest buffers an `[AssemblyInitialize]`'s
+`TestContext.WriteLine`/`Console.Out`/`Console.Error` into the `UnitTestResult` it would attach
+them to, flushing only on failure, and that `MessageLevel.Warning` alone escapes that buffer. A
+per-test `DisplayMessage` call is not subject to that same buffer-and-discard path at all — VSTest
+always synthesises a result for the test that called it, pass or fail — so this task's own golden
+proof (`GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture`, below) is what
+confirms the per-test call reaches stdout, rather than assuming the assembly-scoped finding
+transfers unchanged.
+
+**Verification.** Three layers, matching the three scenarios this task's own instructions named:
+- **Unit (`tests/InTest.Runtime.Tests/ApiTestCoreCaptureTests.cs`).**
+  `WarnSwallowedClientExceptionForwardsTheExceptionTypeAndMessageToWarn` (a fake
+  `IRunDiagnostics` records the exception's type name and message in the single `Warn` call),
+  `WarnSwallowedClientExceptionNeverCallsNote` (the message must survive a passing run, so it
+  cannot go through the level a runner is permitted to discard), `WarnSwallowedClientExceptionExplainsWhyTheExceptionWasDiscarded`
+  (the message states the captured response was already the verdict), and
+  `ADiagnosticsSinkThatIsNeverToldToWarnStaysEmpty` (the trivial but explicitly-requested "clean
+  run" baseline).
+- **Template rendering (`tests/InTest.Cli.Tests/TemplateRendererClientTests.cs`).**
+  `WrapsTheClientCallInThePinnedTryExceptionFilterCatchShape` now pins the second catch's new body
+  (`{ WarnSwallowedClientException(ex); }`) verbatim, alongside the unchanged first-catch filter.
+- **Golden, live (`tests/InTest.Golden.Tests/GeneratedSuiteExecutionTests.cs`).**
+  `GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture` — a `client-map.json`
+  override routes `getStatus` through a new `GoldenTypedClientSources.FakeOrdersApiClient.GetStatusThenThrowAsync`,
+  which makes one real, captured request and then throws a synthetic `InvalidOperationException`;
+  the generated case must still **pass** (the captured response is the verdict) while the
+  exception's type and message reach real process stdout.
+  `GeneratedClientRoutedCaseStillRethrowsWhenNothingWasCaptured` — reusing
+  `AttachThrowingHandlerToApiClient` (the same F10 regression guard
+  `ReadinessProbeSurvivesAThrowingApiHandler` already uses), the throwing handler prevents anything
+  from ever being captured, so the case must **fail** on the handler's own exception, propagated
+  unchanged, with no warning text anywhere in output — proving the untouched first catch still
+  rethrows exactly as before. `GeneratedClientRoutedSuccessCaseReceivesAConformingBody` gained one
+  extra assertion — a clean run's output must not contain the warning text at all — covering the
+  third scenario without a wholly separate golden test for a negative check.
+
 ---
 
 ## Two findings settled by direct experiment, not reasoning — and where the plan document was wrong
@@ -640,7 +775,7 @@ HTTP.
 | `src/InTest.Runtime/CapturedResponse.cs` | `readonly record struct` — status, body, method, URI |
 | `src/InTest.Runtime/InTestAmbient.cs` | `LastCapturedResponse` (`AsyncLocal<CapturedResponseSlot?>`) and `CapturedResponseSlot` — the mutable-cell fix from finding 1 |
 | `src/InTest.Runtime/ResponseCaptureHandler.cs` | `[capture-not-deserialize]` + `[client-rides-the-api-pipeline]`'s authority check |
-| `src/InTest.Runtime/ApiTestCore.cs` | `ApiClient<T>()`, `LastCapturedResponse` accessor — `[neutral-helper]` |
+| `src/InTest.Runtime/ApiTestCore.cs` | `ApiClient<T>()`, `LastCapturedResponse` accessor — `[neutral-helper]`; `WarnSwallowedClientException` and `BeginTest`'s `IRunDiagnostics diagnostics` parameter — `[warn-on-swallowed-exception]`, Task 9 |
 | `src/InTest.Runtime/ApiResponseAssertions.cs` | `ShouldMatchCapturedContractAsync`, `ShouldMatchCapturedStatusAsync` — captured-response counterparts of the existing raw-HTTP assertions, sharing one `Failure(...)` message formatter |
 | `src/InTest.Runtime/InTestRun.cs` | Registers `ResponseCaptureHandler`; reads `clientCaptureEnabled` from `spec-paths.json`; attaches the handler to `InTestClients.Api` only when true |
 | `src/InTest.Cli/Configuration/LoadedClientConfig.cs`, `ConfigLoader.cs` | The `client` section — `kind` + `typeName`, both required together |
@@ -650,9 +785,14 @@ HTTP.
 | `src/InTest.Cli/Planning/TestCasePlan.cs` | `ClientCallExpression` — the carried verdict |
 | `src/InTest.Cli/Rendering/TemplateRenderer.cs`, `Templates/mstest-class.scriban` | `BuildClientCallExpression`; the pinned `try`/filter/`catch` branch; `client_type_name`/`client_call_expression` as bare (unescaped) template fields |
 | `src/InTest.Cli/Commands/GenerateCommand.cs` | Assembles `ClientPlanningConfig` from `LoadedConfig.Client` + `ClientCallMap.Load`; writes `clientCaptureEnabled` |
+| `src/InTest.Runtime.MSTest/ApiTestBase.cs` | `ApiTestInitialize` now supplies a second `TestHost.TestContextDiagnostics`, wrapping this test's own per-test `TestContext`, as `BeginTest`'s new `diagnostics` argument — `[warn-on-swallowed-exception]`, Task 9 |
+| `src/InTest.Runtime.MSTest/TestHost.cs` | `TestContextDiagnostics` unchanged in code — its doc comment now records the second, per-test construction site alongside the original assembly-scoped one |
 
-`src/InTest.Runtime.MSTest/` needs no change — `ApiTestBase` inherits `ApiTestCore`'s new members
-for free.
+Task 9 (`[warn-on-swallowed-exception]`) is the one change in this feature's lifetime that does
+touch `src/InTest.Runtime.MSTest/` — every earlier task's "no change" here held only up to that
+point; `ApiTestCore`'s new `WarnSwallowedClientException` needed a per-test `IRunDiagnostics` to
+reach it with, and only the MSTest adapter can construct one (it is the only layer allowed to name
+`TestContext`).
 
 ---
 
@@ -713,6 +853,22 @@ its numbers were measured against; re-measure before trusting any of them past t
   item 3(b) below — the fix already in place, this pins it). `InTest.Golden.Tests` **45** passing
   (3m20s; +1: `CompileVerificationTests.GeneratedProjectWithASelfClosingClientMapOverrideCompiles`,
   item 3(a) below). All four counts increased or held; none decreased.
+- **Re-measured on top of commit `2dedf4b` (Task 8 `[nswag-compile-verification]` + Task 9
+  `[warn-on-swallowed-exception]`, both uncommitted, 2026-08-26)** (`dotnet build InTest.sln`, then
+  each suite `--no-build`): build clean, 0 warnings, `samples/*.json` unaffected by this task's own
+  `dotnet build` runs (checked directly with `git status --short -- samples/`; nothing to restore).
+  `InTest.Architecture.Tests` **12** passing (unchanged — neither task touched that project).
+  `InTest.Cli.Tests` **604** passing (unchanged — `TemplateRendererClientTests.WrapsTheClientCallInThePinnedTryExceptionFilterCatchShape`
+  was updated in place for the new second-catch body, not duplicated; no new Cli test was added).
+  `InTest.Runtime.Tests` **250** passing (+4, all Task 9: `ApiTestCoreCaptureTests` gained
+  `WarnSwallowedClientExceptionForwardsTheExceptionTypeAndMessageToWarn`,
+  `WarnSwallowedClientExceptionNeverCallsNote`, `WarnSwallowedClientExceptionExplainsWhyTheExceptionWasDiscarded`
+  and `ADiagnosticsSinkThatIsNeverToldToWarnStaysEmpty`). `InTest.Golden.Tests` **48** passing
+  (3m47s; +3: Task 8's `CompileVerificationTests.GeneratedProjectWithAnNSwagConventionCallCompiles`,
+  and Task 9's `GeneratedSuiteExecutionTests.GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture`
+  and `GeneratedClientRoutedCaseStillRethrowsWhenNothingWasCaptured` —
+  `GeneratedClientRoutedSuccessCaseReceivesAConformingBody` gained one extra assertion in place
+  rather than a fourth new test method). All four counts increased or held; none decreased.
 
 ---
 

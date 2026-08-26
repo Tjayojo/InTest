@@ -264,12 +264,13 @@ public class TemplateRendererClientTests
         // single '?.' cannot work), and a second catch — filtered to exclude
         // OperationCanceledException (a review finding: a bare `catch (Exception)` here would
         // swallow a cancellation and report the captured response as the verdict instead of
-        // letting it propagate) — that otherwise does nothing but let the captured-response
-        // assertion below run instead.
+        // letting it propagate) — whose body reports the discarded exception via
+        // WarnSwallowedClientException ([warn-on-swallowed-exception]) rather than doing nothing,
+        // but still lets the captured-response assertion below run instead of failing on `ex`.
         var rendered = Render(PlanWithClientCall());
 
         rendered.ShouldContain("catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }");
-        rendered.ShouldContain("catch (Exception ex) when (ex is not OperationCanceledException) { /* the captured response is the verdict */ }");
+        rendered.ShouldContain("catch (Exception ex) when (ex is not OperationCanceledException) { WarnSwallowedClientException(ex); }");
     }
 
     [TestMethod]

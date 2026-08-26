@@ -27,11 +27,37 @@ public class ApiTestCoreCaptureTests
             typeof(ApiTestCore).GetField("_scope", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .SetValue(this, scope);
 
+        /// <summary>
+        /// [warn-on-swallowed-exception]: <c>_diagnostics</c> is otherwise only ever set by
+        /// <c>BeginTest</c>, which needs a live <c>InTestRun.Root</c> scope to construct
+        /// <see cref="HttpClient"/> from — the same reason <see cref="SetScope"/> exists as a
+        /// reflection escape hatch rather than a real <c>BeginTest</c> call.
+        /// </summary>
+        public void SetDiagnostics(IRunDiagnostics? diagnostics) =>
+            typeof(ApiTestCore).GetField("_diagnostics", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(this, diagnostics);
+
         public TClient ExposedApiClient<TClient>() where TClient : class => ApiClient<TClient>();
 
         public static CapturedResponse ExposedLastCapturedResponse => LastCapturedResponse;
 
+        public void ExposedWarnSwallowedClientException(Exception exception) => WarnSwallowedClientException(exception);
+
         public void ExposedEndTest() => EndTest();
+    }
+
+    /// <summary>Records every <see cref="Warn"/>/<see cref="Note"/> call verbatim, in order —
+    /// the same shape <c>TestHostTests.FakeTestContext</c> uses for
+    /// <c>TestContext.DisplayMessage</c>, adapted to <see cref="IRunDiagnostics"/> directly since
+    /// <see cref="ApiTestCore.WarnSwallowedClientException"/> talks to that interface, never
+    /// <see cref="TestContext"/> itself.</summary>
+    private sealed class FakeRunDiagnostics : IRunDiagnostics
+    {
+        public List<string> Notes { get; } = [];
+        public List<string> Warnings { get; } = [];
+
+        public void Note(string message) => Notes.Add(message);
+        public void Warn(string message) => Warnings.Add(message);
     }
 
     [TestInitialize]
@@ -133,5 +159,83 @@ public class ApiTestCoreCaptureTests
         subject.ExposedEndTest();
 
         InTestAmbient.LastCapturedResponse.Value.ShouldBeNull();
+    }
+
+    // ---- WarnSwallowedClientException ([warn-on-swallowed-exception]) -----------------------
+
+    /// <summary>
+    /// The one scenario this method exists for: a client-map.json override that issues more than
+    /// one call, where an earlier call already captured a response and a later one throws. Both
+    /// the exception's runtime type and its message must be readable from the single string this
+    /// forwards to <see cref="IRunDiagnostics.Warn"/> — an operator reading only that line, with no
+    /// other context, must be able to tell what was thrown and why it did not fail the test.
+    /// </summary>
+    [TestMethod]
+    public void WarnSwallowedClientExceptionForwardsTheExceptionTypeAndMessageToWarn()
+    {
+        var diagnostics = new FakeRunDiagnostics();
+        var subject = new TestableApiTestCore();
+        subject.SetDiagnostics(diagnostics);
+
+        subject.ExposedWarnSwallowedClientException(new InvalidOperationException("second call failed"));
+
+        var warning = diagnostics.Warnings.ShouldHaveSingleItem();
+        warning.ShouldContain(nameof(InvalidOperationException));
+        warning.ShouldContain("second call failed");
+    }
+
+    /// <summary>
+    /// <see cref="IRunDiagnostics.Warn"/>'s own doc: it must reach the operator even on a run that
+    /// otherwise passes — a <see cref="IRunDiagnostics.Note"/> here would be exactly the kind of
+    /// message a passing run is permitted to lose, wrong for a defect a reviewer specifically
+    /// raised because it hides silently inside an otherwise-green result.
+    /// </summary>
+    [TestMethod]
+    public void WarnSwallowedClientExceptionNeverCallsNote()
+    {
+        var diagnostics = new FakeRunDiagnostics();
+        var subject = new TestableApiTestCore();
+        subject.SetDiagnostics(diagnostics);
+
+        subject.ExposedWarnSwallowedClientException(new InvalidOperationException("boom"));
+
+        diagnostics.Notes.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// States clearly, in the message itself, that the exception was discarded because a captured
+    /// response already stood as the verdict — the second half of what an operator needs to read
+    /// off this one line, alongside the exception's own type and message.
+    /// </summary>
+    [TestMethod]
+    public void WarnSwallowedClientExceptionExplainsWhyTheExceptionWasDiscarded()
+    {
+        var diagnostics = new FakeRunDiagnostics();
+        var subject = new TestableApiTestCore();
+        subject.SetDiagnostics(diagnostics);
+
+        subject.ExposedWarnSwallowedClientException(new InvalidOperationException("boom"));
+
+        var warning = diagnostics.Warnings.ShouldHaveSingleItem();
+        warning.ShouldContain("captured response");
+        warning.ShouldContain("discarded");
+    }
+
+    /// <summary>
+    /// A clean run — no client-routed call ever throws after a capture — must warn nothing at
+    /// all: nothing calls <see cref="ApiTestCore.WarnSwallowedClientException"/> unless a generated
+    /// case's second catch actually runs, so a diagnostics sink that is never told to warn stays
+    /// empty by construction. Pinned directly here rather than left implicit, since it is one of
+    /// the three behaviours this feature's own verification explicitly calls for.
+    /// </summary>
+    [TestMethod]
+    public void ADiagnosticsSinkThatIsNeverToldToWarnStaysEmpty()
+    {
+        var diagnostics = new FakeRunDiagnostics();
+        var subject = new TestableApiTestCore();
+        subject.SetDiagnostics(diagnostics);
+
+        diagnostics.Warnings.ShouldBeEmpty();
+        diagnostics.Notes.ShouldBeEmpty();
     }
 }

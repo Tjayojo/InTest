@@ -39,8 +39,8 @@ public partial class {{ class_name }} : {{ base_class }}
         // [captured-response-is-the-verdict], pinned shape — see
         // docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md. stopwatch starts
         // before the try because ShouldMatchCapturedContractAsync takes elapsed and the throwing
-        // path still needs a real number. The filter's two '?.'s and the empty second catch are
-        // both load-bearing, not stylistic — see that decision's own text before changing either.
+        // path still needs a real number. The filter's two '?.'s are load-bearing, not stylistic —
+        // see that decision's own text before changing it.
         //
         // The second catch's own filter (`ex is not OperationCanceledException`) is load-bearing
         // too, added after a review finding: a bare `catch (Exception)` here would swallow a
@@ -51,6 +51,15 @@ public partial class {{ class_name }} : {{ base_class }}
         // ThrowIfCancellationRequested before doing anything else, which incidentally re-raises a
         // cancellation that already happened — but that is a property of those two methods, not a
         // guarantee this catch block can rely on staying true.
+        //
+        // [warn-on-swallowed-exception]: the second catch's body used to discard `ex` outright —
+        // a real gap a reviewer raised, since a client-map.json override that issues more than one
+        // call (the first reaching the wire and captured, a later one failing before it does) left
+        // no trace anywhere that a second call ever ran, let alone threw. WarnSwallowedClientException
+        // reports it at Warn, not Note, so it reaches the operator even on a run that otherwise
+        // passes — see ApiTestCore.WarnSwallowedClientException's own doc for the full reasoning.
+        // The captured response is still the verdict: this call reports the discarded exception,
+        // it does not change what gets asserted below.
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -75,7 +84,7 @@ public partial class {{ class_name }} : {{ base_class }}
             await ApiClient<{{ tc.client_type_name }}>().{{ tc.client_call_expression }};
         }
         catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }
-        catch (Exception ex) when (ex is not OperationCanceledException) { /* the captured response is the verdict */ }
+        catch (Exception ex) when (ex is not OperationCanceledException) { WarnSwallowedClientException(ex); }
         stopwatch.Stop();
 
 {{~ if tc.schema_key_literal ~}}

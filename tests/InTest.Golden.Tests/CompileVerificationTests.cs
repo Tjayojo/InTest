@@ -288,6 +288,136 @@ public class CompileVerificationTests
         exitCode.ShouldBe(0, $"Generated project with a self-closing client-map.json override failed to compile:{Environment.NewLine}{output}");
     }
 
+    /// <summary>
+    /// The third instance of one recurring defect on this PR: a generated shape asserted only as
+    /// text, with nothing compiling it. <c>ClientCallPlannerTests</c>'
+    /// <c>DerivesTheExpressionForGetOrderByIdWithNSwag</c> and
+    /// <c>ResolveAppliesTheNSwagConventionWhenAnOperationIdWithNoUnderscoreIsPresent</c> both pin
+    /// <see cref="Planning.ClientCallPlanner.BuildNSwagConvention"/>'s output as a string; nothing
+    /// before this test ever built it. Its shape is materially different from Kiota's — a flat
+    /// <c>{Method}(args)</c> directly on the configured client type, not a
+    /// <c>.Api.Segment[idx].VerbAsync()</c> builder chain — so <see cref="GeneratedProjectCompiles"/>
+    /// and every Kiota-shaped fake client in <c>GeneratedSuiteExecutionTests</c> give it no coverage
+    /// at all.
+    /// <para>
+    /// Deliberately exercises a path parameter declared <c>format: uuid</c>, not the bare
+    /// <c>type: string</c> <c>orders.json</c> normally carries — mirroring real nswag 14.7.1 output
+    /// for a uuid-formatted path parameter (measured, see <c>BuildNSwagConvention</c>'s own doc
+    /// comment): a strongly-typed <c>System.Guid</c> parameter, with a sibling overload omitting
+    /// the cancellation token. The fake client below carries both overloads, so this test also
+    /// proves <c>cancellationToken:</c>-by-name selects the token-carrying one rather than merely
+    /// happening to compile against a single method — the same targeting
+    /// <c>BuildNSwagConvention</c>'s doc comment claims but that no compiled test had checked.
+    /// </para>
+    /// <para>
+    /// No <c>client-map.json</c> here — unlike
+    /// <see cref="GeneratedProjectWithASelfClosingClientMapOverrideCompiles"/>, which proves an
+    /// <i>override</i> compiles, this test proves <see cref="Planning.ClientCallPlanner.BuildNSwagConvention"/>'s
+    /// own <i>derived</i> expression compiles: both operations in the rewritten spec below qualify
+    /// for the convention on their own (a declared, underscore-free <c>operationId</c>, no query
+    /// parameters, no request body — <c>[nswag-needs-operationid]</c>'s gates), so
+    /// <c>ClientCallPlanner.Resolve</c> derives both call expressions with nothing to override.
+    /// <c>security</c> is dropped from the rewritten spec entirely — irrelevant to what this test
+    /// proves, and the fake client below has no auth-case surface to match it against.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedProjectWithAnNSwagConventionCallCompiles()
+    {
+        var root = CreateProject("orders.json");
+
+        // orders.json's own id parameter is a bare `type: string`, which resolves to
+        // PathParameterKind.String and needs no .Parse(...) wrapper — this test needs
+        // PathParameterKind.Guid instead, so the copied spec is overwritten with a `format: uuid`
+        // variant, same operations and schema otherwise.
+        File.WriteAllText(Path.Combine(root, "orders.json"), """
+                                                              {
+                                                                "openapi": "3.0.3",
+                                                                "info": { "title": "Orders", "version": "1.0" },
+                                                                "paths": {
+                                                                  "/orders": {
+                                                                    "get": {
+                                                                      "operationId": "listOrders",
+                                                                      "tags": ["Orders"],
+                                                                      "responses": { "200": { "description": "ok", "content": { "application/json": {
+                                                                        "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } }
+                                                                    }
+                                                                  },
+                                                                  "/orders/{id}": {
+                                                                    "get": {
+                                                                      "operationId": "getOrderById",
+                                                                      "tags": ["Orders"],
+                                                                      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+                                                                      "responses": {
+                                                                        "200": { "description": "ok", "content": { "application/json": {
+                                                                          "schema": { "$ref": "#/components/schemas/Order" } } } },
+                                                                        "404": { "description": "not found" }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                },
+                                                                "components": {
+                                                                  "schemas": {
+                                                                    "Order": {
+                                                                      "type": "object",
+                                                                      "required": ["id", "quantity"],
+                                                                      "properties": {
+                                                                        "id": { "type": "string" },
+                                                                        "quantity": { "type": "integer", "minimum": 1 },
+                                                                        "notes": { "type": "string", "nullable": true }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                              """);
+
+        File.WriteAllText(Path.Combine(root, "intest.json"), """
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                             "framework": "mstest" },
+                                                                "client": { "kind": "nswag", "typeName": "Orders.NSwagClient.OrdersClient" } }
+                                                              """);
+
+        // Mirrors real nswag 14.7.1 output (measured, see BuildNSwagConvention's own doc comment):
+        // the operation the derived call actually targets, plus a sibling overload omitting the
+        // token, plus the second qualifying operation's own no-path-parameter shape. Only the call
+        // shapes ClientCallPlanner.BuildNSwagConvention derives for this spec's two operations need
+        // to exist for this test's project to compile.
+        File.WriteAllText(Path.Combine(root, "FakeNSwagOrdersClient.cs"), """
+                                                                           namespace Orders.NSwagClient;
+
+                                                                           public sealed class OrdersClient
+                                                                           {
+                                                                               public Task<object?> GetOrderByIdAsync(System.Guid id)
+                                                                                   => throw new NotImplementedException();
+
+                                                                               public Task<object?> GetOrderByIdAsync(System.Guid id, CancellationToken cancellationToken)
+                                                                                   => throw new NotImplementedException();
+
+                                                                               public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
+                                                                                   => throw new NotImplementedException();
+                                                                           }
+                                                                           """);
+
+        (await FixturesRepairCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        // Pins the premise before the compile assertion is allowed to mean anything (the same
+        // discipline every other test in this file follows): the NSwag convention must actually
+        // have been derived, substituted with a Guid.Parse conversion, and reached the renderer —
+        // not merely "the project happened to build".
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        generated.ShouldContain(
+        "await ApiClient<Orders.NSwagClient.OrdersClient>().GetOrderByIdAsync(Guid.Parse(FixtureParameter(\"getOrderById\", \"id\")), cancellationToken: TestContext.CancellationToken);",
+        customMessage: "the NSwag convention-derived call did not reach the renderer with its Guid.Parse conversion applied");
+
+        var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
+
+        exitCode.ShouldBe(0, $"Generated project with an NSwag convention-derived call failed to compile:{Environment.NewLine}{output}");
+    }
+
     [TestMethod]
     public async Task RefusesAnInjectionShapedRootNamespaceInsteadOfCompilingIt()
     {

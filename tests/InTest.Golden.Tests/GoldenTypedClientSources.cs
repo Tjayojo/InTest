@@ -308,6 +308,19 @@ internal static class GoldenTypedClientSources
     public sealed class FakeOrdersApiClient(HttpClient httpClient)
     {
         public FakeApiRequestBuilder Api { get; } = new(httpClient);
+
+        // [warn-on-swallowed-exception]: mirrors the reviewer's exact double-call failure mode a
+        // client-map.json override can produce — one call that genuinely reaches the wire (so
+        // ResponseCaptureHandler captures it, same as Api.Status.GetAsync always does) followed by
+        // a second failure that never reaches the wire at all (here, a synthetic throw standing in
+        // for a serialization error, a null argument, or an adapter misconfiguration). Used only by
+        // GeneratedSuiteExecutionTests.GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture,
+        // via a client-map.json override naming this method instead of the getStatus convention.
+        public async Task<FakeStatusResult> GetStatusThenThrowAsync(CancellationToken cancellationToken = default)
+        {
+            await Api.Status.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException("simulated failure after the first call already captured a response");
+        }
     }
 
     public sealed class FakeApiRequestBuilder(HttpClient httpClient)
