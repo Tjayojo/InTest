@@ -418,6 +418,175 @@ public class CompileVerificationTests
         exitCode.ShouldBe(0, $"Generated project with an NSwag convention-derived call failed to compile:{Environment.NewLine}{output}");
     }
 
+    /// <summary>
+    /// The audit <c>[nswag-compile-verification]</c>'s own review asked for: <c>Integer</c> and
+    /// <c>Long</c> are the two <see cref="Planning.PathParameterKind"/> values
+    /// <c>TemplateRendererClientTests.SplicesAnIntegerPathParameterThroughIntParse</c> and
+    /// <c>SplicesALongPathParameterThroughLongParse</c> pin only as rendered strings —
+    /// <c>int.Parse(FixtureParameter(...))</c> and <c>long.Parse(FixtureParameter(...))</c> spliced
+    /// into a Kiota-shaped indexer. <see cref="SplicesAGuidPathParameterThroughGuidParse"/>'s
+    /// production sibling has a compiled proof
+    /// (<c>GeneratedSuiteExecutionTests.GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer</c>,
+    /// via <c>GoldenTypedClientSources.FakeOrdersApiClient</c>'s <c>this[Guid position]</c>
+    /// overload); before this test, <c>Integer</c>/<c>Long</c> had none — nothing built a project
+    /// where either conversion's result was passed to a signature that actually declares
+    /// <c>int</c>/<c>long</c>, as opposed to merely rendering the expected substring.
+    /// <para>
+    /// One test covers both kinds rather than two near-duplicates, the same way
+    /// <see cref="GeneratedProjectWithAnNSwagConventionCallCompiles"/> exercises two operations in
+    /// one project: two GET-by-id operations sharing the <c>Orders</c> tag (so both land in the
+    /// same generated <c>OrdersTests.g.cs</c>) — <c>getOrderById</c>'s <c>id</c> is <c>type:
+    /// integer</c> with no <c>format</c> (bare <c>int32</c>, per
+    /// <c>TestPlanBuilder.ResolvePathParameterKind</c>'s own doc comment: absent or non-<c>int64</c>
+    /// format still resolves to <see cref="Planning.PathParameterKind.Integer"/>), and
+    /// <c>getAccountById</c>'s <c>id</c> is <c>type: integer, format: int64</c>, resolving to
+    /// <see cref="Planning.PathParameterKind.Long"/>. No <c>client-map.json</c> here, matching
+    /// <see cref="GeneratedProjectWithAnNSwagConventionCallCompiles"/>'s reasoning: both operations
+    /// have neither a query parameter nor a request body, so
+    /// <see cref="Planning.ClientCallPlanner.Resolve"/> derives
+    /// <see cref="Planning.ClientCallPlanner.BuildKiotaConvention"/>'s builder-chain expression for
+    /// each on its own — <c>Orders[{id}].GetAsync</c> and <c>Accounts[{id}].GetAsync</c> (no
+    /// leading <c>Api.</c> segment — unlike <see cref="GoldenTypedClientSources.FakeOrdersApiClient"/>'s
+    /// own <c>GET /api/status</c>, neither path below has a literal <c>api</c> segment for
+    /// <c>BuildKiotaConvention</c> to pascal-case into one; confirmed directly by generating against
+    /// this exact spec before writing the fake client, not assumed from the NSwag test's shape) —
+    /// with nothing to override.
+    /// </para>
+    /// <para>
+    /// The fake client below is written as a builder-chain (<c>Api.Orders[int id]</c> /
+    /// <c>Api.Accounts[long id]</c>, each returning an item builder with its own
+    /// <c>GetAsync(CancellationToken)</c>), not a flat method the way
+    /// <see cref="GeneratedProjectWithASelfClosingClientMapOverrideCompiles"/>'s override-only fake
+    /// is — a flat method would compile against <c>int.Parse(...)</c>/<c>long.Parse(...)</c> too,
+    /// but would not prove the conversion binds a real Kiota item-builder indexer the way
+    /// <c>GoldenTypedClientSources.FakeStatusRequestBuilder</c>'s <c>this[Guid position]</c> already
+    /// does for the Guid kind; each indexer here is declared with exactly the parameter type the
+    /// conversion must produce (<c>int</c>, <c>long</c>), so a mismatched conversion — the wrong
+    /// <c>.Parse</c>, or none at all — fails to compile rather than merely reading wrong in a string
+    /// assertion.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedProjectWithIntegerAndLongPathParametersCompiles()
+    {
+        var root = CreateProject("orders.json");
+
+        // orders.json's own id parameter is a bare `type: string` (PathParameterKind.String, no
+        // conversion) -- this test needs Integer and Long instead, so the copied spec is overwritten
+        // with a two-operation variant: getOrderById's id has no format (bare int32) and
+        // getAccountById's id is format: int64, same as this file's own Guid variant above
+        // overwrites orders.json for its own kind.
+        File.WriteAllText(Path.Combine(root, "orders.json"), """
+                                                              {
+                                                                "openapi": "3.0.3",
+                                                                "info": { "title": "Orders", "version": "1.0" },
+                                                                "paths": {
+                                                                  "/orders/{id}": {
+                                                                    "get": {
+                                                                      "operationId": "getOrderById",
+                                                                      "tags": ["Orders"],
+                                                                      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                                                                      "responses": {
+                                                                        "200": { "description": "ok", "content": { "application/json": {
+                                                                          "schema": { "$ref": "#/components/schemas/Order" } } } },
+                                                                        "404": { "description": "not found" }
+                                                                      }
+                                                                    }
+                                                                  },
+                                                                  "/accounts/{id}": {
+                                                                    "get": {
+                                                                      "operationId": "getAccountById",
+                                                                      "tags": ["Orders"],
+                                                                      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "format": "int64" } }],
+                                                                      "responses": {
+                                                                        "200": { "description": "ok", "content": { "application/json": {
+                                                                          "schema": { "$ref": "#/components/schemas/Order" } } } },
+                                                                        "404": { "description": "not found" }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                },
+                                                                "components": {
+                                                                  "schemas": {
+                                                                    "Order": {
+                                                                      "type": "object",
+                                                                      "required": ["id", "quantity"],
+                                                                      "properties": {
+                                                                        "id": { "type": "string" },
+                                                                        "quantity": { "type": "integer", "minimum": 1 },
+                                                                        "notes": { "type": "string", "nullable": true }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                              """);
+
+        File.WriteAllText(Path.Combine(root, "intest.json"), """
+                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                             "framework": "mstest" },
+                                                                "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                                                              """);
+
+        // A builder-chain fake, not a flat method -- see this test's own doc comment for why. Only
+        // the two indexer shapes ClientCallPlanner.BuildKiotaConvention derives for this spec's two
+        // operations need to exist for this test's project to compile: Orders[int] and
+        // Accounts[long] directly on the client type -- no Api property, since neither path below
+        // has a literal "api" segment (this test's own doc comment).
+        File.WriteAllText(Path.Combine(root, "FakeOrdersApiClient.cs"), """
+                                                                         namespace Orders.ApiClient;
+
+                                                                         public sealed class OrdersApiClient
+                                                                         {
+                                                                             public OrdersRequestBuilder Orders { get; } = new();
+                                                                             public AccountsRequestBuilder Accounts { get; } = new();
+                                                                         }
+
+                                                                         public sealed class OrdersRequestBuilder
+                                                                         {
+                                                                             public OrdersItemRequestBuilder this[int id] => new();
+                                                                         }
+
+                                                                         public sealed class OrdersItemRequestBuilder
+                                                                         {
+                                                                             public Task<object?> GetAsync(CancellationToken cancellationToken = default)
+                                                                                 => throw new NotImplementedException();
+                                                                         }
+
+                                                                         public sealed class AccountsRequestBuilder
+                                                                         {
+                                                                             public AccountsItemRequestBuilder this[long id] => new();
+                                                                         }
+
+                                                                         public sealed class AccountsItemRequestBuilder
+                                                                         {
+                                                                             public Task<object?> GetAsync(CancellationToken cancellationToken = default)
+                                                                                 => throw new NotImplementedException();
+                                                                         }
+                                                                         """);
+
+        (await FixturesRepairCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        // Pins the premise before the compile assertion is allowed to mean anything (the same
+        // discipline every other test in this file follows): both conversions must actually have
+        // been derived, substituted, and reached the renderer -- not merely "the project happened
+        // to build".
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        generated.ShouldContain(
+        "await ApiClient<Orders.ApiClient.OrdersApiClient>().Orders[int.Parse(FixtureParameter(\"getOrderById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);",
+        customMessage: "the Kiota-derived call for the Integer-kind path parameter did not reach the renderer with its int.Parse conversion applied");
+        generated.ShouldContain(
+        "await ApiClient<Orders.ApiClient.OrdersApiClient>().Accounts[long.Parse(FixtureParameter(\"getAccountById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);",
+        customMessage: "the Kiota-derived call for the Long-kind path parameter did not reach the renderer with its long.Parse conversion applied");
+
+        var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
+
+        exitCode.ShouldBe(0, $"Generated project with Integer- and Long-kind path parameters failed to compile:{Environment.NewLine}{output}");
+    }
+
     [TestMethod]
     public async Task RefusesAnInjectionShapedRootNamespaceInsteadOfCompilingIt()
     {

@@ -15,7 +15,7 @@ Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`), Task 7
 | 5 — `[lockfile-recovery]` | `02af19d` | `intest init --client-lockfile <path>`: recovers `spec.source` — and, where the lockfile names one, a `client` section — from a client generator's own lockfile, for a team that owns a generated client but not the OpenAPI document it came from. Kiota only; NSwag was measured and scoped out. See `[lockfile-recovery]` below, which supersedes `[lockfile-configures]`'s "nothing reads them yet" |
 | 6 — `[typed-path-parameters]` | `1e15fd4` | A path parameter's fixture value is now converted to the type Kiota's per-parameter item-builder indexer actually declares (`Guid.Parse(...)`/`int.Parse(...)`/`long.Parse(...)`) before being spliced into a client-routed call, so the generated call binds the typed, non-obsolete indexer overload instead of the deprecated `this[string]` one. **Retires** the "Generator-version fragility" risk's dated finding below — see that risk entry, kept rather than deleted, for the closure note |
 | 7 — `[nswag-needs-operationid]` | `2dedf4b` | NSwag now gets a convention guess too, gated on the spec declaring an `operationId` with no `_` in it — measured directly against a real nswag 14.7.1 client, both for the happy path (`{PascalCase(operationId)}Async`) and for the underscore hazard (NSwag's default `operationGenerationMode` splits onto a different client class). **Partially reopens** the "NSwag convention derivation does not work" finding below — see that finding's own correction note, and `ClientCallPlanner`'s doc comment, for the full measured evidence. Refit gets no convention still, but its own reasoning is now recorded as a *permanent* limitation, distinct from NSwag's gated one, not lumped in with it |
-| 8 — `[nswag-compile-verification]` | *(this change, uncommitted)* | The third instance of one recurring PR defect closed properly: NSwag's convention-derived call — materially different in shape from Kiota's (a flat `{Method}(args)` on the client type itself, not a builder-chain indexer) — was asserted only as a string in `ClientCallPlannerTests`, with nothing compiling it. A new `CompileVerificationTests` case builds a real project with an NSwag-derived call over a `format: uuid` path parameter, proving the `Guid.Parse(...)` conversion compiles against a strongly-typed parameter and that the token-carrying overload is selected by name. The audit this task's own review asked for also found a second, still-open gap: `int.Parse(...)`/`long.Parse(...)` path-parameter conversions are asserted only as text in `TemplateRendererClientTests`, never compiled anywhere — recorded below, not fixed here |
+| 8 — `[nswag-compile-verification]` | *(this change, uncommitted)* | The third instance of one recurring PR defect closed properly: NSwag's convention-derived call — materially different in shape from Kiota's (a flat `{Method}(args)` on the client type itself, not a builder-chain indexer) — was asserted only as a string in `ClientCallPlannerTests`, with nothing compiling it. A new `CompileVerificationTests` case builds a real project with an NSwag-derived call over a `format: uuid` path parameter, proving the `Guid.Parse(...)` conversion compiles against a strongly-typed parameter and that the token-carrying overload is selected by name. The audit this task's own review asked for found a second gap in the same category — `int.Parse(...)`/`long.Parse(...)` path-parameter conversions asserted only as text in `TemplateRendererClientTests`, never compiled anywhere — recorded below at the time, then closed in a follow-up pass by `CompileVerificationTests.GeneratedProjectWithIntegerAndLongPathParametersCompiles` (see that finding's own closure note) |
 | 9 — `[warn-on-swallowed-exception]` | *(this change, uncommitted)* | The pinned client-routed catch's second clause used to discard the client's own exception outright once a response was already captured — silent on the specific failure mode a reviewer raised: a `client-map.json` override issuing more than one call, where an earlier one captures and a later one fails before reaching the wire. A per-test `IRunDiagnostics` sink now flows through `ApiTestCore.BeginTest`/`ApiTestBase.ApiTestInitialize` (the same seam `testDisplayName` already uses), and the second catch calls the new `ApiTestCore.WarnSwallowedClientException(ex)`, which reports the exception's type and message at `Warn` — reaching the operator even on a run that otherwise passes |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
@@ -478,25 +478,45 @@ proving `cancellationToken:`-by-name selects the right one, the exact targeting
 `dotnet build` on the resulting project is the oracle.
 
 **The audit this task's own review asked for: check whether any other generated shape is still
-asserted only as text.** One was found, not fixed here — flagged rather than silently left, per
-the reviewer's explicit instruction to report rather than discover it in review a fourth time.
+asserted only as text.** One was found, and — in a later pass on this same audit — closed.
 `TemplateRendererClientTests.SplicesAnIntegerPathParameterThroughIntParse` and
 `SplicesALongPathParameterThroughLongParse` pin `int.Parse(FixtureParameter(...))` and
 `long.Parse(FixtureParameter(...))` as rendered strings; neither is a `[Guid]`-only concern the way
 `[typed-path-parameters]`'s own golden proof already covers (`PathParameterKind.Guid` splicing
-into a real `this[Guid]` Kiota indexer). No golden or compile-verification test anywhere builds a
-project with an `Integer`- or `Long`-kind client-routed path parameter, so whether
-`int.Parse(...)`/`long.Parse(...)` actually compiles against a real generator's typed indexer or
-method parameter — as opposed to merely rendering the expected substring — is unverified. This is
-lower-risk than the two closed defects (`int`/`long` conversions are simple, well-understood
-casts, not a receiver-shape mismatch like CS0149 or an overload-binding change like CS0618), but it
-is the same category of gap and is recorded here rather than assumed safe.
+into a real `this[Guid]` Kiota indexer). At the time this finding was first recorded, no golden or
+compile-verification test anywhere built a project with an `Integer`- or `Long`-kind client-routed
+path parameter, so whether `int.Parse(...)`/`long.Parse(...)` actually compiles against a real
+generator's typed indexer or method parameter — as opposed to merely rendering the expected
+substring — was unverified. This was lower-risk than the two closed defects (`int`/`long`
+conversions are simple, well-understood casts, not a receiver-shape mismatch like CS0149 or an
+overload-binding change like CS0618), but the same category of gap, and the category had already
+bitten twice.
+
+**Closed by `CompileVerificationTests.GeneratedProjectWithIntegerAndLongPathParametersCompiles`.**
+One test, not two near-duplicates, covering both kinds: a rewritten `orders.json` with two GET-by-id
+operations sharing the `Orders` tag (so both land in one generated `OrdersTests.g.cs`) —
+`getOrderById`'s `id` is a bare `type: integer` (no `format`, resolving to
+`PathParameterKind.Integer`) and `getAccountById`'s `id` is `type: integer, format: int64`
+(`PathParameterKind.Long`) — with `client.kind: "nswag"` swapped for `"kiota"` and no
+`client-map.json`, so `ClientCallPlanner.Resolve` derives both calls itself
+(`Orders[{id}].GetAsync`/`Accounts[{id}].GetAsync` — no leading `Api.` segment, since neither path
+has a literal `api` segment for `BuildKiotaConvention` to pascal-case, confirmed by generating
+against the spec before writing the fake). The fake client is a builder-chain, not a flat method —
+`Orders` and `Accounts` request-builder properties each carrying an indexer declared with exactly
+the parameter type the conversion must produce (`this[int id]`, `this[long id]`), the same way
+`GoldenTypedClientSources.FakeStatusRequestBuilder`'s `this[Guid position]` already proves the Guid
+kind — so a mismatched or missing conversion fails to compile rather than merely reading wrong in a
+string assertion.
 
 **Verification.** `CompileVerificationTests.GeneratedProjectWithAnNSwagConventionCallCompiles`
 pins the generated line
 (`await ApiClient<Orders.NSwagClient.OrdersClient>().GetOrderByIdAsync(Guid.Parse(FixtureParameter("getOrderById", "id")), cancellationToken: TestContext.CancellationToken);`)
 before asserting `dotnet build` succeeds — the same "assert the premise before the compile
 assertion is allowed to mean anything" discipline every other test in that file already follows.
+`GeneratedProjectWithIntegerAndLongPathParametersCompiles` follows the identical discipline for
+both new lines
+(`await ApiClient<Orders.ApiClient.OrdersApiClient>().Orders[int.Parse(FixtureParameter("getOrderById", "id"))].GetAsync(cancellationToken: TestContext.CancellationToken);`
+and the `Accounts`/`long.Parse` sibling) before its own `dotnet build` assertion.
 
 ### `[warn-on-swallowed-exception]` — Task 9: surface a swallowed post-capture exception through `IRunDiagnostics`
 
