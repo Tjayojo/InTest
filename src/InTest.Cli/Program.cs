@@ -29,16 +29,36 @@ var nameOption = new Option<string>("--name") { Description = "Test project name
 // documentation-ahead-of-the-build defect the deleted SpecLoader.UrlReason existed to apologise
 // for. §9's snapshot shipped; the promise the help text was making is now kept. A URL is fetched
 // by `generate` and snapshotted to spec.json — see SpecSnapshot.
-var specOption = new Option<string>("--spec") { Description = "Path of the OpenAPI document relative to the test project directory, or the URL it is served from.", Required = true };
+// Not Required any more: [lockfile-recovery] (Task 5) lets --client-lockfile stand in for --spec,
+// so exactly one of the two must be given rather than --spec unconditionally. InitCommand.Run
+// enforces that — "neither given" and "both given" are refused there, in the same voice, rather
+// than System.CommandLine refusing "neither" one way (a parse error, exit 2 with its own
+// diagnostic text) while InitCommand refuses "both" another (an adopter-facing sentence naming
+// both values). Defaults to "" via DefaultValueFactory, not left null: InitCommand.Run's blank
+// checks throughout this surface already test IsNullOrWhiteSpace, matching every other optional
+// value here (see CommandArguments.TryRequireValue).
+var specOption = new Option<string>("--spec")
+{
+    Description = "Path of the OpenAPI document relative to the test project directory, or the URL it is served from. Mutually exclusive with --client-lockfile.",
+    DefaultValueFactory = _ => string.Empty,
+};
+
+var clientLockfileOption = new Option<string>("--client-lockfile")
+{
+    Description = "Path to a client generator's own lockfile (kiota-lock.json) to recover spec.source — and, where the lockfile names one, a client section — from, instead of --spec.",
+    DefaultValueFactory = _ => string.Empty,
+};
 
 var init = new Command("init", "Scaffold a test project.");
 init.Options.Add(projectOption);
 init.Options.Add(nameOption);
 init.Options.Add(specOption);
+init.Options.Add(clientLockfileOption);
 init.SetAction(parseResult => InitCommand.Run(
     parseResult.GetValue(projectOption)!,
     parseResult.GetValue(nameOption)!,
-    parseResult.GetValue(specOption)!));
+    parseResult.GetValue(specOption)!,
+    parseResult.GetValue(clientLockfileOption)!));
 
 var fixtures = new Command("fixtures", "Fixture maintenance.");
 var repair = new Command("repair", "Create missing fixtures and add sentinels for new required properties.");

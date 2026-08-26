@@ -28,6 +28,17 @@ goes in `Unreleased` and when it moves to a version heading.
   registrations, including the one requirement that matters most — construct the client over
   `IHttpClientFactory.CreateClient(InTestClients.Api)`, or it silently loses capture, auth and the
   run-id header.
+- `intest init --client-lockfile <path>`, mutually exclusive with `--spec`, for a team that owns a
+  generated client but not the OpenAPI document it came from: recovers `spec.source` from a Kiota
+  `kiota-lock.json`'s `descriptionLocation` (a local path or a URL), and — where the lockfile also
+  names `clientClassName`/`clientNamespaceName` — scaffolds a working `client` section too, so the
+  common case needs no hand-editing. A required field missing, renamed, blank or wrong-typed fails
+  loudly, naming the field, rather than silently scaffolding an empty `spec.source`. NSwag's own
+  config was measured (`nswag new`, NSwag 14.7.1) and deliberately not supported: its `className`
+  is a naming template under NSwag's default generation mode, not a concrete type name. See
+  `docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md`'s `[lockfile-recovery]` for
+  the measured detail and `docs/getting-started.md`'s "Typed client invocation (opt-in)" for the
+  worked example.
 
 ### Changed
 

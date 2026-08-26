@@ -1,6 +1,7 @@
 # Opt-in invocation through a team's pre-generated API client
 
-**Status: complete, 2026-08-26.** Five commits, in order:
+**Status: complete, 2026-08-26.** Five commits, in order, plus Task 5 (`[lockfile-recovery]`)
+below:
 
 | Stage | Commit | What it landed |
 |---|---|---|
@@ -9,6 +10,7 @@
 | 2 — `[convention-and-config]` | `336b166` | The `client` config section, `client-map.json`, `ClientCallPlanner`, `TestPlanBuilder` wiring. Plans the call expression; nothing renders it yet |
 | 3 — `[template-and-render]` | `0104a4d` | The template branch, `GenerateCommand` writing `clientCaptureEnabled`, full golden proof of *generated* code |
 | fix — the schema-less gap | `19ab080` | A client-routed case with no response schema (a 204, or any `client-map.json` override) now still routes through the client instead of silently falling back to raw HTTP |
+| 5 — `[lockfile-recovery]` | *(this change, uncommitted)* | `intest init --client-lockfile <path>`: recovers `spec.source` — and, where the lockfile names one, a `client` section — from a client generator's own lockfile, for a team that owns a generated client but not the OpenAPI document it came from. Kiota only; NSwag was measured and scoped out. See `[lockfile-recovery]` below, which supersedes `[lockfile-configures]`'s "nothing reads them yet" |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
 tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
@@ -286,7 +288,7 @@ output, or a hand-written interface — so there is no single naming/shape conve
 all, unconditionally, independent of any measurement. `ClientKind.Refit` gets no
 `ClientCallPlanner` branch; every Refit operation routes through `client-map.json`.
 
-### `[lockfile-configures]` — noted as a design constraint, not shipped in this feature
+### `[lockfile-configures]` — noted as a design constraint, not shipped in this feature (stages 1–3/fix)
 
 `kiota-lock.json`'s `clientClassName`/`clientNamespaceName` and `nswag.json`'s
 `operationGenerationMode`/`className` *configure* what a generator's convention actually produces,
@@ -294,6 +296,76 @@ rather than leaving it purely guessed — a fact worth recording because it bear
 generator-version-fragility risk below, but reading either lockfile automatically (to recover
 `client.typeName`, or to detect a convention-breaking regeneration) was not built in this feature
 and ships with no code behind it. `client.typeName` is adopter-supplied, hand-written JSON.
+
+**Superseded in one direction by Task 5 below**: `init --client-lockfile` now does read
+`kiota-lock.json` automatically — but only at scaffold time, to *recover* `spec.source` and an
+initial `client` section for a project that has neither yet, never to detect a *later*
+regeneration drifting out from under an already-scaffolded `intest.json`. That second use — a
+lockfile diff at `generate` time flagging a convention that quietly stopped applying — is still
+undesigned and unbuilt; `[compiler-is-oracle]` remains the only defence against it. `typeName`
+recovered from a lockfile is still adopter-supplied in every sense that matters downstream: it is
+validated the same way (`CSharpIdentifier.TryValidateDottedName`) and written into the same
+hand-editable `intest.json` a directly-typed value would be, not read fresh on every `generate`.
+
+### `[lockfile-recovery]` — Task 5: `init --client-lockfile`, Kiota only, measured against a real config each way
+
+**What was built.** `intest init --client-lockfile <path>`, mutually exclusive with `--spec` (both
+given is refused, naming both; neither given is refused exactly like a blank `--spec` always has
+been — one voice, not two). `ClientLockfile.Recover` (`src/InTest.Cli/Spec/ClientLockfile.cs`) — a
+DISTINCT FOURTH concern beside `SpecLoader`, `SpecFetcher` and `SpecSnapshot`, because it parses an
+entirely different file format produced by a third-party tool, not an OpenAPI document or the
+transport that fetches one — reads a `kiota-lock.json`:
+
+- `descriptionLocation` recovers `spec.source` directly, handled identically whether it names a
+  local path or an `http(s)` URL — this type does no URL-specific parsing of its own, and the
+  recovered value flows into `InitCommand`'s existing `specSource` variable, through the
+  unchanged `SpecLoader.IsUrl` / `SpecFetcher.TryValidateUrl` / `MSBuildPropertyValue.TryEscape`
+  path, never a parallel one.
+- `clientClassName` + `clientNamespaceName`, dot-joined, recover `client.typeName` — confirmed
+  against a real kiota 1.34.1 lockfile (`kiota generate --openapi
+  samples/Orders.Api/Orders.Api.json --class-name OrdersApiClient --namespace-name
+  Orders.ApiClient --language CSharp`): `"OrdersApiClient"` + `"Orders.ApiClient"` gives exactly
+  `Orders.ApiClient.OrdersApiClient`, the same value getting-started's own worked example already
+  uses. Present only when both fields are present in the lockfile (kiota always writes them
+  together — a lockfile naming only one is refused as more likely hand-edited than a legitimate
+  partial state); absent, `init` scaffolds a `spec.source` with no `client` section, same as a
+  plain `--spec` project.
+- A required field missing, renamed, blank or wrong-typed fails loudly, naming the field —
+  `ClientLockfileException`, caught by `InitCommand` the same way `GenerateCommand` already
+  catches `SpecLoadException`/`ConfigLoadException` (print the message bare, exit 2) — never a
+  silent null that would resurface, far from here, as `ConfigLoader`'s "spec.source is empty"
+  refusal.
+
+**One correction to the risk section below, made by direct measurement rather than left open**:
+`kiotaVersion` (`"1.34.1"` in the measured fixture) IS a stable, always-present field in
+`kiota-lock.json` — the generator-version-fragility risk previously left this unverified because
+nothing had measured it. Nothing reads `kiotaVersion` today (there is no version-drift detection
+built), but the field existing and being stable is now a measured fact, not an open question.
+
+**NSwag was measured and scoped out, not skipped.** `nswag new` (NSwag 14.7.1) was run to get real
+ground truth. What it produces, `nswag.json`, is materially different from a lockfile in the sense
+this task needed: it is the *input config* an adopter writes and maintains themselves *before*
+generation, not a record the generator writes *after* — so recovering a spec location from it
+returns little a team without the OpenAPI document does not already have. More fatally for
+`client.typeName` specifically: under NSwag's own default `operationGenerationMode`
+(`MultipleClientsFromOperationId`), `codeGenerators.openApiToCSharpClient.className` is
+`"{controller}Client"` — a *naming template* with a placeholder, not a concrete type name, and
+that same generation mode produces one class *per controller*, not the single class
+`client.typeName` names. Resolving the template against the spec's actual controllers is exactly
+the kind of per-generator guessing `[compiler-is-oracle]` already rejected for NSwag convention
+derivation (measured finding 2, above); reading it from a config file rather than deriving it from
+spec text does not change that verdict. Consistent with that same call, NSwag lockfile recovery is
+not built — a NSwag-shaped file handed to `--client-lockfile` fails loudly on the same
+"no descriptionLocation" message any unrecognised JSON object gets, an honest "cannot recover
+this" rather than a wrong answer.
+
+**Verification.** `ClientLockfileTests` (parse a real-shaped `kiota-lock.json`, both
+`descriptionLocation` forms, missing file, missing/renamed/blank/wrong-typed field refusal,
+malformed JSON, partial client-identity refusal) and `InitCommandTests` (`--client-lockfile` alone
+scaffolds the recovered `spec.source` and a working `client` section verified through
+`ConfigLoader.Load` — not a text scan, so the double-`$` raw-string brace trap in `intest.json`'s
+template would actually be caught; both flags together refused naming both; neither given refused
+exactly like a blank `--spec` always has been).
 
 ---
 
@@ -492,7 +564,13 @@ for free.
   across majors. `[compiler-is-oracle]` is the defence — a convention that compiles today but
   breaks against a regenerated client (regenerated by the adopter's own tooling, entirely outside
   any `intest generate` run) fails the adopter's build loudly, not silently. `[lockfile-configures]`
-  documents that the two lockfiles *could* narrow this further; nothing reads them yet.
+  documents that the two lockfiles *could* narrow this further; Task 5's `[lockfile-recovery]`
+  reads `kiota-lock.json` now, but only at `init` time, to recover a project's *initial*
+  `spec.source`/`client` section — not at `generate` time, to detect a *later* regeneration
+  drifting the convention out from under an already-scaffolded project. That narrower use is still
+  undesigned. One field is now measured rather than assumed, though: `kiotaVersion` is confirmed
+  stable and always-present in a real kiota 1.34.1 lockfile — previously listed here as an open
+  question, not a verified fact.
 - **Stale `client-map.json` entries warn, not block** — a `CoverageNote`, softer than fixtures'
   drift-blocks-`generate` gate, because (unlike a fixture) there is no second derivable answer to
   diff an override against; the only available check is "does this key still name an operation in

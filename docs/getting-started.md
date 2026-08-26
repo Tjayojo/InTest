@@ -290,6 +290,23 @@ name, exactly as you would write it in code. Leave the section out entirely and 
 every generated case keeps building its own `HttpRequestMessage`, byte-for-byte identical to a
 project with no `client` section at all.
 
+**Own a generated client but not the OpenAPI document it came from?** Kiota already recorded where
+it generated from, in `kiota-lock.json` — point `init` at it instead of hunting the document down
+by hand:
+
+```bash
+intest init --name Orders.ApiTests --client-lockfile ../Orders.ApiClient/kiota-lock.json
+```
+
+This recovers `spec.source` from the lockfile's `descriptionLocation` (a local path or a URL,
+either way) and, since it also names `clientClassName`/`clientNamespaceName`, scaffolds a working
+`client` section too — no hand-editing needed for the common case. `--spec` and
+`--client-lockfile` are mutually exclusive; give neither and `init` refuses exactly like a blank
+`--spec` always has. NSwag's own config (`nswag.json`) is not supported here — measured directly
+(NSwag 14.7.1's default `nswag new` output), its `className` is a naming *template*
+(`"{controller}Client"`) under NSwag's default generation mode, not the single concrete type name
+a `client.typeName` needs, so there is nothing safe to recover automatically.
+
 **The one thing that matters more than the config: register the client over InTest's own
 `HttpClient`, or it silently stops working.** `AuthHandler`, `RunIdHandler`, and the handler that
 lets a client-routed test still validate the raw response bytes are all attached to one named
