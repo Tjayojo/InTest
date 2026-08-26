@@ -1725,6 +1725,149 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// <c>[mixed-idiom-execution]</c>: closes a coverage gap the plan's own <c>[success-only]</c>
+    /// decision names directly. A generated class can contain both a client-routed Success case
+    /// and raw-HTTP declared-error/auth siblings — <c>[success-only]</c>: <c>TestPlanBuilder.Build</c>
+    /// calls <c>ClientCallPlanner</c> only when building the <c>Success</c> case; declared-error and
+    /// auth cases are built afterward from separate helpers (<c>TryPlanDeclaredNotFound</c>,
+    /// <c>PlanAuthCases</c>) that never touch it, regardless of whether <c>client</c> is configured
+    /// — and the plan's own risk section calls this mixed shape accepted for v1, "reintroducing
+    /// two ways of calling the same API inside a single file". An audit found that shape was
+    /// <b>compiled</b> in three <c>CompileVerificationTests</c> cases but never <b>run</b> anywhere:
+    /// every Golden test that runs an auth case (<see cref="AuthCasesReceiveRealStatusesOverTheWireAndSuccessCasesStillPass"/>
+    /// above) configures no <c>client</c> section, and every Golden test that configures one
+    /// (every <c>GeneratedClientRouted*</c> test in this file) exercises the unsecured <c>getStatus</c>
+    /// operation, with no auth case in play. This is the single most likely real adopter shape — a
+    /// class where some cases go through the typed client and others go straight over raw HTTP,
+    /// sharing one <c>ApiTestBase</c>, one <c>HttpClient</c>, one identity pipeline and one
+    /// captured-response slot — and it had never actually been run before this test.
+    /// <para>
+    /// Reuses <see cref="SpecWithSecuredOperation"/> exactly as
+    /// <see cref="AuthCasesReceiveRealStatusesOverTheWireAndSuccessCasesStillPass"/> does — already
+    /// proven, with no <c>client</c> section, to produce one <c>SecureTests.g.cs</c> class with
+    /// three cases (<c>Contract</c>, <c>Unauthorized</c>, <c>Forbidden</c>) sharing exactly the
+    /// pipeline this test cares about — and adds <see cref="AddClientConfig"/> plus
+    /// <see cref="RegisterFakeOrdersApiClient"/> (over the new
+    /// <c>GoldenTypedClientSources.FakeApiRequestBuilder.Secure</c> builder — see its own doc for
+    /// why the extension lives there) before <c>generate</c> runs, so
+    /// <c>GetSecureResource_Contract</c> becomes the client-routed case while its two auth siblings
+    /// stay raw HTTP, unchanged from the no-client-config shape
+    /// <see cref="AuthCasesReceiveRealStatusesOverTheWireAndSuccessCasesStillPass"/> already proves.
+    /// </para>
+    /// <para>
+    /// Two things this test exists to observe, not merely assert, per the review that requested it:
+    /// <b>the shared <c>InTestAmbient.LastCapturedResponse</c> slot</b> — a per-test
+    /// <c>AsyncLocal&lt;CapturedResponseSlot?&gt;</c> that <c>ApiTestCore.BeginTest</c> reassigns to
+    /// a <em>fresh</em> cell for every test method, so the two raw-HTTP auth cases can never observe
+    /// a stale capture left behind by the client-routed <c>Contract</c> case, or vice versa, purely
+    /// by construction — and <b><c>ResponseCaptureHandler</c> now running over the raw-HTTP cases'
+    /// own requests too</b>, since <c>clientCaptureEnabled</c> gates attachment to
+    /// <c>InTestClients.Api</c> for the whole run, not per case (<c>[capture-is-opt-in]</c>'s own
+    /// doc calls this harmless because <c>Client</c> and every typed client resolve over that same
+    /// pipeline) — so both auth cases' <c>Client.SendAsync</c> calls are captured into the ambient
+    /// slot exactly like the client-routed call is, even though neither case's rendered body ever
+    /// reads it. The negative assertions below on process output are what actually check that
+    /// neither observation turns into a real defect (a spurious "[client-rides-the-api-pipeline]:
+    /// no response has been captured" exception, or an unexpected swallowed-exception warning) — a
+    /// bare "Passed!" would not distinguish "this never happened" from "this happened but the test
+    /// still passed by accident".
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings()
+    {
+        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation);
+
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        RegisterTokenProvider();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        // Decisive proof of the mixed shape itself, before anything runs: one generated class, one
+        // Success case routed through the typed client, its two auth siblings still raw HTTP.
+        var generatedFile = Directory.GetFiles(_root, "SecureTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one SecureTests.g.cs");
+        var generated = File.ReadAllText(generatedFile);
+
+        generated.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
+        customMessage: "GetSecureResource_Contract should be the client-routed case now that a client section is configured");
+        generated.ShouldContain("Api.Secure.GetAsync(cancellationToken: TestContext.CancellationToken)",
+        customMessage: "the Kiota convention over GET /api/secure should have resolved to Api.Secure.GetAsync");
+        generated.ShouldContain("GetSecureResource_Unauthorized",
+        customMessage: "the no-token 401 case must still be generated");
+        generated.ShouldContain("GetSecureResource_Forbidden",
+        customMessage: "the wrong-scope 403 case must still be generated");
+        generated.ShouldContain("RequireMultipleIdentities();",
+        customMessage: "decision 3: the 403 case must still carry the runtime guard");
+
+        // [success-only]'s mechanical check: exactly one case in this class should be
+        // client-routed. A regression that routed an auth case through the client too — defeating
+        // the entire reasoning [success-only]'s own doc gives for why that never happens — would
+        // show up here as a second "ApiClient<" occurrence, which neither auth case's own rendered
+        // body (a bare HttpRequestMessage/Client.SendAsync pair, per mstest-class.scriban's
+        // raw-HTTP branch) ever contains today.
+        var apiClientOccurrences = generated.Split("ApiClient<", StringSplitOptions.None).Length - 1;
+        apiClientOccurrences.ShouldBe(1,
+        $"expected exactly one client-routed case (GetSecureResource_Contract) in this class, found " +
+        $"{apiClientOccurrences} occurrences of \"ApiClient<\":{Environment.NewLine}{generated}");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var test = await ProcessRunner.RunAsync("dotnet",
+        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var results = trx.Descendants().Where(e => e.Name.LocalName == "UnitTestResult").ToList();
+
+        results.Count.ShouldBe(3,
+        $"expected exactly 3 tests (Contract, Unauthorized, Forbidden) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
+
+        foreach (var name in new[]
+                 {
+                     "GetSecureResource_Contract",
+                     "GetSecureResource_Unauthorized",
+                     "GetSecureResource_Forbidden"
+                 })
+        {
+            var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
+            result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
+        }
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        // Closes the loop from the outside, the same pattern every other live-wire test in this
+        // file uses: all 3 requests — the client-routed Contract case included — must have
+        // actually reached the stub, not merely have been built.
+        _stub.ReceivedPaths.Count(p => p == "/api/secure").ShouldBe(3,
+        $"expected all 3 cases (client-routed and raw-HTTP alike) to reach the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+
+        // The two observations this test exists to make, turned into assertions: mixing the two
+        // idioms in one class must never surface [client-rides-the-api-pipeline]'s own "nothing was
+        // captured" exception against either auth case (it would, if BeginTest's fresh-slot-per-test
+        // guarantee ever regressed and a stale capture — or the absence of one — leaked across
+        // cases), and ResponseCaptureHandler now running over the auth cases' own raw-HTTP requests
+        // must never produce a spurious [warn-on-swallowed-exception] warning (it would only ever
+        // fire from inside a client-routed case's own catch block, which neither auth case's
+        // rendered body contains at all).
+        test.Output.ShouldNotContain("no response has been captured",
+        customMessage: $"a case unexpectedly hit LastCapturedResponse's throwing guard:{Environment.NewLine}{test.Output}");
+        test.Output.ShouldNotContain("captured response is being used as the test's verdict",
+        customMessage: $"a case unexpectedly warned about a swallowed exception that never happened:{Environment.NewLine}{test.Output}");
+    }
+
+    /// <summary>
     /// Task 4 / F11's live wire proof — the whole of F11 in one assertion. Before this plan (the
     /// template never emitted <c>RequireSecondaryIdentityLacks</c>, whatever
     /// <c>TestCasePlan.RequiredScopes</c> carried), the generated suite fails here:

@@ -2,8 +2,9 @@
 
 **Status: complete, 2026-08-26.** Five commits, in order, for the original stages below, plus
 Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`), Task 7
-(`[nswag-needs-operationid]`), Task 8 (`[nswag-compile-verification]`) and Task 9
-(`[warn-on-swallowed-exception]`) — nine commits total:
+(`[nswag-needs-operationid]`), Task 8 (`[nswag-compile-verification]`), Task 9
+(`[warn-on-swallowed-exception]`) and Task 10 (`[mixed-idiom-execution]`) — nine commits plus one
+uncommitted test-only change:
 
 | Stage | Commit | What it landed |
 |---|---|---|
@@ -17,6 +18,7 @@ Task 5 (`[lockfile-recovery]`), Task 6 (`[typed-path-parameters]`), Task 7
 | 7 — `[nswag-needs-operationid]` | `2dedf4b` | NSwag now gets a convention guess too, gated on the spec declaring an `operationId` with no `_` in it — measured directly against a real nswag 14.7.1 client, both for the happy path (`{PascalCase(operationId)}Async`) and for the underscore hazard (NSwag's default `operationGenerationMode` splits onto a different client class). **Partially reopens** the "NSwag convention derivation does not work" finding below — see that finding's own correction note, and `ClientCallPlanner`'s doc comment, for the full measured evidence. Refit gets no convention still, but its own reasoning is now recorded as a *permanent* limitation, distinct from NSwag's gated one, not lumped in with it |
 | 8 — `[nswag-compile-verification]` | *(this change, uncommitted)* | The third instance of one recurring PR defect closed properly: NSwag's convention-derived call — materially different in shape from Kiota's (a flat `{Method}(args)` on the client type itself, not a builder-chain indexer) — was asserted only as a string in `ClientCallPlannerTests`, with nothing compiling it. A new `CompileVerificationTests` case builds a real project with an NSwag-derived call over a `format: uuid` path parameter, proving the `Guid.Parse(...)` conversion compiles against a strongly-typed parameter and that the token-carrying overload is selected by name. The audit this task's own review asked for found a second gap in the same category — `int.Parse(...)`/`long.Parse(...)` path-parameter conversions asserted only as text in `TemplateRendererClientTests`, never compiled anywhere — recorded below at the time, then closed in a follow-up pass by `CompileVerificationTests.GeneratedProjectWithIntegerAndLongPathParametersCompiles` (see that finding's own closure note) |
 | 9 — `[warn-on-swallowed-exception]` | *(this change, uncommitted)* | The pinned client-routed catch's second clause used to discard the client's own exception outright once a response was already captured — silent on the specific failure mode a reviewer raised: a `client-map.json` override issuing more than one call, where an earlier one captures and a later one fails before reaching the wire. A per-test `IRunDiagnostics` sink now flows through `ApiTestCore.BeginTest`/`ApiTestBase.ApiTestInitialize` (the same seam `testDisplayName` already uses), and the second catch calls the new `ApiTestCore.WarnSwallowedClientException(ex)`, which reports the exception's type and message at `Warn` — reaching the operator even on a run that otherwise passes |
+| 10 — `[mixed-idiom-execution]` | *(this change, uncommitted, test-only)* | An audit found the "mixed suite" risk below (a client-routed Success case and its raw-HTTP auth/declared-error siblings sharing one generated class, `[success-only]`) was **compiled** in three `CompileVerificationTests` cases but never **run** anywhere — every Golden test that runs an auth case configures no `client` section, and every Golden test that configures one has no auth case in play. `GeneratedSuiteExecutionTests.GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings` closes that: it reuses `SpecWithSecuredOperation`, adds a `client` section and a small extension to `GoldenTypedClientSources.FakeApiRequestBuilder` (a new `Secure` builder over `GET /api/secure`), and runs all three cases in one generated class — `GetSecureResource_Contract` now client-routed, `_Unauthorized`/`_Forbidden` still raw HTTP — against the live stub. See the "mixed suite" risk entry below for what running it actually showed |
 
 **Goal:** Let a team opt in, via a new `client` section in `intest.json`, to having generated
 tests invoke their own pre-generated API client (Kiota, NSwag, Refit) instead of building
@@ -889,6 +891,18 @@ its numbers were measured against; re-measure before trusting any of them past t
   and `GeneratedClientRoutedCaseStillRethrowsWhenNothingWasCaptured` —
   `GeneratedClientRoutedSuccessCaseReceivesAConformingBody` gained one extra assertion in place
   rather than a fourth new test method). All four counts increased or held; none decreased.
+- **Re-measured on top of commit `c4fbc3c` (Task 10 `[mixed-idiom-execution]`, uncommitted,
+  test-only, 2026-08-26)** (`dotnet build InTest.sln`, then each suite `--no-build`): build clean,
+  0 warnings, `samples/*.json` restored with `git checkout -- samples/` after each build (a
+  `dotnet build` regenerates them; never staged). `InTest.Architecture.Tests` **12** passing
+  (unchanged — this task never touched that project). `InTest.Cli.Tests` **604** passing
+  (unchanged — no `src/InTest.Cli/**` change; this task is test-only per its own constraint).
+  `InTest.Runtime.Tests` **250** passing (unchanged — no `src/InTest.Runtime/**` change either).
+  `InTest.Golden.Tests` **50** passing (3m48s; +1:
+  `GeneratedSuiteExecutionTests.GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings`,
+  plus a small, additive extension to `GoldenTypedClientSources.FakeApiRequestBuilder` — a new
+  `Secure` builder property — that no other test's assertions depend on). All four counts increased
+  or held; none decreased.
 
 ---
 
@@ -900,6 +914,32 @@ its numbers were measured against; re-measure before trusting any of them past t
   feature's own motivation names. Accepted for v1: guessing query-parameter or request-body
   binding across three generators is how a wrong test ships that still compiles, and the override
   map covers any operation a team actually cares about routing through the client.
+
+  **`[mixed-idiom-execution]`, Task 10 — this shape was compiled but never run, until now.** An
+  audit found the mixed class above was exercised only by three `CompileVerificationTests` cases
+  (`dotnet build`, never `dotnet test`): every Golden test that runs an auth case
+  (`AuthCasesReceiveRealStatusesOverTheWireAndSuccessCasesStillPass`) configures no `client`
+  section, and every Golden test that configures one exercises the unsecured `getStatus` operation,
+  with no auth case in play. `GeneratedSuiteExecutionTests.GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings`
+  reuses `SpecWithSecuredOperation` with a `client` section added, so `GetSecureResource_Contract`
+  becomes client-routed while `_Unauthorized`/`_Forbidden` stay raw HTTP in the same generated
+  `SecureTests.g.cs` — and runs all three against the live stub. Two things this test asked whether
+  the shared runtime state would disturb, both confirmed harmless: **`InTestAmbient.LastCapturedResponse`**
+  is reassigned to a *fresh* `CapturedResponseSlot` in `ApiTestCore.BeginTest` for every test
+  method, so the client-routed case's capture can never leak into either auth case's own run, or
+  vice versa — there is no cross-case state to disturb in the first place, only a cross-*test*
+  boundary that was already guaranteed clean. **`ResponseCaptureHandler`, attached to
+  `InTestClients.Api` for the whole run once any case in the plan resolved a client call (a
+  project-wide flag, not a per-case one), now also runs over the two auth cases' own
+  `Client.SendAsync` calls** — every one of their responses gets captured into the ambient slot
+  exactly like the client-routed call's does, even though neither auth case's rendered body ever
+  reads `LastCapturedResponse` at all. Measured, not merely asserted: the handler capturing an
+  unread value costs nothing and changes nothing about either raw-HTTP case's own outcome — this is
+  exactly what `[capture-is-opt-in]`'s own doc predicted ("the handler simply has nothing extra to
+  do for those cases"), now confirmed by an actual run rather than left as a prediction. All three
+  cases passed with real statuses over the wire, and process output carried neither
+  `[client-rides-the-api-pipeline]`'s "no response has been captured" exception nor an unexpected
+  `[warn-on-swallowed-exception]` warning.
 - **Generator-version fragility.** Kiota and NSwag have both changed default naming/topology
   across majors. `[compiler-is-oracle]` is the defence — a convention that compiles today but
   breaks against a regenerated client (regenerated by the adopter's own tooling, entirely outside

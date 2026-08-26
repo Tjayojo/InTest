@@ -327,6 +327,17 @@ internal static class GoldenTypedClientSources
     {
         public FakeStatusRequestBuilder Status { get; } = new(httpClient);
         public FakePingRequestBuilder Ping { get; } = new(httpClient);
+
+        // [success-only]-and-[mixed-idiom-execution]: GET /api/secure, a secured operation whose
+        // Success case is client-routed while its 401/403 siblings (built from TestPlanBuilder's
+        // separate PlanAuthCases helper, never touched by ClientCallPlanner per [success-only])
+        // stay raw HTTP in the very same generated class. Used only by
+        // GeneratedSuiteExecutionTests.GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings
+        // — every other test in this file that registers FakeOrdersApiClient exercises an
+        // unsecured operation, so nothing before that test ever proved AuthHandler's token
+        // actually reaches a client-routed call the way it already does for a raw-HTTP one
+        // (AuthCasesReceiveRealStatusesOverTheWireAndSuccessCasesStillPass).
+        public FakeSecureRequestBuilder Secure { get; } = new(httpClient);
     }
 
     /// <summary>[stage-3b]: GET /api/ping, a bodiless-204 operation — see FakeOrdersApiClient's own
@@ -350,6 +361,36 @@ internal static class GoldenTypedClientSources
             // ShouldMatchCapturedStatusAsync via ResponseCaptureHandler's already-stashed capture —
             // this method's own IsSuccessStatusCode check has no way to see the mismatch, on
             // purpose: mirroring a real generated client, which would not either.
+        }
+    }
+
+    /// <summary>[mixed-idiom-execution]: GET /api/secure, mirroring FakeStatusRequestBuilder.GetAsync's
+    /// own body (same non-2xx exception, same ReadAsStreamAsync deserialization) — the golden test
+    /// that uses this needs no schema-violation variant of its own, so this builder returns the
+    /// same FakeStatusResult shape rather than inventing a parallel result type. Deliberately no
+    /// Authorization header of its own: [client-rides-the-api-pipeline] means AuthHandler, already
+    /// attached to InTestClients.Api, is what has to put the bearer token on this request for it to
+    /// reach GoldenApiStub.HandleSecureResource's 200 arm — the same mechanism the raw-HTTP
+    /// GetSecureResource_Contract case relied on before this operation's client got configured, now
+    /// proven to reach a client-routed call too.</summary>
+    public sealed class FakeSecureRequestBuilder(HttpClient httpClient)
+    {
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+        public async Task<FakeStatusResult> GetAsync(
+            Action<FakeRequestConfiguration>? requestConfiguration = default, CancellationToken cancellationToken = default)
+        {
+            using var response = await httpClient.GetAsync("/api/secure", cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new FakeApiException((int)response.StatusCode);
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var result = await JsonSerializer.DeserializeAsync<FakeStatusResult>(stream, JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return result ?? new FakeStatusResult();
         }
     }
 
