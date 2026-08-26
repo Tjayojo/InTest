@@ -983,6 +983,65 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// [finding-3]'s coverage-gap closure. Before this test, no golden test compiled a
+    /// client-routed case with a path parameter at all —
+    /// <see cref="GoldenTypedClientSources.FakeOrdersApiClient"/> had no indexer anywhere until
+    /// this same finding added one, so <c>ClientCallPlanner.BuildKiotaConvention</c>'s
+    /// <c>Api.Status[{id}].GetAsync</c> shape — and the template's
+    /// <c>#pragma warning disable CS0618</c> wrapping it — went completely unexercised by anything
+    /// that actually compiles.
+    /// <para>
+    /// <c>GetStatusById_Contract</c>'s typed-client call reaches exactly the
+    /// <c>[Obsolete]</c>-marked <c>this[string]</c> overload confirmed against a real kiota 1.34.1
+    /// client (this plan's own risk section): <c>FixtureParameter</c> returns
+    /// <see cref="string"/>, and <c>FakeStatusRequestBuilder</c> now carries that same overload,
+    /// obsolete text verbatim, alongside the typed <c>this[Guid]</c> one real kiota output also
+    /// has.
+    /// </para>
+    /// <para>
+    /// <c>-p:WarningsAsErrors=CS0618</c> — not a blanket <c>TreatWarningsAsErrors</c> — is what
+    /// actually proves the pragma matters: the scaffold's own <c>.csproj</c> sets no
+    /// <c>TreatWarningsAsErrors</c>, so without promoting this one warning code to an error the
+    /// build would succeed even with the defect this test exists to catch reintroduced (CS0618
+    /// would merely warn, never fail). A blanket flip risks failing on some unrelated warning this
+    /// test has no business asserting about.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedClientRoutedSuccessCaseWithAPathParameterCompilesDespiteTheObsoleteIndexer()
+    {
+        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+
+        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
+        var generatedText = File.ReadAllText(generatedFile);
+
+        generatedText.ShouldContain(
+        "Api.Status[FixtureParameter(\"getStatusById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);",
+        customMessage: "getStatusById's client-routed case should splice the indexer exactly as " +
+                       "ClientCallPlanner.BuildKiotaConvention derives it");
+        generatedText.ShouldContain("#pragma warning disable CS0618",
+        customMessage: "the client call must be wrapped in the CS0618 suppression -- see [finding-3]");
+        generatedText.ShouldContain("#pragma warning restore CS0618");
+
+        var build = await ProcessRunner.RunAsync("dotnet",
+        $"build \"{_root}\" --nologo -v q -p:WarningsAsErrors=CS0618");
+        build.ExitCode.ShouldBe(0,
+        $"generated project failed to build with CS0618 promoted to an error -- the #pragma " +
+        $"suppression did not take effect:{Environment.NewLine}{build.Output}");
+        build.Output.ShouldNotContain("CS0618", customMessage: build.Output);
+    }
+
+    /// <summary>
     /// F10 inverted (Task 1, Step 3). Before the readiness client existed, this exact scenario —
     /// a throwing handler on <c>InTestClients.Api</c>, exactly where an adopter's own bearer
     /// handler attaches via <c>TestStartup.cs</c>'s <c>Register</c> hook — made

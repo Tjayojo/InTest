@@ -861,6 +861,94 @@ public class InitCommandTests
     }
 
     /// <summary>
+    /// Reproduced defect: a real run of <c>--client-lockfile</c> scaffolded
+    /// <c>"D:/TestGen/.claude/worktrees/intest-pregenerated-api-clients-168695/samples/Orders.Api/Orders.Api.json"</c>
+    /// verbatim into <c>intest.json</c>'s <c>spec.source</c> — the exact absolute path the dev box
+    /// it ran on happened to check the repo out to. A teammate cloning elsewhere, or CI, then fails
+    /// `generate` with "spec file not found" against a path that looks correct and explains
+    /// nothing. This proves the fix: when the recovered location is genuinely reachable from the
+    /// project root via a relative path, `init` scaffolds the relative form instead — portable
+    /// across machines regardless of where each one checked the repo out to, as long as the spec's
+    /// position relative to the project stays the same.
+    /// </summary>
+    [TestMethod]
+    public void ClientLockfileRelativizesAnAbsoluteSpecLocationReachableFromTheProjectRoot()
+    {
+        // A sibling of _root, not a descendant — proving relativization is not merely "strip a
+        // shared prefix" but a real Path.GetRelativePath computation, matching the real-world
+        // shape (spec.source and the scaffolded project both live under the same repo checkout,
+        // as siblings, not one nested inside the other).
+        var specDir = Path.Combine(Path.GetDirectoryName(_root)!, "orders-shared-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(specDir);
+        var absoluteSpecPath = Path.GetFullPath(Path.Combine(specDir, "Orders.Api.json"));
+
+        var lockfilePath = WriteKiotaLockfile(_root, $$"""{ "descriptionLocation": "{{absoluteSpecPath.Replace("\\", "/")}}" }""");
+
+        try
+        {
+            InitCommand.Run(_root, "Orders.ApiTests", specSource: "", lockfilePath).ShouldBe(ExitCode.Ok);
+
+            var config = ConfigLoader.Load(_root);
+            config.SpecSource.ShouldBe($"../{Path.GetFileName(specDir)}/Orders.Api.json");
+        }
+        finally
+        {
+            ForceDeleteDirectory(specDir);
+        }
+    }
+
+    /// <summary>
+    /// The "otherwise" half: when the recovered absolute location cannot be expressed relative to
+    /// the project root at all — no shared root, which on a real filesystem means distinct drive
+    /// letters on Windows (a POSIX filesystem has exactly one root, so any two absolute paths on it
+    /// can always be related through some number of "../" segments) — `init` leaves the recovered
+    /// value exactly as-is and prints a warning naming it, rather than silently shipping an
+    /// absolute path with nothing on record explaining why. `init` still succeeds: this is
+    /// recoverable by hand, not a reason to refuse the whole scaffold.
+    /// </summary>
+    [TestMethod]
+    public void ClientLockfileWarnsInsteadOfRelativizingWhenNoRelativePathExists()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Path.GetRelativePath can always express one POSIX absolute path relative to another
+            // — a single shared root ("/") is guaranteed by construction — so this branch is only
+            // reachable at all when two paths name distinct drive roots, a Windows-only concept.
+            Assert.Inconclusive(
+            "the 'cannot relativize' branch needs two distinct drive roots, which POSIX has no " +
+            "equivalent of — nothing to prove on this platform.");
+            return;
+        }
+
+        var rootDrive = Path.GetPathRoot(Path.GetFullPath(_root))!.TrimEnd('\\');
+        var otherDriveLetter = rootDrive.StartsWith("C", StringComparison.OrdinalIgnoreCase) ? "Z" : "C";
+        var absoluteSpecPath = $"{otherDriveLetter}:/Orders/Orders.Api.json";
+
+        var lockfilePath = WriteKiotaLockfile(_root, $$"""{ "descriptionLocation": "{{absoluteSpecPath}}" }""");
+
+        var originalOut = Console.Out;
+        var capturedOut = new StringWriter();
+        Console.SetOut(capturedOut);
+        int exitCode;
+        try
+        {
+            exitCode = InitCommand.Run(_root, "Orders.ApiTests", specSource: "", lockfilePath);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        exitCode.ShouldBe(ExitCode.Ok);
+        var config = ConfigLoader.Load(_root);
+        config.SpecSource.ShouldBe(absoluteSpecPath);
+
+        var output = capturedOut.ToString();
+        output.ShouldContain("Warning", Case.Sensitive);
+        output.ShouldContain(absoluteSpecPath, Case.Sensitive);
+    }
+
+    /// <summary>
     /// Giving both is a contradiction, not a preference — refused before either is acted on,
     /// naming both values, with no silent priority pick.
     /// </summary>

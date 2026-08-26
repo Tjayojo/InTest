@@ -270,6 +270,33 @@ public sealed class TemplateRenderer
     /// mirroring the raw-HTTP branch's own long-standing choice between
     /// <c>ShouldMatchContractAsync</c> and <c>ShouldMatchStatusAsync</c>.
     /// </para>
+    /// <para>
+    /// <b>Reproduced defect, now fixed: a self-closing override must not get a second argument
+    /// list appended.</b> The unconditional <c>$"{expression}(cancellationToken: …)"</c> this
+    /// method used to return was correct only for a bare call chain — a Kiota-convention
+    /// expression such as <c>Api.Orders[{id}].GetAsync</c>, which names a method with no argument
+    /// list of its own. <c>client-map.json</c>'s own documented escape hatch is exactly the
+    /// opposite shape: getting-started.md tells an adopter to "wrap it in parentheses with any
+    /// additional argument the call needs", i.e. to spell the whole call, arguments included —
+    /// <c>"createOrder": "Api.Orders.PostAsync(new CreateOrderRequest())"</c>, confirmed by direct
+    /// reproduction to generate
+    /// <c>await ApiClient&lt;…&gt;().Api.Orders.PostAsync(new CreateOrderRequest())(cancellationToken:
+    /// TestContext.CancellationToken);</c> — CS0149, "method group cannot be invoked twice" —
+    /// against exactly the case this map exists to cover (the query-parameter and request-body
+    /// operations <see cref="Planning.ClientCallPlanner"/>'s own convention gates withhold). An
+    /// override that already closes its own parentheses is spliced verbatim; only a bare call
+    /// chain gets the token appended. Distinguished the only way available here — no parser, no
+    /// knowledge of what <see cref="TestCasePlan.ClientCallExpression"/>'s author intended, only
+    /// the text itself — by whether the expression, after path-parameter substitution, already
+    /// ends with a closing <c>)</c>: every shape <see cref="Planning.ClientCallPlanner.BuildKiotaConvention"/>
+    /// produces ends in a bare verb-method name (<c>GetAsync</c>, <c>PostAsync</c>, …, per its own
+    /// doc comment — "no trailing <c>()</c> … stage 3 owns the call arguments"), and every
+    /// documented override shape that supplies its own arguments necessarily ends by closing the
+    /// parenthesis it opened. A hand-written override that violates that pattern — ending in
+    /// something other than a bare identifier or a closed call, e.g. an indexer with no verb — is
+    /// not a shape <c>client-map.json</c>'s own contract describes, and <c>[compiler-is-oracle]</c>
+    /// catches it at the adopter's next build regardless of which arm this heuristic takes.
+    /// </para>
     /// </summary>
     private static string? BuildClientCallExpression(TestCasePlan plan, string? clientTypeName)
     {
@@ -287,7 +314,12 @@ public sealed class TemplateRenderer
                 $"{{{name}}}", FixtureParameterCall(operationKeyLiteral, name), StringComparison.Ordinal);
         }
 
-        return $"{expression}(cancellationToken: TestContext.CancellationToken)";
+        // A self-closing override (one that already spells its own argument list, e.g. a typed
+        // body or a RequestConfiguration lambda — exactly what client-map.json's override map
+        // exists to cover) is spliced verbatim; only a bare call chain gets the cancellation token
+        // appended. See this method's own doc comment for the reproduced CS0149 this guards
+        // against and why "already ends with ')'" is the correct — not merely convenient — test.
+        return expression.EndsWith(')') ? expression : $"{expression}(cancellationToken: TestContext.CancellationToken)";
     }
 
     /// <summary>

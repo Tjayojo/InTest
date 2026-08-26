@@ -176,6 +176,51 @@ public class ClientCallPlannerTests
         resolution.UnresolvedReason.ShouldContain("request body");
     }
 
+    // ---- Resolve: an unsupported HTTP verb withholds convention instead of crashing ----------
+
+    /// <summary>
+    /// Reproduced defect: before this gate existed, a HEAD/OPTIONS/TRACE operation with neither a
+    /// query parameter nor a request body sailed past both existing gates and reached
+    /// <see cref="ClientCallPlanner.BuildKiotaConvention"/>, which throws for any verb outside
+    /// GET/POST/PUT/PATCH/DELETE — confirmed by direct reproduction: a spec with
+    /// <c>head: { responses: { "200": … } }</c> on <c>/api/ping</c> crashed `generate` with
+    /// <c>ArgumentException: 'HEAD' has no known Kiota verb-method convention</c>, exit 2, the
+    /// instant a `client` section was configured. <see cref="Resolve"/> must absorb that the same
+    /// way it already absorbs the query-parameter and request-body gates: a withheld resolution
+    /// plus a reason naming the verb, never an escaped exception.
+    /// </summary>
+    [TestMethod]
+    public void ResolveWithholdsConventionForAnUnsupportedHttpVerbInsteadOfThrowing()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.Kiota, "ping", "HEAD", "/api/ping",
+            hasQueryParameters: false, hasRequestBody: false, NoOverrides);
+
+        resolution.Expression.ShouldBeNull();
+        resolution.UnresolvedReason.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldContain("HEAD", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
+    }
+
+    /// <summary>An override still wins outright for an unsupported verb — the same
+    /// override-runs-first guarantee <see cref="ResolveReturnsTheOverrideEvenWhenTheOperationHasQueryParametersOrABody"/>
+    /// already pins for the other two gates, extended to the new one.</summary>
+    [TestMethod]
+    public void ResolveReturnsTheOverrideEvenForAnUnsupportedHttpVerb()
+    {
+        var overrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ping"] = "Api.Ping.CustomAsync()"
+        };
+
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.Kiota, "ping", "HEAD", "/api/ping",
+            hasQueryParameters: false, hasRequestBody: false, overrides);
+
+        resolution.Expression.ShouldBe("Api.Ping.CustomAsync()");
+        resolution.UnresolvedReason.ShouldBeNull();
+    }
+
     // ---- Resolve: NSwag and Refit get no convention guess -------------------------------------
 
     [TestMethod]

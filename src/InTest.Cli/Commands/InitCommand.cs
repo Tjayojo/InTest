@@ -227,6 +227,55 @@ public static class InitCommand
                 "\"client\" section to intest.json by hand afterward.");
                 return ExitCode.ToolError;
             }
+
+            // Reproduced defect: kiota's own `descriptionLocation` is measured (ClientLockfile's
+            // own doc comment) to be an absolute local path with forward slashes when the source
+            // was one — confirmed against a real fixture: a real run scaffolded
+            // "D:/TestGen/.claude/worktrees/intest-pregenerated-api-clients-168695/samples/Orders.Api/Orders.Api.json"
+            // verbatim into intest.json's spec.source. That is exactly the value the dev box it was
+            // generated on happened to check the repo out to — a teammate cloning elsewhere, or CI,
+            // then fails `generate` with "spec file not found" against a path that looks correct
+            // and names nothing about why. A plain, hand-typed `--spec` is not touched by this:
+            // that value is the adopter's own explicit choice, made looking at intest.json as they
+            // write it, unlike a lockfile-recovered one nobody reviewed for portability.
+            //
+            // Only attempted for a rooted (i.e. genuinely absolute) local path, never a URL —
+            // ClientLockfile.Recover treats descriptionLocation as an opaque string regardless of
+            // shape, so this is the first point that distinguishes them, the same way the
+            // specSourceIsUrl guard below does for a hand-typed --spec. A relative
+            // descriptionLocation (kiota was invoked with a relative --openapi) is left exactly as
+            // recovered — it is already expressed relative to *something*, and rewriting it
+            // relative to a different base (the project root) without knowing what that something
+            // was would silently change what it points at rather than merely reformat it.
+            if (!SpecLoader.IsUrl(specSource) && Path.IsPathRooted(specSource))
+            {
+                var fullProjectRoot = Path.GetFullPath(projectRoot);
+                var relativized = Path.GetRelativePath(fullProjectRoot, specSource).Replace('\\', '/');
+
+                // Path.GetRelativePath hands back `specSource` itself (still rooted) exactly when
+                // it cannot express one path relative to the other at all — different drive roots
+                // on Windows, chiefly, since a POSIX filesystem has exactly one root and can always
+                // relate two absolute paths through some number of "../" segments. Nothing to
+                // rewrite in that case; warn instead, loudly enough to read even though `init`
+                // still succeeds and exits 0 (CLAUDE.md's "fail loudly" is about silence, not
+                // severity — this is recoverable by hand, not a reason to refuse the whole
+                // scaffold), so the absolute path does not silently ship into a committed
+                // intest.json with nothing on record explaining why it looks the way it does.
+                if (Path.IsPathRooted(relativized))
+                {
+                    Console.WriteLine(
+                    $"Warning: --client-lockfile recovered an absolute spec location " +
+                    $"('{specSource}') that intest could not express as a path relative to the " +
+                    $"project root ('{fullProjectRoot}') — scaffolding it as-is. Anyone who checks " +
+                    "this project out somewhere else (a teammate, CI) will get \"spec file not " +
+                    "found\" from `generate` until spec.source is repointed by hand, or by editing " +
+                    "intest.json directly.");
+                }
+                else
+                {
+                    specSource = relativized;
+                }
+            }
         }
 
         // Normalised once, before either escaping step, and — [lockfile-recovery] — after

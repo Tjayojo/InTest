@@ -41,13 +41,36 @@ public partial class {{ class_name }} : {{ base_class }}
         // before the try because ShouldMatchCapturedContractAsync takes elapsed and the throwing
         // path still needs a real number. The filter's two '?.'s and the empty second catch are
         // both load-bearing, not stylistic — see that decision's own text before changing either.
+        //
+        // The second catch's own filter (`ex is not OperationCanceledException`) is load-bearing
+        // too, added after a review finding: a bare `catch (Exception)` here would swallow a
+        // cancellation — the test run being cancelled mid-call, say — and report whatever the
+        // captured response happened to hold as the verdict instead of letting the cancellation
+        // propagate. It went unnoticed because ShouldMatchCapturedContractAsync/
+        // ShouldMatchCapturedStatusAsync both call TestContext.CancellationToken.
+        // ThrowIfCancellationRequested before doing anything else, which incidentally re-raises a
+        // cancellation that already happened — but that is a property of those two methods, not a
+        // guarantee this catch block can rely on staying true.
         var stopwatch = Stopwatch.StartNew();
         try
         {
+            // Kiota's per-parameter item builder carries this call through the SAME [Obsolete]
+            // this[string] overload FixtureParameter's return type always reaches — confirmed
+            // against real kiota 1.34.1 output (OrdersItemRequestBuilder.cs,
+            // CustomersItemRequestBuilder.cs both declare a this[Guid] and an [Obsolete]-marked
+            // this[string], and ClientCallPlanner's own doc comment names the same finding). The
+            // deprecation text itself says the string overload "will be removed in the next major
+            // version" — see docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md's
+            // risk section for what that means for this generator and the type-mapping layer that
+            // would let InTest target the typed overload instead. Scoped to this one statement,
+            // not the whole file, so a future non-Obsolete call this template emits is never
+            // silently shielded from a real CS0618 of its own.
+#pragma warning disable CS0618
             await ApiClient<{{ tc.client_type_name }}>().{{ tc.client_call_expression }};
+#pragma warning restore CS0618
         }
         catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }
-        catch (Exception) { /* the captured response is the verdict */ }
+        catch (Exception ex) when (ex is not OperationCanceledException) { /* the captured response is the verdict */ }
         stopwatch.Stop();
 
 {{~ if tc.schema_key_literal ~}}

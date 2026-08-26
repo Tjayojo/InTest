@@ -1422,4 +1422,50 @@ public class TestPlanBuilderTests
 
         plan.Notes.ShouldNotContain(n => n.Reason.Contains("stale"));
     }
+
+    // ---- Reproduced crash: a HEAD/OPTIONS/TRACE operation with a `client` section configured --
+
+    private const string SpecWithAHeadOperation = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/api/ping": {
+          "head": {
+            "operationId": "ping",
+            "tags": ["Status"],
+            "responses": { "200": { "description": "ok" } }
+          }
+        }
+      }
+    }
+    """;
+
+    /// <summary>
+    /// The reproduced defect this task exists to fix, at the layer that actually crashed:
+    /// <c>ClientCallPlanner.Resolve</c> used to call <c>BuildKiotaConvention</c> unconditionally
+    /// once the query-parameter and request-body gates both passed — neither of which a bodiless
+    /// HEAD operation ever trips — and that method throws for any verb outside
+    /// GET/POST/PUT/PATCH/DELETE. Confirmed by direct reproduction before this fix: `generate`
+    /// against a spec with <c>head: { responses: { "200": … } }</c> on <c>/api/ping</c> generated
+    /// cleanly with no <c>client</c> section configured, then crashed with
+    /// <c>intest: unexpected failure: ArgumentException: 'HEAD' has no known Kiota verb-method
+    /// convention</c>, exit 2, the moment one was added — this test is the
+    /// <see cref="TestPlanBuilder"/>-level half of that reproduction (<c>ClientCallPlannerTests</c>
+    /// pins the same fix one layer down, directly against <c>Resolve</c>). Must not throw, and must
+    /// still generate the HEAD operation's Success case over raw HTTP with a
+    /// <see cref="CoverageNote"/> pointing at <c>client-map.json</c> — the same "note, not a crash"
+    /// treatment every other withheld-convention reason on this plan already gets.
+    /// </summary>
+    [TestMethod]
+    public async Task AHeadOperationWithAClientConfiguredGeneratesInsteadOfCrashing()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(SpecWithAHeadOperation)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "ping");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "ping" &&
+            n.Reason.Contains("HEAD", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
 }

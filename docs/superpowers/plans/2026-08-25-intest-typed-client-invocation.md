@@ -571,6 +571,33 @@ for free.
   undesigned. One field is now measured rather than assumed, though: `kiotaVersion` is confirmed
   stable and always-present in a real kiota 1.34.1 lockfile — previously listed here as an open
   question, not a verified fact.
+
+  **This risk is now concrete and dated, not hypothetical, for the Kiota convention itself.** A
+  code-review finding on the shipped feature confirmed what a real kiota 1.34.1 client's own
+  attribute already says, word for word: `OrdersItemRequestBuilder`'s (and every other item
+  builder's) `this[string position]` indexer — the exact overload
+  `ClientCallPlanner.BuildKiotaConvention`'s splice depends on, since `FixtureParameter` returns
+  `string` — carries
+  `[Obsolete("This indexer is deprecated and will be removed in the next major version. Use the
+  one with the typed parameter instead.")]`. That is Kiota's own generator telling adopters, today,
+  that the overload this convention relies on is scheduled for removal, not merely at risk of a
+  breaking rename the way "generators change across majors" reads as an abstract possibility above.
+  When that major ships, every convention-derived path-parameter call `[compiler-is-oracle]`
+  accepted today stops compiling at once — not a slow drift, a single-version cliff. The stopgap
+  shipped alongside this finding (a `#pragma warning disable CS0618` scoped to the generated call
+  site, so a `TreatWarningsAsErrors` adopter's *current* build does not break on the warning Kiota
+  already emits) buys time against the warning, not against the eventual removal — the pragma
+  cannot suppress a member that no longer exists. **The real mitigation is the same type-mapping
+  layer NSwag support already needs** (see "Two findings settled by direct experiment" above): a
+  layer that turns a path parameter's declared `type`/`format` into a conversion expression
+  (`format: uuid` → `Guid.Parse(...)`, `integer` → `int.Parse(...)`) before splicing a fixture's raw
+  string value in, would let this convention target the *typed* indexer (`this[Guid position]`,
+  confirmed present alongside the obsolete one in the same measured fixture) instead of the
+  deprecated string one — permanently outrunning the removal rather than merely deferring it. That
+  is the same missing layer `TestPlanBuilder.PathParameterKinds` already carries a coarser version
+  of, and the same one NSwag's strongly-typed, no-string-overload parameters need before *that*
+  generator can get a convention at all. One piece of future work unblocks both gaps this plan
+  currently ships without; it remains unbuilt today, so both gaps remain open until it lands.
 - **Stale `client-map.json` entries warn, not block** — a `CoverageNote`, softer than fixtures'
   drift-blocks-`generate` gate, because (unlike a fixture) there is no second derivable answer to
   diff an override against; the only available check is "does this key still name an operation in

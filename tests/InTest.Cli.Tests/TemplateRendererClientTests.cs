@@ -62,6 +62,30 @@ public class TemplateRendererClientTests
             Category: "Contract",
             ClientCallExpression: "Api.Orders.GetAsync")]);
 
+    /// <summary>
+    /// A <c>client-map.json</c> override that already spells its own argument list — exactly the
+    /// documented shape getting-started.md's own worked example uses ("wrap it in parentheses with
+    /// any additional argument the call needs"), and the reproduced-CS0149 case
+    /// <c>BuildClientCallExpression</c>'s own doc comment names: a POST whose typed body
+    /// <c>ClientCallPlanner</c>'s convention gate withholds, routed through the client by an
+    /// override instead.
+    /// </summary>
+    private static TestClassPlan PlanWithSelfClosingOverride() => new(
+        "OrdersTests", "Orders",
+        [new TestCasePlan(
+            MethodName: "CreateOrder_Contract",
+            DisplayName: "Given Orders, when createOrder, then 201",
+            OperationKey: "createOrder",
+            OperationKeySynthesized: false,
+            HttpMethod: "POST",
+            PathTemplate: "/orders",
+            PathParameterNames: [],
+            ExpectedStatus: 201,
+            SchemaKey: "Order",
+            Category: "Contract",
+            HasRequestBody: true,
+            ClientCallExpression: "Api.Orders.PostAsync(new CreateOrderRequest())")]);
+
     /// <summary>One raw-HTTP Success case alongside one client-routed Success case, in the same
     /// class — the design's own "a class freely mixes client-routed Success cases with raw-HTTP
     /// siblings" claim (the typed-client-invocation plan's Template section), proved directly
@@ -133,17 +157,60 @@ public class TemplateRendererClientTests
     }
 
     [TestMethod]
+    public void AppendsTheCancellationTokenToABareCallChainButNotToASelfClosingOverride()
+    {
+        // Reproduced defect: BuildClientCallExpression used to append "(cancellationToken: …)"
+        // unconditionally, so a client-map.json override that already spells its own argument
+        // list — getting-started.md's own documented shape for the exact operations
+        // ClientCallPlanner's convention gates withhold — rendered
+        // "PostAsync(new CreateOrderRequest())(cancellationToken: …)", CS0149 ("cannot invoke a
+        // non-delegate type twice"). A bare Kiota-convention chain (no override) must still get
+        // the token appended, or the generated call never passes one at all.
+        var bareChain = Render(PlanWithClientCall());
+        var selfClosingOverride = Render(PlanWithSelfClosingOverride());
+
+        bareChain.ShouldContain("Api.Orders[FixtureParameter(\"getOrderById\", \"id\")].GetAsync(cancellationToken: TestContext.CancellationToken);");
+
+        selfClosingOverride.ShouldContain("await ApiClient<Orders.ApiClient.OrdersApiClient>().Api.Orders.PostAsync(new CreateOrderRequest());");
+        selfClosingOverride.ShouldNotContain("cancellationToken:",
+        customMessage: "a self-closing override already closed its own argument list — appending " +
+                       "a second one is the exact CS0149 this test guards against");
+        selfClosingOverride.ShouldNotContain("CreateOrderRequest())(",
+        customMessage: "the reproduced defect's own shape: a second, appended argument list " +
+                       "immediately after the override's own closing ')'");
+    }
+
+    [TestMethod]
     public void WrapsTheClientCallInThePinnedTryExceptionFilterCatchShape()
     {
-        // [captured-response-is-the-verdict]'s pinned shape, verbatim: two '?.'s in the filter
-        // (the first for "no slot, no test scope active", the second for "slot exists but nothing
-        // captured yet" — InTestAmbient.LastCapturedResponse's own doc explains why a single
-        // '?.' cannot work), and a second, unconditional catch that does nothing but let the
-        // captured-response assertion below run instead.
+        // [captured-response-is-the-verdict]'s pinned shape, verbatim: two '?.'s in the first
+        // filter (the first for "no slot, no test scope active", the second for "slot exists but
+        // nothing captured yet" — InTestAmbient.LastCapturedResponse's own doc explains why a
+        // single '?.' cannot work), and a second catch — filtered to exclude
+        // OperationCanceledException (a review finding: a bare `catch (Exception)` here would
+        // swallow a cancellation and report the captured response as the verdict instead of
+        // letting it propagate) — that otherwise does nothing but let the captured-response
+        // assertion below run instead.
         var rendered = Render(PlanWithClientCall());
 
         rendered.ShouldContain("catch (Exception) when (InTestAmbient.LastCapturedResponse.Value?.Value is null) { throw; }");
-        rendered.ShouldContain("catch (Exception) { /* the captured response is the verdict */ }");
+        rendered.ShouldContain("catch (Exception ex) when (ex is not OperationCanceledException) { /* the captured response is the verdict */ }");
+    }
+
+    [TestMethod]
+    public void DoesNotSwallowAnOperationCanceledExceptionAsTheCapturedVerdict()
+    {
+        // The specific defect the filter above exists to close: before this fix, a bare
+        // `catch (Exception)` matched OperationCanceledException just like any other exception,
+        // so a cancelled client call with a captured response already sitting in the ambient slot
+        // (e.g. a second call inside an override expression whose first call already succeeded)
+        // would report that captured response as the verdict instead of letting the cancellation
+        // propagate. Asserted as "the filter names the type", which is the mechanical guarantee —
+        // proving the runtime effect end-to-end needs a live cancellation, out of reach for a
+        // string-rendering test.
+        var rendered = Render(PlanWithClientCall());
+
+        rendered.ShouldContain("when (ex is not OperationCanceledException)");
     }
 
     [TestMethod]

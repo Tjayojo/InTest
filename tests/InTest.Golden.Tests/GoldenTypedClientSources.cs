@@ -270,6 +270,21 @@ internal static class GoldenTypedClientSources
     /// nothing here has anything to deserialize — mirroring a real Kiota client's own <c>void</c>-
     /// content-type verb methods, which return <see cref="Task"/> too.
     /// </para>
+    /// <para>
+    /// [finding-3]: <see cref="FakeStatusRequestBuilder"/>'s <c>this[string position]</c> indexer,
+    /// added alongside its existing <c>GetAsync()</c> rather than replacing it, carries the exact
+    /// <see cref="ObsoleteAttribute"/> text a real kiota 1.34.1 item builder's own deprecated
+    /// overload does (confirmed directly against <c>OrdersItemRequestBuilder.cs</c> and
+    /// <c>CustomersItemRequestBuilder.cs</c> — see this plan's own risk section for the full
+    /// account). Before this addition, no golden test compiled a client-routed case with a path
+    /// parameter at all — <c>FakeOrdersApiClient</c> had no indexer anywhere, so
+    /// <c>ClientCallPlanner.BuildKiotaConvention</c>'s <c>Api.Status[{id}].GetAsync</c> shape
+    /// (confirmed to compile only against the <c>this[string]</c> overload, since
+    /// <c>FixtureParameter</c> returns <see cref="string"/>) went unexercised end to end, which is
+    /// exactly how the CS0618-with-no-pragma defect this addition covers went unnoticed. The
+    /// <c>this[Guid position]</c> overload alongside it is unused by anything InTest generates
+    /// today — present only so this fake matches the real shape's two-overload indexer, not one.
+    /// </para>
     /// </summary>
     public const string FakeOrdersApiClient = """
     using System.Net.Http;
@@ -330,6 +345,46 @@ internal static class GoldenTypedClientSources
 
             // Deliberately ReadAsStreamAsync, never ReadAsStringAsync — see FakeStatusClient's own
             // doc comment (GoldenTypedClientSources.FakeStatusClient) for the full account.
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var result = await JsonSerializer.DeserializeAsync<FakeStatusResult>(stream, JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return result ?? new FakeStatusResult();
+        }
+
+        // [finding-3]: word-for-word the same deprecation text a real kiota 1.34.1 item builder's
+        // this[string] overload carries (OrdersItemRequestBuilder.cs, CustomersItemRequestBuilder.cs
+        // -- see GoldenTypedClientSources.FakeOrdersApiClient's own doc comment and this plan's risk
+        // section). ClientCallPlanner.BuildKiotaConvention splices FixtureParameter's string return
+        // value in here, so a path-parameter client-routed case reaches exactly this overload --
+        // this is what proves the template's #pragma warning disable CS0618 actually compiles under
+        // TreatWarningsAsErrors, rather than merely rendering text nothing ever builds.
+        [Obsolete("This indexer is deprecated and will be removed in the next major version. Use the one with the typed parameter instead.")]
+        public FakeStatusItemRequestBuilder this[string position] => new(httpClient, position);
+
+        // The typed overload real kiota output carries alongside the deprecated one. Unused by
+        // anything InTest generates today -- present only so this fake's indexer shape matches the
+        // real one measured (two overloads, not one).
+        public FakeStatusItemRequestBuilder this[Guid position] => new(httpClient, position.ToString());
+    }
+
+    /// <summary>[finding-3]: the item builder a path-parameter client-routed case's indexer call
+    /// returns -- GET /api/status/{id}, mirroring FakeStatusRequestBuilder.GetAsync's own body
+    /// (same deserialization shape, same non-2xx exception) against the id the indexer captured.
+    /// </summary>
+    public sealed class FakeStatusItemRequestBuilder(HttpClient httpClient, string id)
+    {
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+        public async Task<FakeStatusResult> GetAsync(
+            Action<FakeRequestConfiguration>? requestConfiguration = default, CancellationToken cancellationToken = default)
+        {
+            using var response = await httpClient.GetAsync($"/api/status/{id}", cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new FakeApiException((int)response.StatusCode);
+            }
+
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             var result = await JsonSerializer.DeserializeAsync<FakeStatusResult>(stream, JsonOptions, cancellationToken)
                 .ConfigureAwait(false);

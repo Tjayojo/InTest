@@ -99,6 +99,25 @@ public static class ClientCallPlanner
     /// request-body Success case is exactly the shape an override exists to cover in the first
     /// place.
     /// </para>
+    /// <para>
+    /// <b>The verb gate — added after a reproduced crash, not a hypothetical.</b> A spec with a
+    /// <c>head</c>/<c>options</c>/<c>trace</c> operation and a <c>client</c> section configured
+    /// used to reach <see cref="BuildKiotaConvention"/> unconditionally once the query-parameter
+    /// and request-body gates both passed (neither of those methods ever carries either), and that
+    /// method throws <see cref="ArgumentException"/> for any verb outside GET/POST/PUT/PATCH/DELETE
+    /// — confirmed by direct reproduction: a spec with <c>head: { responses: { "200": … } }</c> on
+    /// <c>/api/ping</c> generated cleanly with no <c>client</c> section, then crashed `generate`
+    /// with <c>intest: unexpected failure: ArgumentException: 'HEAD' has no known Kiota
+    /// verb-method convention</c>, exit 2, the instant one was added. Throwing is the right
+    /// contract for <see cref="BuildKiotaConvention"/> itself — a <b>public</b> method with no
+    /// gating of its own, so it must fail loudly rather than hand back a nonsense expression — but
+    /// <see cref="Resolve"/> is exactly the kind of caller <see cref="TestPlanBuilder"/> already
+    /// asks of the query-parameter and request-body gates: absorb an unsupported shape into a
+    /// <see cref="CoverageNote"/> naming <see cref="ClientCallMap.FileName"/>, the same "note, not
+    /// a crash" idiom every other withheld-convention reason on this type already uses, rather than
+    /// letting an exception a planning-time caller never expected escape all the way out of
+    /// `generate`.
+    /// </para>
     /// </summary>
     public static Resolution Resolve(
         ClientKind kind,
@@ -138,6 +157,21 @@ public static class ClientCallPlanner
             return new Resolution(null,
             $"has {reason}, which the kiota convention does not attempt to bind — add an entry " +
             $"to {ClientCallMap.FileName} to route it through the client");
+        }
+
+        // Checked ahead of the call rather than caught around it: BuildKiotaConvention's throw is
+        // meant for a caller with no other way to learn a verb is unsupported, and Resolve already
+        // has the answer in hand via the same lookup table that method itself consults. Catching
+        // the exception instead would work too, but would make "an unsupported verb" and "a bug in
+        // BuildKiotaConvention" both surface as the same caught ArgumentException here — this way,
+        // any exception BuildKiotaConvention does throw is unambiguously a defect in this planner,
+        // not an expected, already-handled case.
+        if (!KiotaVerbMethods.ContainsKey(httpMethod.ToUpperInvariant()))
+        {
+            return new Resolution(null,
+            $"is an HTTP {httpMethod} operation, which has no known Kiota verb-method convention " +
+            $"(supported: {string.Join(", ", KiotaVerbMethods.Keys)}) — add an entry to " +
+            $"{ClientCallMap.FileName} to route it through the client");
         }
 
         return new Resolution(BuildKiotaConvention(httpMethod, pathTemplate), null);
