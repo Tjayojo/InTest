@@ -216,6 +216,21 @@ public static class ClientCallPlanner
     /// since <c>TemplateRenderer.WrapForClientCall</c>'s per-kind conversion is the one mechanism
     /// both conventions' <c>{param}</c> placeholders share.
     /// </para>
+    /// <para>
+    /// <b><c>[path-item-parameters]</c> — a second, distinct cause behind the same bool.</b> OpenAPI
+    /// 3.x also lets a path parameter be declared once at the path-item level rather than repeated
+    /// on every operation beneath it; nothing in this codebase reads <c>pathItem.Parameters</c>
+    /// (merging it in is deliberately out of scope — it would also have to change
+    /// <see cref="Fixtures.FixtureComposer"/>, and therefore fixtures and generated raw-HTTP output).
+    /// <c>TestPlanBuilder.ResolvePathParameterKinds</c> fails such a parameter closed to
+    /// <see langword="null"/> too, so it sets <paramref name="hasUntypablePathParameter"/> exactly
+    /// like an unsupported <em>type</em> does — but "InTest never saw this parameter declared
+    /// anywhere it looked" and "InTest saw it declared with a type it cannot convert" call for two
+    /// different remedies, so this method re-derives which one applies (the same
+    /// <c>undeclaredPathParameterName</c> lookup <c>[nswag-path-parameter-order]</c> already needed)
+    /// and picks the note accordingly, rather than sending an adopter to <c>client-map.json</c>
+    /// chasing an unsupported type that was never declared at all.
+    /// </para>
     /// </summary>
     public static Resolution Resolve(
         ClientKind kind,
@@ -269,25 +284,30 @@ public static class ClientCallPlanner
             "to route it through the client");
         }
 
+        // [path-item-parameters]: computed unconditionally (not just for the NSwag-only gate
+        // below) — a path-template placeholder absent from declaredPathParameterOrder is the same
+        // fact TestPlanBuilder.ResolvePathParameterKinds's own [path-item-parameters] fail-closed
+        // mapping just resolved to a null (untypable) kind: nothing in this codebase reads
+        // pathItem.Parameters, so a placeholder with no matching 'in: path' entry among the
+        // operation's own declared parameters is most likely declared one level up, at the
+        // path-item rather than the operation. Reused below by the hasUntypablePathParameter gate
+        // to give Kiota the same distinguishing note NSwag's own gate already gives itself.
+        var declaredNames = new HashSet<string>(declaredPathParameterOrder, StringComparer.Ordinal);
+        var undeclaredPathParameterName = PathTemplatePlaceholderNames(pathTemplate)
+            .FirstOrDefault(name => !declaredNames.Contains(name));
+
         // [nswag-path-parameter-order]: a third NSwag-only gate, for the same reason as the two
         // above — this planner cannot trust an argument order it cannot fully derive. Kiota is
         // unaffected: BuildKiotaConvention derives its indexer placeholders from the path
         // template's own structure, never from declaredPathParameterOrder, so a mismatch here
         // cannot affect it.
-        if (kind == ClientKind.NSwag)
+        if (kind == ClientKind.NSwag && undeclaredPathParameterName is not null)
         {
-            var declaredNames = new HashSet<string>(declaredPathParameterOrder, StringComparer.Ordinal);
-            var undeclared = PathTemplatePlaceholderNames(pathTemplate)
-                .FirstOrDefault(name => !declaredNames.Contains(name));
-
-            if (undeclared is not null)
-            {
-                return new Resolution(null,
-                $"has a path parameter ('{undeclared}') in its path template with no matching " +
-                "'in: path' entry in the declared parameters, so the NSwag convention cannot " +
-                $"determine its declared argument order — add an entry to {ClientCallMap.FileName} " +
-                "to route it through the client");
-            }
+            return new Resolution(null,
+            $"has a path parameter ('{undeclaredPathParameterName}') in its path template with no " +
+            "matching 'in: path' entry in the declared parameters, so the NSwag convention cannot " +
+            $"determine its declared argument order — add an entry to {ClientCallMap.FileName} " +
+            "to route it through the client");
         }
 
         if (hasQueryParameters || hasRequestBody)
@@ -308,8 +328,27 @@ public static class ClientCallPlanner
         // TemplateRenderer.WrapForClientCall's per-kind conversion is what both conventions'
         // {param} placeholders share — see this method's own doc comment above for the measured
         // evidence and the reasoning this gate corrects.
+        //
+        // [path-item-parameters]: this gate is also what a path-item-level path parameter reaches
+        // for Kiota (NSwag's own [nswag-path-parameter-order] gate above already caught it, with
+        // its own note, before control gets here). undeclaredPathParameterName distinguishes the
+        // two causes with two different remedies: a parameter this method never even saw declared
+        // (most likely one level up, at the path-item) has no schema to type-check at all, which is
+        // a different fact from a parameter that IS declared on the operation but whose declared
+        // schema is a shape InTest has no client-side conversion for (date-time, number, ...).
+        // Conflating the two into one message would send an adopter chasing an "unsupported type"
+        // that was never declared anywhere this planner looked.
         if (hasUntypablePathParameter)
         {
+            if (undeclaredPathParameterName is not null)
+            {
+                return new Resolution(null,
+                $"has a path parameter ('{undeclaredPathParameterName}') declared at the path-item " +
+                "level rather than on the operation, which intest does not yet read " +
+                $"([path-item-parameters]) — add an entry to {ClientCallMap.FileName} to route it " +
+                "through the client");
+            }
+
             return new Resolution(null,
             $"has a path parameter whose declared schema has no client-side type conversion " +
             $"InTest can produce ([typed-path-parameters]) — add an entry to {ClientCallMap.FileName} " +

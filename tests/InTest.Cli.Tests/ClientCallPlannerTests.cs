@@ -470,6 +470,55 @@ public class ClientCallPlannerTests
         resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
     }
 
+    /// <summary>
+    /// <c>[path-item-parameters]</c>: the same <c>hasUntypablePathParameter: true</c> bool this
+    /// gate already reacts to also carries a second, distinct cause — a path parameter TestPlanBuilder
+    /// never even saw declared on the operation at all (most likely because the spec declares it one
+    /// level up, at the path-item, which nothing in this codebase reads). <c>declaredPathParameterOrder</c>
+    /// not naming <c>'id'</c>, the same fact <c>[nswag-path-parameter-order]</c>'s own gate above
+    /// tests for NSwag, is what this test reproduces for Kiota — Kiota has no equivalent
+    /// argument-order gate of its own, so this is the only place that catches it, and the note text
+    /// must say "declared at the path-item level", not the generic "no client-side type conversion"
+    /// text an unsupported-<em>type</em> case gets (<see cref="ResolveWithholdsConventionForAnUntypablePathParameterKindOnKiota"/>
+    /// above) — the two call for different remedies.
+    /// </summary>
+    [TestMethod]
+    public void ResolveNamesThePathItemLevelCauseWhenTheUntypableParameterWasNeverDeclaredOnTheOperation()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.Kiota, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
+            declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: true, NoOverrides);
+
+        resolution.Expression.ShouldBeNull();
+        resolution.UnresolvedReason.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldContain("'id'", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("path-item level", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// The control for the test above: when the untypable parameter IS declared on the operation
+    /// (just with an unsupported schema shape), the generic "no client-side type conversion" note
+    /// must still be the one that fires — declaredPathParameterOrder naming <c>'id'</c> is what
+    /// keeps <see cref="ResolveWithholdsConventionForAnUntypablePathParameterKindOnKiota"/> above
+    /// on that message rather than this one; this test pins the same distinction from the other
+    /// side, directly against <c>Resolve</c> rather than only through it.
+    /// </summary>
+    [TestMethod]
+    public void ResolveKeepsTheGenericUntypableNoteWhenTheParameterIsDeclaredOnTheOperation()
+    {
+        var resolution = ClientCallPlanner.Resolve(
+            ClientKind.Kiota, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
+            declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
+            hasUntypablePathParameter: true, NoOverrides);
+
+        resolution.Expression.ShouldBeNull();
+        resolution.UnresolvedReason.ShouldNotBeNull();
+        resolution.UnresolvedReason.ShouldContain("client-side type", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldNotContain("path-item level", Case.Sensitive);
+    }
+
     /// <summary>An override still wins outright for an untypable path-parameter kind — the same
     /// override-runs-first guarantee every other gate on this type already gives; the adopter's own
     /// expression is not re-validated against a kind this planner could not classify.</summary>

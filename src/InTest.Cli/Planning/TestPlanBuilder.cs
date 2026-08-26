@@ -669,8 +669,25 @@ public static class TestPlanBuilder
             .Where(p => p.In == ParameterLocation.Path)
             .ToDictionary(p => p.Name!, p => p.Schema, StringComparer.Ordinal);
 
+        // [path-item-parameters]: OpenAPI 3.x lets a path parameter be declared once at the
+        // path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every
+        // operation under it — a common way to declare an `id` once for GET/PUT/DELETE on
+        // `/orders/{id}`. Nothing in this codebase reads `pathItem.Parameters` — every read here
+        // and in FixtureComposer is `operation.Parameters` only — so a name absent from `declared`
+        // is not "no schema was given for it", it is "this method never saw a declaration for it
+        // at all". Falling through to PathParameterKind.String used to treat that exactly like the
+        // genuinely-undeclared-schema case ResolvePathParameterKind itself handles (a real
+        // assumption, documented there, that a fresh GUID is well-typed for a parameter with no
+        // schema). That conflated two different unknowns: "no schema, but this method IS the
+        // parameter's operation" vs "this method was never given the parameter's declaration to
+        // begin with". The latter deserves null (untypable), not a guess — merging
+        // `pathItem.Parameters` into this read is deliberately out of scope (it would also change
+        // FixtureComposer, and therefore fixtures and generated raw-HTTP output — see
+        // ClientCallPlanner.Resolve's own doc comment and [typed-client-invocation]'s plan doc for
+        // the full reasoning); this fail-closed mapping is the gate that stands in for that fix
+        // until it lands.
         return pathParameterNames
-            .Select(name => declared.TryGetValue(name, out var schema) ? ResolvePathParameterKind(schema) : PathParameterKind.String)
+            .Select(name => declared.TryGetValue(name, out var schema) ? ResolvePathParameterKind(schema) : null)
             .ToList();
     }
 

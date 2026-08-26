@@ -1125,3 +1125,38 @@ its numbers were measured against; re-measure before trusting any of them past t
   *shape* reachable from more than one generator (or hand-written), each free to name methods
   however its author chose. This is not expected to close as more generators are tried or measured
   further; it is a structural limitation of what "Refit" even means, not a gap this plan left open.
+- **Path-item-level path parameters are not read at all — a known limitation, gated, not fixed
+  (`[path-item-parameters]`).** OpenAPI 3.x lets a path parameter be declared once at the path-item
+  level (sibling to `get`/`put`/`delete`) instead of repeated per operation — a common way to
+  declare an `id` once for GET/PUT/DELETE on `/orders/{id}`. Nothing in `src/InTest.Cli` reads
+  `pathItem.Parameters`; every read (`TestPlanBuilder` and `Fixtures/FixtureComposer` alike) is
+  `operation.Parameters` only. Before this gate, a template placeholder with no matching declared
+  entry fell through to `PathParameterKind.String` — an assumption, not a measurement — so
+  `generate` against such a spec produced a client-routed call spliced with a bare
+  `FixtureParameter(...)` string against what a real kiota client actually declares as a typed
+  indexer (`this[Guid]`, `this[DateTimeOffset]`, ...), the same wrong-overload defect
+  `[typed-path-parameters]` corrected for a *declared-but-unsupported-type* parameter, reached here
+  by a different mechanism (a parameter never declared on the operation at all). Reproduced
+  directly: a spec declaring `{"name":"id","in":"path","schema":{"type":"string","format":"uuid"}}`
+  at path-item level generated cleanly and emitted a bare-string call before this fix.
+  `TestPlanBuilder.ResolvePathParameterKinds` now fails such a parameter closed to `null`
+  ("untypable") instead of assuming `String`, so `ClientCallPlanner.Resolve`'s existing
+  `hasUntypablePathParameter` gate withholds convention for the whole operation — the same "note,
+  not a crash" treatment every other withheld-convention reason on this plan already gets, with its
+  own distinguishing note text ("declared at the path-item level ... which intest does not yet
+  read") rather than the generic unsupported-type wording, so an adopter is not sent chasing a type
+  problem that was never declared anywhere InTest looked. NSwag needs no new gate for this shape at
+  all — `[nswag-path-parameter-order]`'s own pre-existing gate already refuses to guess an argument
+  order for a placeholder with no matching declared entry, for the same underlying reason.
+  **Deliberately not fixed at the root** — merging `pathItem.Parameters` into the read would also
+  have to change `FixtureComposer` (which parameters get a fixture entry written for them at all),
+  and therefore what `fixtures repair` writes, generated raw-HTTP output, and golden fixtures; that
+  is a behaviour change to the raw-HTTP path this narrowly-scoped fix must not make as a side
+  effect. This is not a regression this PR introduces: on `main`, `FixtureComposer` already reads
+  only `operation.Parameters`, so a path-item-level parameter already gets no fixture entry and the
+  raw-HTTP branch already fails at runtime against such a spec today (reproduced: `fixtures repair`
+  against the same spec prints `Nothing to repair.`, silently). This gate makes the *typed-client*
+  path fail closed — a withheld convention and a coverage note — rather than emit code that compiles
+  against the wrong overload; it does not paper over the pre-existing raw-HTTP gap, which remains
+  open, tracked here, for the future work that would merge `pathItem.Parameters` into both readers
+  together.

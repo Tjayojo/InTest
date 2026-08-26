@@ -1,4 +1,5 @@
 using InTest.Cli.Planning;
+using InTest.Cli.Rendering;
 using InTest.Cli.Spec;
 using Shouldly;
 
@@ -1791,5 +1792,182 @@ public class TestPlanBuilderTests
         success.ClientCallExpression.ShouldBe(
             "Events[DateTimeOffset.Parse(FixtureParameter(\"getEventByTimestamp\", \"occurredAt\"))].GetAsync");
         plan.Notes.ShouldNotContain(n => n.OperationKey == "getEventByTimestamp");
+    }
+
+    // ---- [path-item-parameters]: OpenAPI 3.x also lets a path parameter be declared once at the
+    // path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every operation
+    // beneath it. Nothing in this codebase reads pathItem.Parameters — ResolvePathParameterKinds
+    // must fail such a parameter closed (null, "untypable") rather than assume
+    // PathParameterKind.String, or the client-routed branch would splice a bare fixture string
+    // into a strongly-typed indexer exactly like the corrected [typed-path-parameters] finding
+    // above, by a different mechanism (a missing declaration rather than an unsupported one).
+    // Merging pathItem.Parameters is deliberately out of scope for this gate — see
+    // ClientCallPlanner.Resolve's own [path-item-parameters] doc comment for why. ------------------
+
+    private const string SpecWithAUuidPathParameterDeclaredAtThePathItemLevel = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "parameters": [
+            { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          ],
+          "get": {
+            "operationId": "getOrderById",
+            "tags": ["Orders"],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    // Same operation, same schema, moved down onto the operation itself — the control this whole
+    // gate exists to be compared against.
+    private const string SpecWithTheSameUuidPathParameterDeclaredOnTheOperation = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "get": {
+            "operationId": "getOrderById",
+            "tags": ["Orders"],
+            "parameters": [
+              { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+            ],
+            "responses": { "200": { "description": "ok", "content": { "application/json": {
+              "schema": { "$ref": "#/components/schemas/Order" } } } } }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// Reproduces the finding directly: before this fix, a name absent from
+    /// <c>operation.Parameters</c> fell through to <see cref="PathParameterKind.String"/> — an
+    /// assumption, not a measurement — so a path-item-level <c>id</c> was treated exactly like a
+    /// plain, untyped string and the client-routed branch spliced a bare
+    /// <c>FixtureParameter(...)</c> into what a real kiota client actually declares as
+    /// <c>this[Guid]</c>. <see langword="null"/> is now the verdict, matching the corrected
+    /// <c>[typed-path-parameters]</c> null for an unsupported type — see the paired test below for
+    /// the proof that the same schema resolves normally once it is where this method actually
+    /// looks.
+    /// </summary>
+    [TestMethod]
+    public async Task APathParameterDeclaredOnlyAtThePathItemLevelResolvesToNoTypableKind()
+    {
+        var plan = await BuildAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.PathParameterKinds.ShouldBe([null]);
+    }
+
+    [TestMethod]
+    public async Task TheSameUuidPathParameterDeclaredOnTheOperationStillResolvesToGuidKind()
+    {
+        var plan = await BuildAsync(SpecWithTheSameUuidPathParameterDeclaredOnTheOperation);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.PathParameterKinds.ShouldBe([PathParameterKind.Guid]);
+    }
+
+    /// <summary>
+    /// The end-to-end proof for Kiota: convention is withheld, and the note names the real cause
+    /// ("declared at the path-item level ... which intest does not yet read") rather than the
+    /// generic "no client-side type conversion" text an unsupported-*type* case gets
+    /// (<see cref="AnUntypablePathParameterKindWithholdsTheClientConventionForKiota"/> above) —
+    /// the two call for different remedies and must not read as the same defect.
+    /// </summary>
+    [TestMethod]
+    public async Task APathItemLevelPathParameterWithholdsTheClientConventionForKiotaWithADistinguishingNote()
+    {
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, KiotaClient);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" &&
+            n.Reason.Contains("path-item level", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// NSwag withholds too, but through its own pre-existing <c>[nswag-path-parameter-order]</c>
+    /// gate — a path-template placeholder with no matching declared entry is exactly the shape
+    /// that gate already refuses to guess an argument order for, and it runs before the shared
+    /// untypable-path-parameter gate reaches this operation at all. Convention is withheld either
+    /// way; only the note text differs, which is the correct outcome given the two mechanisms.
+    /// </summary>
+    [TestMethod]
+    public async Task APathItemLevelPathParameterWithholdsTheClientConventionForNSwagToo()
+    {
+        var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
+
+        var plan = TestPlanBuilder.Build(
+            (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, client);
+        var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
+
+        success.ClientCallExpression.ShouldBeNull();
+        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" &&
+            n.Reason.Contains("'id'", StringComparison.Ordinal) &&
+            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+    }
+
+    private const string SpecDeclaring404WithAPathItemLevelPathParameter = """
+    {
+      "openapi": "3.0.3",
+      "info": { "title": "Orders", "version": "1.0" },
+      "paths": {
+        "/orders/{id}": {
+          "parameters": [
+            { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+          ],
+          "get": {
+            "operationId": "getOrderById",
+            "tags": ["Orders"],
+            "responses": {
+              "200": { "description": "ok", "content": { "application/json": {
+                "schema": { "$ref": "#/components/schemas/Order" } } } },
+              "404": { "description": "not found" }
+            }
+          }
+        }
+      },
+      "components": { "schemas": { "Order": { "type": "object" } } }
+    }
+    """;
+
+    /// <summary>
+    /// Pins the raw-HTTP side against a regression the fail-closed mapping above could cause:
+    /// <c>TryPlanDeclaredNotFound</c> feeds the same <c>ResolvePathParameterKinds</c> output into
+    /// <c>TemplateRenderer.UnmatchableValueFor</c>, which already treats <see langword="null"/>
+    /// exactly like <see cref="PathParameterKind.String"/> — a fresh, well-typed-but-unmatchable
+    /// GUID — so a spec like this one (no <c>client</c> section, declared-error case included)
+    /// must render byte-for-byte the same as it did on <c>main</c>, where the same parameter fell
+    /// through to <see cref="PathParameterKind.String"/> instead of <see langword="null"/>. Both
+    /// map to the same rendered literal, so this is the actual guarantee, not an assumption from
+    /// reading the switch.
+    /// </summary>
+    [TestMethod]
+    public async Task APathItemLevelPathParameterDoesNotChangeTheDeclaredErrorCaseRawHttpRendering()
+    {
+        var plan = await BuildAsync(SpecDeclaring404WithAPathItemLevelPathParameter);
+        var orders = plan.Classes.Single(c => c.ClassName == "OrdersTests");
+        var notFound = orders.Cases.Single(c => c.Role == CaseRole.DeclaredError);
+
+        notFound.PathParameterKinds.ShouldBe([null]);
+
+        var rendered = new TemplateRenderer().RenderClass(orders, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+
+        // The DeclaredError case's own unmatchable-id splice — not the Success case's, which
+        // legitimately uses FixtureParameter("getOrderById", "id") regardless of kind and is
+        // untouched by this fix either way.
+        rendered.ShouldContain("Guid.NewGuid().ToString()");
     }
 }
