@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using Shouldly;
 
 namespace InTest.Runtime.Tests;
@@ -144,5 +145,67 @@ public class ApiResponseAssertionsTests
         // here: a "Schema:" line leaking in would mean this accidentally called the *Contract*
         // overload instead.
         ex.Message.ShouldNotContain("Schema:");
+    }
+
+    /// <summary>
+    /// [captured-is-the-single-shape]: the raw pair become adapters over the captured pair, and the
+    /// obvious adapter — always convert, then delegate — would read the response body on every
+    /// matching-status call. Today ShouldMatchStatusAsync returns before touching the body. This test
+    /// pins that, because the difference is invisible in every passing suite and shows up only as an
+    /// extra read against a real API.
+    /// </summary>
+    [TestMethod]
+    public async Task ShouldMatchStatusAsyncDoesNotReadTheBodyWhenTheStatusMatches()
+    {
+        var content = new ReadCountingContent("{}");
+        using var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+
+        await ApiResponseAssertions.ShouldMatchStatusAsync(
+            response, 200, "test-id", TimeSpan.FromMilliseconds(1));
+
+        content.ReadCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The counterpart: on a mismatch the body IS read, because the failure message quotes it.
+    /// </summary>
+    [TestMethod]
+    public async Task ShouldMatchStatusAsyncReadsTheBodyWhenTheStatusDiffers()
+    {
+        var content = new ReadCountingContent("nope");
+        using var response = new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content };
+
+        var ex = await Should.ThrowAsync<ContractAssertionException>(() =>
+            ApiResponseAssertions.ShouldMatchStatusAsync(
+                response, 200, "test-id", TimeSpan.FromMilliseconds(1)));
+
+        content.ReadCount.ShouldBe(1);
+        ex.Message.ShouldContain("nope");
+    }
+
+    /// <summary>
+    /// Counts reads so the two tests above can distinguish "did not read" from "read and discarded".
+    /// StringContent cannot report this, hence a local subclass rather than a mock framework — this
+    /// repository has no mocking dependency and the dependency policy in CONTRIBUTING.md is why.
+    /// </summary>
+    private sealed class ReadCountingContent : HttpContent
+    {
+        private readonly byte[] _bytes;
+
+        public ReadCountingContent(string body) => _bytes = Encoding.UTF8.GetBytes(body);
+
+        public int ReadCount { get; private set; }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            ReadCount++;
+            return stream.WriteAsync(_bytes, 0, _bytes.Length);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = _bytes.Length;
+            return true;
+        }
     }
 }

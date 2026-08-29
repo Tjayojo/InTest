@@ -20,18 +20,10 @@ public static class ApiResponseAssertions
         ArgumentNullException.ThrowIfNull(response);
         ArgumentNullException.ThrowIfNull(schemas);
 
-        var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
-
-        if ((int)response.StatusCode != expectedStatus)
-        {
-            throw Failure(response, expectedStatus, testId, elapsed, body, []);
-        }
-
-        var violations = schemas.Validate(schemaKey, body);
-        if (violations.Count > 0)
-        {
-            throw Failure(response, expectedStatus, testId, elapsed, body, violations);
-        }
+        var captured = await CaptureAsync(response, cancellationToken).ConfigureAwait(false);
+        await ShouldMatchCapturedContractAsync(
+            captured, expectedStatus, schemaKey, schemas, testId, elapsed, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task ShouldMatchStatusAsync(
@@ -40,13 +32,17 @@ public static class ApiResponseAssertions
     {
         ArgumentNullException.ThrowIfNull(response);
 
+        // The early return is load-bearing, not an optimisation: converting to CapturedResponse reads
+        // the body, and today a matching status never touches it. Pinned by
+        // ShouldMatchStatusAsyncDoesNotReadTheBodyWhenTheStatusMatches.
         if ((int)response.StatusCode == expectedStatus)
         {
             return;
         }
 
-        var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
-        throw Failure(response, expectedStatus, testId, elapsed, body, []);
+        var captured = await CaptureAsync(response, cancellationToken).ConfigureAwait(false);
+        await ShouldMatchCapturedStatusAsync(
+            captured, expectedStatus, testId, elapsed, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -144,32 +140,31 @@ public static class ApiResponseAssertions
     }
 
     /// <summary>
-    /// Thin adapter over the lower-level <see cref="Failure(int, string?, string?, int, string, TimeSpan, string, IReadOnlyList{SchemaViolation})"/>
-    /// for the raw-<see cref="HttpResponseMessage"/> callers (<see cref="ShouldMatchContractAsync"/>,
-    /// <see cref="ShouldMatchStatusAsync"/>): pulls method/URI out of
-    /// <see cref="HttpResponseMessage.RequestMessage"/>, which a captured-response call has no
-    /// equivalent of to read from.
+    /// [captured-is-the-single-shape]: the one place an <see cref="HttpResponseMessage"/> becomes a
+    /// <see cref="CapturedResponse"/>. Reads the body, so callers that can avoid needing it (see
+    /// <see cref="ShouldMatchStatusAsync"/>'s early return on a matching status) must not call this
+    /// before they know they need it.
     /// </summary>
-    private static ContractAssertionException Failure(
-        HttpResponseMessage response, int expectedStatus, string testId,
-        TimeSpan elapsed, string body, IReadOnlyList<SchemaViolation> violations)
+    private static async Task<CapturedResponse> CaptureAsync(
+        HttpResponseMessage response, CancellationToken cancellationToken)
     {
+        var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
         var request = response.RequestMessage;
-        return Failure(
-        (int)response.StatusCode, request?.Method.Method, request?.RequestUri?.ToString(),
-        expectedStatus, testId, elapsed, body, violations);
+        return new CapturedResponse(
+            (int)response.StatusCode, body, request?.Method.Method, request?.RequestUri?.ToString());
     }
 
     /// <summary>
-    /// The one implementation of failure-message formatting, extracted so
-    /// <see cref="ShouldMatchCapturedContractAsync"/> and the two existing
-    /// <see cref="HttpResponseMessage"/>-based methods (via the <see cref="Failure(HttpResponseMessage, int, string, TimeSpan, string, IReadOnlyList{SchemaViolation})"/>
-    /// overload above) produce byte-identical message shapes from whichever facts they each
-    /// actually have on hand — an <see cref="HttpResponseMessage"/> in one case, a
-    /// <see cref="CapturedResponse"/>'s already-buffered fields in the other. <paramref name="status"/>,
-    /// <paramref name="method"/> and <paramref name="uri"/> stand in for what the two callers would
-    /// otherwise each read differently (<c>(int)response.StatusCode</c> vs. <c>captured.Status</c>,
-    /// and so on), so this method itself needs no knowledge of either source.
+    /// The one implementation of failure-message formatting. [captured-is-the-single-shape]: now
+    /// that <see cref="ShouldMatchContractAsync"/> and <see cref="ShouldMatchStatusAsync"/> convert
+    /// to a <see cref="CapturedResponse"/> and delegate to their captured counterparts (see
+    /// <see cref="CaptureAsync"/>), every caller of this method already holds a
+    /// <see cref="CapturedResponse"/>'s already-buffered fields — the
+    /// <see cref="HttpResponseMessage"/>-shaped overload that used to sit in front of this one is
+    /// gone, not merely unused. <paramref name="status"/>, <paramref name="method"/> and
+    /// <paramref name="uri"/> stand in for <c>captured.Status</c>/<c>captured.RequestMethod</c>/
+    /// <c>captured.RequestUri</c> so this method itself needs no knowledge of
+    /// <see cref="CapturedResponse"/> either — it only formats.
     /// </summary>
     private static ContractAssertionException Failure(
         int status, string? method, string? uri, int expectedStatus, string testId,
