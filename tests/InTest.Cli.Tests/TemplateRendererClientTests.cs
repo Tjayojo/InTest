@@ -345,8 +345,8 @@ public class TemplateRendererClientTests
     {
         var rendered = Render(PlanWithClientCall());
 
-        rendered.ShouldContain("ShouldMatchCapturedContractAsync(\r\n            LastCapturedResponse, 200, \"Order\", Schemas, TestId, stopwatch.Elapsed");
-        rendered.ShouldNotContain("ShouldMatchContractAsync(\r\n            response,");
+        rendered.ShouldContain("await ExpectCapturedContract(200, \"Order\", stopwatch.Elapsed);");
+        rendered.ShouldNotContain("ExpectContract(");
     }
 
     [TestMethod]
@@ -354,8 +354,8 @@ public class TemplateRendererClientTests
     {
         var rendered = Render(PlanWithClientCall());
 
-        rendered.ShouldNotContain("new HttpRequestMessage(");
-        rendered.ShouldNotContain("Client.SendAsync(");
+        rendered.ShouldNotContain("ExpectStatus(");
+        rendered.ShouldNotContain("ExpectContract(");
     }
 
     [TestMethod]
@@ -380,7 +380,7 @@ public class TemplateRendererClientTests
 
         var rendered = Render(plan);
 
-        rendered.ShouldContain("new HttpRequestMessage(");
+        rendered.ShouldContain("await ExpectContract(");
         rendered.ShouldNotContain("ApiClient<");
         rendered.ShouldNotContain("LastCapturedResponse");
     }
@@ -398,10 +398,9 @@ public class TemplateRendererClientTests
         var rendered = Render(PlanWithClientCall(schemaKey: null));
 
         rendered.ShouldContain($"ApiClient<{ClientTypeName}>()");
-        rendered.ShouldContain("LastCapturedResponse");
-        rendered.ShouldContain("ShouldMatchCapturedStatusAsync(\r\n            LastCapturedResponse, 200, TestId, stopwatch.Elapsed, TestContext.CancellationToken);");
-        rendered.ShouldNotContain("new HttpRequestMessage(");
-        rendered.ShouldNotContain("ShouldMatchCapturedContractAsync(");
+        rendered.ShouldContain("await ExpectCapturedStatus(200, stopwatch.Elapsed);");
+        rendered.ShouldNotContain("ExpectStatus(");
+        rendered.ShouldNotContain("ExpectCapturedContract(");
     }
 
     [TestMethod]
@@ -414,7 +413,7 @@ public class TemplateRendererClientTests
         var rendered = Render(PlanWithClientCall(), clientTypeName: null);
 
         rendered.ShouldNotContain("ApiClient<");
-        rendered.ShouldContain("new HttpRequestMessage(");
+        rendered.ShouldContain("await ExpectContract(");
     }
 
     [TestMethod]
@@ -423,7 +422,7 @@ public class TemplateRendererClientTests
         var rendered = Render(PlanMixingRawAndClientRoutedCases());
 
         rendered.ShouldContain($"ApiClient<{ClientTypeName}>()", customMessage: "the client-routed case must still render its branch");
-        rendered.ShouldContain("new HttpRequestMessage(", customMessage: "the raw-HTTP sibling must still render its own branch");
+        rendered.ShouldContain("await ExpectContract(", customMessage: "the raw-HTTP sibling must still render its own branch");
     }
 
     [TestMethod]
