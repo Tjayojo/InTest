@@ -1,9 +1,16 @@
 # Unified call surface for generated tests
 
-**Status:** Design · Revision 3
+**Status:** Design · Revision 4
 **Date:** 2026-08-27
 **Scope:** Piece 1 of two. Piece 2 — making the typed-client path the default — is explicitly out
 of scope and gets its own cycle.
+
+**Revision note — rev 4.** Reviewed again. The core was judged sound and every load-bearing claim
+in §2, §3, §4 and §7 was independently re-confirmed in source. Four fixes: §8's vacuity list was
+itself incomplete — the same defect it exists to prevent; "§5's compatibility table" was the wrong
+cross-reference, cited twice, and ambiguous across two documents; **P1's push seam is replaced by a
+pull seam**, which is both more correct and deletes P1's entire compatibility argument; and the
+optional trailing body argument weakened "fail loudly".
 
 **Revision note — rev 3.** Reviewed. Three findings would have produced wrong work, six were
 smaller. Rev 2's core survived — its three rev-1 corrections were independently confirmed in
@@ -17,6 +24,14 @@ The generated test is the product. An adopting team commits it, reads it when it
 extends it with hand-written partials. Design principle #6 in
 `docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md` states it: *"Generated code
 is idiomatic and direct. No facades that obscure failure messages."*
+
+**That principle is the one most in tension with this change, so confront it rather than cite it.**
+Consolidating a send into the runtime does put a facade in front of it. The defence is narrow and
+should be stated as such: `ApiResponseAssertions` already constructs the failure message today and
+still carries method, URI, status, run id and body, so *assertion* failures read identically. The
+genuine loss is that a **transport-level** throw — connection refused, DNS failure, TLS error —
+now stack-traces into `InTest.Runtime` rather than at the generated line that issued it. That is a
+real cost of this change, accepted, not argued away.
 
 Today each generated case costs about ten lines, of which roughly seven are identical everywhere:
 
@@ -94,7 +109,20 @@ await ExpectContract(404, "ProblemDetails", HttpMethod.Delete,
 ```
 
 What moves inside is exactly the plumbing — `Schemas`, `TestId`, the stopwatch and the cancellation
-token. Seven arguments become four; nothing describing *what the test does* is hidden.
+token. Seven arguments become four.
+
+**Two qualifications the claim "nothing describing what the test does is hidden" needs.**
+
+`Encoding.UTF8` and `"application/json"` move out of the generated file into the runtime. They are
+hardcoded in the template today, so this is a lateral move rather than a new assumption — but they
+are facts about the request leaving the code the adopter reads, and the claim should not paper over
+that.
+
+And **a null body on a case the generator decided has one must throw, not degrade.** `FixtureBody`
+returns `string?`, and the template's `FixtureBody(key)!` throws loudly today. A `string? body =
+null` parameter treated as "no body" would let such a case silently send nothing and still pass —
+`CLAUDE.md`'s named anti-pattern. The optional argument is a convenience for cases that genuinely
+have no body; it must not become a way for a body-bearing case to lose one quietly.
 
 Rejected: a fluent chain (`Operation(key).Delete(path).ShouldReturn(204)`). Three reasons, any one
 sufficient.
@@ -135,8 +163,11 @@ too, so `ShouldMatchCapturedStatusAsync` and `ShouldMatchCapturedContractAsync` 
 implementations.
 
 **The raw pair are kept as thin adapters, not deleted.** `ApiResponseAssertions` is public surface
-in a package published as `0.1.0-preview.1`, and §5's compatibility table reserves public-surface
-changes for a major bump. Pre-1.0 the exception is available, but taking it as a side effect of an
+in a package published as `0.1.0-preview.1`, and the **§3 compatibility table** in
+`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md` (under "Versioning and
+compatibility") reserves public-surface changes for a major bump. Rev 3 cited "§5" twice; §5 of that
+document is "Configuration and command surface", and *this* document's own §5 is "Unchanged" — so
+the reference was both wrong and ambiguous across two files. Pre-1.0 the exception is available, but taking it as a side effect of an
 internal consolidation is not the same as taking it deliberately. Adapters give the same
 consolidation at no compatibility cost.
 
@@ -146,7 +177,7 @@ coverage; adapters with no caller and no test are dead code wearing a compatibil
 
 **The compatibility argument cuts both ways, and rev 2 only applied one edge.** Declining to delete
 two public statics is careful. But adding `ExpectStatus`/`ExpectContract` to the runtime and having
-the CLI emit calls to them immediately breaks the *first* row of §5's table — "`InTest.Runtime`
+the CLI emit calls to them immediately breaks the *first* row of that §3 table — "`InTest.Runtime`
 **N.x** accepts code generated by `InTest.Cli` **N.y** for any `y`" — because regenerating with a
 newer CLI against a pinned older runtime becomes a compile error. The mitigations exist
 (`InitCommand` pins `InTest.Runtime.MSTest` to `CliVersion.Current`; `upgrade` reports drift) and
@@ -205,7 +236,7 @@ validation has no BCL equivalent — NJsonSchema is already a pinned dependency 
 
 Both are correct independently and each makes the main change smaller.
 
-**P1 — the `CancellationToken` seam. Add a third overload; do not change a signature.**
+**P1 — the `CancellationToken` seam. A pull seam, not a push seam.**
 
 Moving the send into `ApiTestCore` needs a token there, and `ApiTestCore` cannot obtain one from
 `TestContext`. The mechanism is the **compiler**, not a test: `InTest.Runtime` has no MSTest
@@ -215,13 +246,34 @@ Moving the send into `ApiTestCore` needs a token there, and `ApiTestCore` cannot
 primary". Rev 2 cited the wrong evidence for a right conclusion, which in this codebase is itself a
 defect.)
 
-So the token is a genuine fifth seam alongside `IRunDiagnostics`, the profile string, the display
-name and the skip reason. **But it must arrive as a new overload.** `ApiTestCore.cs` already carries
-a compatibility overload for `BeginTest`, and its doc argues at IL level that adding a parameter to
-this exact method is a source break against published `0.1.0-preview.1` — it exists because
-`BeginTest` gained a second parameter once already. Rev 2 proposed doing the thing that file
-forbids. Add `BeginTest(string?, IRunDiagnostics, CancellationToken)` delegating from the two-arg
-form, or state that the pre-1.0 exception is being taken deliberately.
+```csharp
+// InTest.Runtime — neutral
+protected virtual CancellationToken TestCancellationToken => CancellationToken.None;
+
+// InTest.Runtime.MSTest — the adapter
+protected override CancellationToken TestCancellationToken => TestContext.CancellationToken;
+```
+
+**Rev 3 proposed pushing the token through a third `BeginTest` overload. That is withdrawn**, and
+the reason matters more than the mechanism.
+
+The four seams already extracted — `IRunDiagnostics`, the profile string, the display name, the skip
+reason — are **facts fixed for the duration of a test**, so pushing them in once at the start is
+right. A cancellation token is a **live signal**. Pushing it snapshots at `[TestInitialize]` what
+the template reads fresh at every send today, and if MSTest replaces `TestContext`'s
+`CancellationTokenSource` afterwards — as it is reported to for `[Timeout]` — the stashed token goes
+stale and cancellation never reaches the request. That is a behaviour change hiding inside a change
+§5 promises is behaviour-identical.
+
+*(The `[Timeout]` replacement is the reviewer's reasoning about MSTest internals and is **not
+verified here**. The pull seam is preferred regardless: it is purely additive, preserves today's
+read-at-call-time semantics exactly, and needs no compatibility argument at all.)*
+
+Rev 3's whole overload discussion — `ApiTestCore.cs`'s existing `BeginTest` compatibility overload,
+its IL-level reasoning, whether to take the pre-1.0 exception — **evaporates**, because a new
+`virtual` member changes no existing signature. That the simpler option also removes a page of
+compatibility argument is the tell that rev 3 asked "how do we push this compatibly" without first
+asking whether to push it at all.
 
 Rev 2 also claimed "without it a cancelled run keeps issuing HTTP". **That is false today** — the
 template passes `TestContext.CancellationToken` straight into `Client.SendAsync` in the generated
@@ -292,22 +344,45 @@ behaviour.
 - `src/InTest.Runtime/ApiTestCore.cs` — the `CancellationToken` seam (P1) and the consolidated call.
 - `src/InTest.Runtime/ApiResponseAssertions.cs` — captured pair as single implementations, raw pair
   as adapters (P2).
-- `src/InTest.Runtime.MSTest/ApiTestBase.cs` — supplies the token.
+- `src/InTest.Runtime.MSTest/ApiTestBase.cs` — overrides `TestCancellationToken` (P1). No
+  signature changes.
 - `src/InTest.Cli/Rendering/Templates/mstest-class.scriban` and `TemplateRenderer.cs` — emit the
   consolidated call for the **raw branch only**; role gating unchanged.
 - **`tests/InTest.Cli.Tests/TemplateRendererTests.cs`** — ordering assertions anchored on
   `IndexOf("new HttpRequestMessage(")` and assertions naming `ShouldMatchStatusAsync` /
   `ShouldMatchContractAsync`. These break loudly, which is fine.
 - **`tests/InTest.Cli.Tests/TemplateRendererClientTests.cs` — the one that fails *quietly*.**
-  Lines 357, 358 and 403 assert `ShouldNotContain("new HttpRequestMessage(")` and
-  `ShouldNotContain("Client.SendAsync(")`. Once the raw branch stops emitting those strings, those
-  three keep passing while discriminating nothing — the raw-versus-client separation they exist to
+  Lines **349**, 357, 358 and 403 — rev 3's list of three was itself incomplete, which is the very
+  defect this entry exists to prevent. 357/358/403 assert `ShouldNotContain("new
+  HttpRequestMessage(")` and `ShouldNotContain("Client.SendAsync(")`; **349** asserts
+  `ShouldNotContain("ShouldMatchContractAsync(
+            response,")` while its paired
+  positive at 348 asserts on the *client* branch, which this change does not touch — so that pair
+  cannot fail as a unit either. Once the raw branch stops emitting those strings, all four keep
+  passing while discriminating nothing — the raw-versus-client separation they exist to
   prove silently evaporates, and their paired positive control at line 426 is the half that fails,
   so the pair does not fail as a unit. **Replace the discriminator in the same change** — assert on
   `ExpectStatus(` versus `ApiClient<` — so the vacuity is closed rather than discovered later, if
   at all. This is the "a suite silently matching nothing cannot read as green" rule that
   `assert-trx-results.ps1` exists for.
 - **`tests/InTest.Runtime.Tests/ApiResponseAssertionsTests.cs`** — directly in P2's blast radius.
+- **`tests/InTest.Golden.Tests/GeneratedSuiteExecutionTests.cs` — absent from rev 3's list
+  entirely**, and it is the suite `CLAUDE.md` calls the only one proving generated code both
+  compiles *and* runs. Line 1070 asserts `ShouldNotContain("new HttpRequestMessage(")` and goes
+  vacuous exactly as above, with its positives at 1062/1065/1066 still passing. The comment at line
+  1812 describing "a bare `HttpRequestMessage`/`Client.SendAsync` pair" also goes stale.
+- **A home for direct tests of `ExpectStatus`/`ExpectContract`.** Rev 3 named none, leaving
+  disposal, body pass-through and token honouring covered only end-to-end through Golden's happy
+  path. `ApiTestCoreCaptureTests.cs` and `ApiTestBaseTests.cs` already establish the
+  test-only-subclass pattern via `InternalsVisibleTo` and are the obvious place.
 - `tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt` — regenerated golden file.
 - `examples/Catalog.ApiTests/`, `examples/Orders.ApiTests/` — regenerated.
+- The template header's `using System.Diagnostics;` and `using System.Text;` — after the change a
+  class with no client-routed case uses neither. Not a build error (the scaffold sets `Nullable` but
+  not `TreatWarningsAsErrors`, and unused usings are IDE-only), but the header is a file this change
+  touches.
 - The design spec §9 and `docs/getting-started.md`.
+
+**A cost worth naming:** because piece 1 consolidates only the raw branch, the golden file and both
+`examples/` projects take a shape churn now and another in piece 2 — two reviewed diffs for
+adopters instead of one.
