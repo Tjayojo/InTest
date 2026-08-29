@@ -44,6 +44,12 @@ public class ApiTestCoreExpectTests
 
         public Task ExposedExpectStatus(int expectedStatus, HttpMethod method, string url, string body) =>
             ExpectStatus(expectedStatus, method, url, body);
+
+        public Task ExposedExpectCapturedStatus(int expectedStatus, TimeSpan elapsed) =>
+            ExpectCapturedStatus(expectedStatus, elapsed);
+
+        public Task ExposedExpectCapturedContract(int expectedStatus, string schemaKey, TimeSpan elapsed) =>
+            ExpectCapturedContract(expectedStatus, schemaKey, elapsed);
     }
 
     /// <summary>
@@ -244,5 +250,54 @@ public class ApiTestCoreExpectTests
         // cancellation observed here came from the token travelling with the send rather than from
         // the pre-check refusing an already-cancelled token.
         handler.CallCount.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The client branch's consolidated assertion. Takes elapsed as an argument because the stopwatch
+    /// stays a visible local in the generated method — it must start before the pinned try, since the
+    /// throwing path still needs a real number.
+    /// </summary>
+    [TestMethod]
+    public async Task ExpectCapturedStatusPassesWhenTheCapturedStatusMatches()
+    {
+        var core = new TestableApiTestCore();
+        core.SetTestId("test-id");
+        InTestAmbient.LastCapturedResponse.Value = new CapturedResponseSlot
+        {
+            Value = new CapturedResponse(200, "{}", "GET", "https://example.test/api/orders"),
+        };
+
+        try
+        {
+            await core.ExposedExpectCapturedStatus(200, TimeSpan.FromMilliseconds(5));
+        }
+        finally
+        {
+            InTestAmbient.LastCapturedResponse.Value = null;
+        }
+    }
+
+    [TestMethod]
+    public async Task ExpectCapturedStatusThrowsWhenTheCapturedStatusDiffers()
+    {
+        var core = new TestableApiTestCore();
+        core.SetTestId("test-id");
+        InTestAmbient.LastCapturedResponse.Value = new CapturedResponseSlot
+        {
+            Value = new CapturedResponse(500, "boom", "GET", "https://example.test/api/orders"),
+        };
+
+        try
+        {
+            var ex = await Should.ThrowAsync<ContractAssertionException>(() =>
+                core.ExposedExpectCapturedStatus(200, TimeSpan.FromMilliseconds(5)));
+
+            ex.Message.ShouldContain("expected 200");
+            ex.Message.ShouldContain("got 500");
+        }
+        finally
+        {
+            InTestAmbient.LastCapturedResponse.Value = null;
+        }
     }
 }

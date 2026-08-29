@@ -132,6 +132,32 @@ public abstract class ApiTestCore
     }
 
     /// <summary>
+    /// [one-terminal-call]: the client branch's assertion, consolidated. Folds
+    /// <see cref="LastCapturedResponse"/>, <see cref="TestId"/> and the cancellation token into the
+    /// call, leaving the generated method's pinned <c>try</c>/exception-filter/<c>catch</c> and its
+    /// stopwatch exactly where they are.
+    /// <para>
+    /// <paramref name="elapsed"/> stays an explicit argument rather than being timed in here, and that
+    /// is the constraint that shapes this whole method: the stopwatch must start <em>before</em> the
+    /// generated <c>try</c>, because a typed client that throws still needs a real elapsed for the
+    /// failure message. Timing inside this call would measure nothing on the throwing path — the exact
+    /// path a contract test exists to report on.
+    /// </para>
+    /// </summary>
+    protected Task ExpectCapturedStatus(int expectedStatus, TimeSpan elapsed) =>
+        ApiResponseAssertions.ShouldMatchCapturedStatusAsync(
+            LastCapturedResponse, expectedStatus, TestId, elapsed, TestCancellationToken);
+
+    /// <inheritdoc cref="ExpectCapturedStatus(int, TimeSpan)"/>
+    /// <remarks>
+    /// The contract form. <paramref name="schemaKey"/> stays explicit for the same reason it does on
+    /// <see cref="ExpectContract(int, string, HttpMethod, string)"/> — it is not derivable at runtime.
+    /// </remarks>
+    protected Task ExpectCapturedContract(int expectedStatus, string schemaKey, TimeSpan elapsed) =>
+        ApiResponseAssertions.ShouldMatchCapturedContractAsync(
+            LastCapturedResponse, expectedStatus, schemaKey, Schemas, TestId, elapsed, TestCancellationToken);
+
+    /// <summary>
     /// The single implementation behind all four raw entry points. <paramref name="schemaKey"/> null
     /// means status-only.
     /// </summary>
