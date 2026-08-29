@@ -4,7 +4,6 @@
 // </auto-generated>
 #nullable enable
 using System.Diagnostics;
-using System.Text;
 using InTest.Runtime;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -19,17 +18,8 @@ public partial class OrdersTests : Orders.ApiTests.OrdersTestBase
     {
         RequireFixture("getOrderById");
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectContract(200, "Order", HttpMethod.Get,
             InTestUrl.Build("/orders/{id}", FixtureParameter("getOrderById", "id")));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchContractAsync(
-            response, 200, "Order", Schemas, TestId, stopwatch.Elapsed,
-            TestContext.CancellationToken);
     }
 
     [TestMethod, TestCategory("Contract")]
@@ -39,32 +29,16 @@ public partial class OrdersTests : Orders.ApiTests.OrdersTestBase
         RequireMultipleIdentities();
         using var _ = UseIdentity(IdentitySlot.Secondary);
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectStatus(403, HttpMethod.Get,
             InTestUrl.Build("/orders/{id}", Guid.NewGuid().ToString()));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchStatusAsync(
-            response, 403, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
     }
 
     [TestMethod, TestCategory("Contract")]
     [Description("Given Orders, when getOrderById, then 404")]
     public async Task GetOrderById_NotFound()
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectStatus(404, HttpMethod.Get,
             InTestUrl.Build("/orders/{id}", Guid.NewGuid().ToString()));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchStatusAsync(
-            response, 404, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
     }
 
     [TestMethod, TestCategory("Contract")]
@@ -73,16 +47,8 @@ public partial class OrdersTests : Orders.ApiTests.OrdersTestBase
     {
         using var _ = UseIdentity(IdentitySlot.None);
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectStatus(401, HttpMethod.Get,
             InTestUrl.Build("/orders/{id}", Guid.NewGuid().ToString()));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchStatusAsync(
-            response, 401, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
     }
 
     [TestMethod, TestCategory("Contract")]
@@ -91,17 +57,8 @@ public partial class OrdersTests : Orders.ApiTests.OrdersTestBase
     {
         RequireFixture("listOrders");
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectContract(200, "op:listOrders:200:application/json", HttpMethod.Get,
             InTestUrl.Build("/orders"));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchContractAsync(
-            response, 200, "op:listOrders:200:application/json", Schemas, TestId, stopwatch.Elapsed,
-            TestContext.CancellationToken);
     }
 
     [TestMethod, TestCategory("Contract")]
@@ -112,16 +69,8 @@ public partial class OrdersTests : Orders.ApiTests.OrdersTestBase
         RequireSecondaryIdentityLacks("orders.read");
         using var _ = UseIdentity(IdentitySlot.Secondary);
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectStatus(403, HttpMethod.Get,
             InTestUrl.Build("/orders"));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchStatusAsync(
-            response, 403, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
     }
 
     [TestMethod, TestCategory("Contract")]
@@ -130,15 +79,7 @@ public partial class OrdersTests : Orders.ApiTests.OrdersTestBase
     {
         using var _ = UseIdentity(IdentitySlot.None);
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+        await ExpectStatus(401, HttpMethod.Get,
             InTestUrl.Build("/orders"));
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
-        await ApiResponseAssertions.ShouldMatchStatusAsync(
-            response, 401, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
     }
 }

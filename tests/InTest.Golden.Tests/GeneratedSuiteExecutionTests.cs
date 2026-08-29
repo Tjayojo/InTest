@@ -1063,11 +1063,11 @@ public class GeneratedSuiteExecutionTests
         customMessage: "[stage-3b]: a schema-less client-routed case must still route through the " +
                        "client, never fall back to raw HTTP");
         generatedText.ShouldContain("Api.Ping.GetAsync(cancellationToken: TestContext.CancellationToken)");
-        generatedText.ShouldContain("ShouldMatchCapturedStatusAsync(",
+        generatedText.ShouldContain("await ExpectCapturedStatus(",
         customMessage: "a bodiless declared response has no schema to validate — the generated case " +
                        "must call the status-only captured assertion, not ShouldMatchCapturedContractAsync");
-        generatedText.ShouldNotContain("ShouldMatchCapturedContractAsync(");
-        generatedText.ShouldNotContain("new HttpRequestMessage(");
+        generatedText.ShouldNotContain("ExpectCapturedContract(");
+        generatedText.ShouldNotContain("ExpectStatus(");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
@@ -1809,8 +1809,8 @@ public class GeneratedSuiteExecutionTests
         // client-routed. A regression that routed an auth case through the client too — defeating
         // the entire reasoning [success-only]'s own doc gives for why that never happens — would
         // show up here as a second "ApiClient<" occurrence, which neither auth case's own rendered
-        // body (a bare HttpRequestMessage/Client.SendAsync pair, per mstest-class.scriban's
-        // raw-HTTP branch) ever contains today.
+        // body (a single await ExpectStatus(...)/ExpectContract(...) call, per
+        // mstest-class.scriban's raw-HTTP branch) ever contains today.
         var apiClientOccurrences = generated.Split("ApiClient<", StringSplitOptions.None).Length - 1;
         apiClientOccurrences.ShouldBe(1,
         $"expected exactly one client-routed case (GetSecureResource_Contract) in this class, found " +
