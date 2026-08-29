@@ -17,6 +17,13 @@
          0.1.0 intest init normally scaffolds (Directory.Build.props' Version) — pinned here
          to the real published version so this committed example actually restores from
          nuget.org. Bump back to 0.1.0 once a stable release replaces the preview. -->
+    <!--
+      This project's committed Generated/ output predates the unified call surface and is
+      deliberately NOT regenerated here: it is the only artifact in the repo proving the
+      *published* packages restore and build for a real adopter, so it stays pinned to what is
+      actually on nuget.org. Regenerate it when this PackageReference id moves to
+      InTest.Runtime.MSTest — see CONTRIBUTING.md's publishing checklist.
+    -->
     <PackageReference Include="InTest.Runtime" Version="0.1.0-preview.1" />
   </ItemGroup>
   <ItemGroup>

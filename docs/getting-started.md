@@ -287,7 +287,7 @@ can opt generated tests into calling it instead of building `HttpRequestMessage`
 
 `kind` is `"kiota"`, `"nswag"` or `"refit"`; `typeName` is the client's fully-qualified C# type
 name, exactly as you would write it in code. Leave the section out entirely and nothing changes —
-every generated case keeps building its own `HttpRequestMessage`, byte-for-byte identical to a
+every generated case keeps issuing its own direct HTTP call, byte-for-byte identical to a
 project with no `client` section at all.
 
 **Own a generated client but not the OpenAPI document it came from?** Kiota already recorded where
@@ -367,8 +367,8 @@ or fail for the wrong reason.
 
 **Which operations get routed through the client, and which need `client-map.json`.** Only
 `Success` cases ever route through a client — a 404 or a 401/403 case is testing what your *API*
-does with a bad request, not what your client does with one, so those always build
-`HttpRequestMessage` directly regardless of this section. Among `Success` cases, `generate`
+does with a bad request, not what your client does with one, so those always issue a direct HTTP
+call regardless of this section. Among `Success` cases, `generate`
 derives the call automatically for an operation with **no query parameters and no request
 body** — neither generator's convention has a fixture value InTest could safely splice into a
 query-binding shape or a typed request-body parameter. It also needs every path parameter's

@@ -970,10 +970,13 @@ feature.
 (`ResponseCaptureHandler`) sits in the `InTestClients.Api` pipeline and buffers the response body
 into a byte array *before* the typed client ever reads it, stashes it for the assertion helper,
 then replaces `response.Content` with a fresh, equally-readable copy so the client's own
-deserialization proceeds normally. `ApiResponseAssertions.ShouldMatchCapturedContractAsync` /
-`ShouldMatchCapturedStatusAsync` then validate those buffered bytes exactly as
-`ShouldMatchContractAsync` validates a raw-HTTP response's bytes — schema validation stays
-byte-level either way.
+deserialization proceeds normally. The generated method calls `ExpectCapturedContract` /
+`ExpectCapturedStatus` — the client-routed half of `ApiTestCore`'s consolidated call surface
+(`[one-terminal-call]`) — which validate those buffered bytes exactly as `ExpectContract` /
+`ExpectStatus` validate a raw-HTTP response's bytes, by delegating to the same underlying
+`ApiResponseAssertions.ShouldMatchCapturedContractAsync` / `ShouldMatchCapturedStatusAsync` pair
+the raw path's `ShouldMatchContractAsync` / `ShouldMatchStatusAsync` themselves now adapt into —
+schema validation stays byte-level either way.
 
 **Which cases qualify.** Only `CaseRole.Success` cases are ever routed through a client —
 declared-error and auth cases exist to exercise the API's own behaviour against a deliberately
@@ -1200,17 +1203,19 @@ public partial class OrdersTests : OrdersTestBase
     [TestMethod, TestCategory("Contract")]
     public async Task GetOrderById_Contract()
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            InTestUrl.Build("orders/{id}", TestData.Get("getOrderById", "id")));
+        RequireFixture("get_api_orders_id");
 
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-
-        await ApiResponseAssertions.ShouldMatchContractAsync(
-            response, expectedStatus: 200, schema: Schemas.Order, TestId);
+        await ExpectContract(200, "Order", HttpMethod.Get,
+            InTestUrl.Build("/api/orders/{id}", FixtureParameter("get_api_orders_id", "id")));
     }
 }
 ```
+
+`ExpectContract` is `ApiTestCore`'s consolidated call surface (`[one-terminal-call]`) — it builds
+the request, sends it with the seam's cancellation token, and asserts, all behind one call. There
+is no generated `Schemas.Order`-style typed accessor (§9's "Bundling" section explains why, above)
+and no `TestData.Get`: a fixture value reaches the call through `FixtureParameter`, keyed by the
+operation's fixture key and gated on `RequireFixture`, the same mechanism §10 documents in full.
 
 **Latency is recorded, not asserted.** Cold start, JIT, shared agent and noisy neighbour are
 exactly the flake class readiness gating removes; asserting a latency budget in the gate
@@ -1316,27 +1321,22 @@ fourth situation is a defect to record, not a contradiction of this section.
 [Description("Given Orders, when getOrderById, then 404")]
 public async Task GetOrderById_NotFound()
 {
-    using var request = new HttpRequestMessage(
-        HttpMethod.Get,
-        InTestUrl.Build("/orders/{id}", Guid.NewGuid().ToString()));
-
-    var stopwatch = Stopwatch.StartNew();
-    using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-    stopwatch.Stop();
-
-    await ApiResponseAssertions.ShouldMatchContractAsync(
-        response, 404, "ProblemDetails", Schemas, TestId, stopwatch.Elapsed,
-        TestContext.CancellationToken);
+    await ExpectContract(404, "ProblemDetails", HttpMethod.Get,
+        InTestUrl.Build("/api/orders/{id}", Guid.NewGuid().ToString()));
 }
 ```
 
 `Guid.NewGuid()`, not a fixture value (decision 6): a generated, unmatchable id so no seeded row
-can collide and an unfilled fixture can never block a case that needs no data. The declared-error
-case asks the same `ResolveSchemaKey` the success case uses, so it schema-checks the body
-whenever the 404 declares one — as every 404 in every shipped sample does, which makes
-`ShouldMatchContractAsync` the form you will actually see generated. A 404 declared with no
-response schema falls back to `ShouldMatchStatusAsync` instead, status-only, the same way a
-success case does.
+can collide and an unfilled fixture can never block a case that needs no data. It is spliced
+straight into the `InTestUrl.Build` argument list rather than read through `FixtureParameter` —
+`[role-stays-in-the-argument]` — because the generator decides what a parameter resolves to by
+the case's role, not by a uniform lookup: a Success case emits `FixtureParameter(key, name)`, and
+every other role emits an unmatchable value in its place, so which call the argument list carries
+is itself how the generator records which kind of case this is. The declared-error case
+asks the same `ResolveSchemaKey` the success case uses, so it schema-checks the body whenever the
+404 declares one — as every 404 in every shipped sample does, which makes `ExpectContract` the
+form you will actually see generated. A 404 declared with no response schema falls back to
+`ExpectStatus` instead, status-only, the same way a success case does.
 
 ### Auth contract tests
 
@@ -1400,16 +1400,8 @@ public async Task GetOrderById_Forbidden()
     RequireMultipleIdentities();
     using var _ = UseIdentity(IdentitySlot.Secondary);
 
-    using var request = new HttpRequestMessage(
-        HttpMethod.Get,
-        InTestUrl.Build("/orders/{id}", Guid.NewGuid().ToString()));
-
-    var stopwatch = Stopwatch.StartNew();
-    using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-    stopwatch.Stop();
-
-    await ApiResponseAssertions.ShouldMatchStatusAsync(
-        response, 403, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+    await ExpectStatus(403, HttpMethod.Get,
+        InTestUrl.Build("/api/orders/{id}", Guid.NewGuid().ToString()));
 }
 ```
 

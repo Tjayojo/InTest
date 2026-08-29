@@ -638,6 +638,17 @@ push itself remains a real, one-time or per-release, human step — see `docs/su
     just published — `InTest.Runtime` and, once it has shipped a first version,
     `InTest.Runtime.MSTest` too. (`InTest.Cli` never participates in package validation — the SDK
     hard-disables it for tool packages.)
+12. **Regenerate `examples/Catalog.ApiTests` and `examples/Orders.ApiTests`, and move each
+    `PackageReference` from `InTest.Runtime` to `InTest.Runtime.MSTest`.** Both are required and
+    both are easy to forget, because **no test enforces either**.
+    `ExampleProjectVersionMarkerTests` compares the three version markers *to each other*, never
+    against `CliVersion.Current`, and its package-reference regex deliberately matches either id
+    — so stale examples stay green indefinitely. Nothing under `.github/` or `scripts/` builds
+    them and neither is in `InTest.sln`.
+    This is a human step by necessity, not by omission: the trigger is "at the next publish",
+    and a test encoding it would go red on `main` the moment the CLI version moves ahead and
+    stay red for the whole development cycle — which is pressure to migrate `examples/`
+    preemptively, exactly what `ExampleProjectVersionMarkerTests`' own comment forbids.
 
 ## Testing against a local build
 

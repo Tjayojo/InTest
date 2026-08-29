@@ -60,6 +60,8 @@ public class ExampleProjectVersionMarkerTests
     // `dotnet restore` for anyone running them. Once the adapter is published, migrating each
     // example is a one-line PackageReference id edit rather than a surprise red test here — do NOT
     // "fix" that migration by touching examples/ preemptively (see CLAUDE.md's Task 8 notes).
+    // The regeneration that must accompany that id edit is a release-checklist step, not a test —
+    // see CONTRIBUTING.md's publishing checklist for why it cannot be enforced here.
     private static readonly Regex RuntimePackageReferencePattern =
         new(@"<PackageReference\s+Include=""InTest\.Runtime(?:\.MSTest)?""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
 
