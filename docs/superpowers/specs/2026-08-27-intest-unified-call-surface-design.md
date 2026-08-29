@@ -1,15 +1,15 @@
 # Unified call surface for generated tests
 
 **Status:** Design · Revision 3
+**Date:** 2026-08-27
+**Scope:** Piece 1 of two. Piece 2 — making the typed-client path the default — is explicitly out
+of scope and gets its own cycle.
 
 **Revision note — rev 3.** Reviewed. Three findings would have produced wrong work, six were
 smaller. Rev 2's core survived — its three rev-1 corrections were independently confirmed in
 source — but it restated a Golden timing figure this repo has already corrected twice, it proposed
 a change to `ApiTestCore.BeginTest` that the method's own compatibility overload argues against at
 IL level, and it would have left three assertions passing vacuously.
-**Date:** 2026-08-27
-**Scope:** Piece 1 of two. Piece 2 — making the typed-client path the default — is explicitly out
-of scope and gets its own cycle.
 
 ## 1. Why
 
