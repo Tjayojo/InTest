@@ -179,8 +179,8 @@ public static class ApiResponseAssertions
 
         sb.Append(method ?? "?").Append(' ')
           .Append(uri ?? "<unknown uri>")
-          .Append(" → expected ").Append(expectedStatus)
-          .Append(", got ").Append(status)
+          .Append(" → expected ").Append(Describe(expectedStatus))
+          .Append(", got ").Append(Describe(status))
           .Append(" (").Append(elapsed.TotalMilliseconds.ToString("N0", CultureInfo.InvariantCulture)).AppendLine("ms)");
 
         if (violations.Count > 0)
@@ -196,5 +196,17 @@ public static class ApiResponseAssertions
         sb.Append("Body: ").AppendLine(body.Length > BodyExcerptLimit ? body[..BodyExcerptLimit] + "…" : body);
 
         return new ContractAssertionException(sb.ToString());
+    }
+
+    /// <summary>
+    /// "404 NotFound" when .NET names the status, "599" when it does not. Deliberately no empty
+    /// parenthetical in the unnamed case — a message reading "599 ()" is worse than the bare number.
+    /// </summary>
+    private static string Describe(int status)
+    {
+        var name = HttpStatusNames.For(status);
+        return name is null
+            ? status.ToString(CultureInfo.InvariantCulture)
+            : string.Create(CultureInfo.InvariantCulture, $"{status} {name}");
     }
 }

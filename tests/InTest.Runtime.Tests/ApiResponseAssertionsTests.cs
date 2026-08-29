@@ -36,7 +36,7 @@ public class ApiResponseAssertionsTests
                 response, 200, "Order", SchemaBundle.FromJson(BundleJson), "run-1-test", TimeSpan.FromMilliseconds(1204)));
 
         ex.Message.ShouldContain("GET https://h/api/orders/7");
-        ex.Message.ShouldContain("expected 200, got 503");
+        ex.Message.ShouldContain("expected 200 OK, got 503 ServiceUnavailable");
         ex.Message.ShouldContain("1,204ms");
         ex.Message.ShouldContain("run-1-test");
         ex.Message.ShouldContain("upstream timeout");
@@ -60,6 +60,47 @@ public class ApiResponseAssertionsTests
         using var response = Response(HttpStatusCode.NoContent, "");
         await Should.NotThrowAsync(() => ApiResponseAssertions.ShouldMatchStatusAsync(
             response, 204, "run-1-test", TimeSpan.Zero));
+    }
+
+    /// <summary>
+    /// A status .NET does not name must still produce a usable message — the number alone, with no
+    /// empty parenthetical or stray space. OpenAPI documents may declare any integer, and a vendor
+    /// range like 599 is exactly where a diagnostic matters most.
+    /// </summary>
+    [TestMethod]
+    public async Task FailureMessageOmitsTheNameForAStatusDotNetDoesNotName()
+    {
+        using var response = new HttpResponseMessage((HttpStatusCode)599)
+        {
+            Content = new StringContent("boom"),
+        };
+
+        var ex = await Should.ThrowAsync<ContractAssertionException>(() =>
+            ApiResponseAssertions.ShouldMatchStatusAsync(
+                response, 200, "test-id", TimeSpan.FromMilliseconds(1)));
+
+        // "got 599 (" pins the number as immediately followed by the elapsed clause, with no name
+        // spliced in between. This is the assertion that discriminates:
+        //   correct        -> "got 599 (1ms)"          contains it
+        //   name wrongly added -> "got 599 Unnamed (1ms)"  does not
+        //   stray trailing space -> "got 599  (1ms)"       does not
+        ex.Message.ShouldContain("expected 200 OK, got 599 (");
+    }
+
+    /// <summary>
+    /// The table's own contract, tested directly rather than through a formatted message —
+    /// <c>InTest.Runtime.csproj</c> grants <c>InternalsVisibleTo</c> to this assembly, so there is no
+    /// reason to infer it from message text.
+    /// </summary>
+    [TestMethod]
+    public void HttpStatusNamesResolvesTheAmbiguousCodesToTheirHttpSpecNames()
+    {
+        // The entry that made an explicit table necessary: ToString() returns RedirectKeepVerb here.
+        HttpStatusNames.For(307).ShouldBe("TemporaryRedirect");
+
+        HttpStatusNames.For(200).ShouldBe("OK");
+        HttpStatusNames.For(422).ShouldBe("UnprocessableEntity");
+        HttpStatusNames.For(599).ShouldBeNull();
     }
 
     /// <summary>
@@ -87,7 +128,7 @@ public class ApiResponseAssertionsTests
                 captured, 200, "Order", SchemaBundle.FromJson(BundleJson), "run-1-test", TimeSpan.FromMilliseconds(1204)));
 
         ex.Message.ShouldContain("GET https://h/api/orders/7");
-        ex.Message.ShouldContain("expected 200, got 503");
+        ex.Message.ShouldContain("expected 200 OK, got 503 ServiceUnavailable");
         ex.Message.ShouldContain("1,204ms");
         ex.Message.ShouldContain("run-1-test");
         ex.Message.ShouldContain("upstream timeout");
@@ -133,7 +174,7 @@ public class ApiResponseAssertionsTests
                 captured, 204, "run-1-test", TimeSpan.FromMilliseconds(1204)));
 
         ex.Message.ShouldContain("DELETE https://h/api/orders/7");
-        ex.Message.ShouldContain("expected 204, got 503");
+        ex.Message.ShouldContain("expected 204 NoContent, got 503 ServiceUnavailable");
         ex.Message.ShouldContain("1,204ms");
         ex.Message.ShouldContain("run-1-test");
         ex.Message.ShouldContain("upstream timeout");
