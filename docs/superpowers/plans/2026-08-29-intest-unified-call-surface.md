@@ -330,11 +330,19 @@ public class ApiTestCoreExpectTests
 
         public int CallCount { get; private set; }
 
+        /// <summary>
+        /// The token the handler was actually handed. Needed to prove the seam's token reaches the
+        /// send rather than only being pre-checked — see
+        /// <c>ExpectStatusPassesTheSeamTokenToTheSend</c> for why that distinction is load-bearing.
+        /// </summary>
+        public CancellationToken LastToken { get; private set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             CallCount++;
             LastRequest = request;
+            LastToken = cancellationToken;
             LastRequestBody = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -564,6 +572,39 @@ public async Task ExpectStatusHonoursTheSeamTokenBeforeSending()
 }
 ```
 
+```csharp
+/// <summary>
+/// The pre-check above only catches a token that was <em>already</em> cancelled. Cooperative
+/// cancellation — a token cancelled while the request is in flight — requires the token to actually
+/// reach <c>Client.SendAsync</c>, and nothing else in this suite proves it does.
+/// <para>
+/// Established by mutation, not by reading: with <c>Client.SendAsync(request, cancellationToken)</c>
+/// changed to <c>Client.SendAsync(request)</c>, the entire runtime suite still passed. This test is
+/// what closes that hole, and it is the one that makes Task 6's deletion of
+/// <c>ThreadsTheCancellationTokenSoCooperativeCancellationWorks</c> honest.
+/// </para>
+/// <para>
+/// Asserts by cancelling <em>after</em> the send rather than comparing token identity:
+/// <see cref="HttpClient"/> always links the caller's token with its own timeout source, so the
+/// handler never sees the caller's token instance and <c>CanBeCanceled</c> is true either way.
+/// Propagation from this test's own source is the property that actually discriminates.
+/// </para>
+/// </summary>
+[TestMethod]
+public async Task ExpectStatusPassesTheSeamTokenToTheSend()
+{
+    var (core, handler) = Harness(HttpStatusCode.NoContent);
+    using var cts = new CancellationTokenSource();
+    core.TokenToReturn = cts.Token;
+
+    await core.ExposedExpectStatus(204, HttpMethod.Delete, "/api/orders/42");
+
+    handler.LastToken.IsCancellationRequested.ShouldBeFalse();
+    cts.Cancel();
+    handler.LastToken.IsCancellationRequested.ShouldBeTrue();
+}
+```
+
 And add these passthroughs to `TestableApiTestCore`:
 
 ```csharp
@@ -691,7 +732,7 @@ private async Task SendAndAssertAsync(
 dotnet test tests/InTest.Runtime.Tests --filter "FullyQualifiedName~ApiTestCoreExpectTests"
 ```
 
-Expected: **PASS**, 6 tests.
+Expected: **PASS**, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1043,7 +1084,12 @@ This entry was named by no revision of the design and by neither party in review
 
 It asserts `ShouldContain("TestContext.CancellationToken")` against a raw-only plan. After the pull seam no raw generated case names cancellation, so the string is genuinely gone and the test cannot be repaired at template level.
 
-Its replacement already exists: `ApiTestCoreExpectTests.ExpectStatusHonoursTheSeamTokenBeforeSending`, written in Task 3. Delete the test method and add a comment where it was:
+Its replacement is **two** tests from Task 3, and both are required for the deletion to be honest:
+`ExpectStatusHonoursTheSeamTokenBeforeSending` (an already-cancelled token is refused before the
+request goes out) and `ExpectStatusPassesTheSeamTokenToTheSend` (the token reaches
+`Client.SendAsync`, which is what the word *cooperative* in the deleted test's name refers to).
+**Confirm both exist and pass before deleting anything here.** The first alone does not cover
+threading — measured: with the token dropped from the send, the whole runtime suite still passed. Delete the test method and add a comment where it was:
 
 ```csharp
 // [one-terminal-call]: the cancellation-threading guard moved to
