@@ -67,11 +67,29 @@ public class ApiTestCoreExpectTests
 
         public int CallCount { get; private set; }
 
+        /// <summary>
+        /// When set, the handler cancels this source <em>while the request is in flight</em> and
+        /// then observes its own token. That is the only way to prove the caller's token reached
+        /// the send: <see cref="HttpClient"/> links the caller's token with its own timeout source
+        /// and <b>disposes that linked source when the request completes</b>, so a token captured
+        /// here is already detached by the time the awaiting test body could cancel anything.
+        /// Cancelling from inside the handler observes the linkage while it still exists, and needs
+        /// no timing assumptions.
+        /// </summary>
+        public CancellationTokenSource? CancelDuringSend { get; set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             CallCount++;
             LastRequest = request;
+
+            if (CancelDuringSend is not null)
+            {
+                CancelDuringSend.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             LastRequestBody = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -190,5 +208,41 @@ public class ApiTestCoreExpectTests
             core.ExposedExpectStatus(204, HttpMethod.Delete, "/api/orders/42"));
 
         handler.CallCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The pre-check above only catches a token that was <em>already</em> cancelled. Cooperative
+    /// cancellation — a token cancelled while the request is in flight — requires the token to actually
+    /// reach <c>Client.SendAsync</c>, and nothing else in this suite proves it does.
+    /// <para>
+    /// Established by mutation, not by reading: with <c>Client.SendAsync(request, cancellationToken)</c>
+    /// changed to <c>Client.SendAsync(request)</c>, the entire runtime suite still passed. This test is
+    /// what closes that hole, and it is the one that makes Task 6's deletion of
+    /// <c>ThreadsTheCancellationTokenSoCooperativeCancellationWorks</c> honest.
+    /// </para>
+    /// <para>
+    /// Asserts by cancelling <em>after</em> the send rather than comparing token identity:
+    /// <see cref="HttpClient"/> always links the caller's token with its own timeout source, so the
+    /// handler never sees the caller's token instance and <c>CanBeCanceled</c> is true either way.
+    /// Propagation from this test's own source is the property that actually discriminates.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ExpectStatusPassesTheSeamTokenToTheSend()
+    {
+        var (core, handler) = Harness(HttpStatusCode.NoContent);
+        using var cts = new CancellationTokenSource();
+        core.TokenToReturn = cts.Token;
+
+        handler.CancelDuringSend = cts;
+
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            core.ExposedExpectStatus(204, HttpMethod.Delete, "/api/orders/42"));
+
+        // CallCount 1, not 0, is what separates this from
+        // ExpectStatusHonoursTheSeamTokenBeforeSending: the request DID reach the handler, so the
+        // cancellation observed here came from the token travelling with the send rather than from
+        // the pre-check refusing an already-cancelled token.
+        handler.CallCount.ShouldBe(1);
     }
 }
