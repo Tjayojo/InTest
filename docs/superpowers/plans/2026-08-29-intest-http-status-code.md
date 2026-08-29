@@ -525,6 +525,63 @@ number, binding to the int overload — no cast ever reaches adopter code."
 - Create: `tests/InTest.Architecture.Tests/HttpStatusNameCouplingTests.cs`
 - Modify: `tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt`
 
+- [ ] **Step 0: Cover `HttpStatusExpression` directly — the CLI side has no test of its own**
+
+Task 10 gave `HttpStatusNames` a direct test; `HttpStatusExpression` got none, and the renderer tests
+only exercise it indirectly through statuses that happen to be named. **Measured: changing the
+unnamed-status branch to emit `"(HttpStatusCode)" + status` leaves all 627 Cli tests passing.** That
+branch is the entire justification for keeping the `int` overloads — if it regresses, adopter code
+gets the casts this design exists to avoid, silently.
+
+Create `tests/InTest.Cli.Tests/HttpStatusExpressionTests.cs`:
+
+```csharp
+using InTest.Cli.Naming;
+using Shouldly;
+
+namespace InTest.Cli.Tests;
+
+/// <summary>
+/// [status-code-is-named]: the expression the generator emits. The renderer tests cover this
+/// indirectly for named statuses only, which left the unnamed branch untested — confirmed by
+/// mutation: emitting <c>(HttpStatusCode)599</c> instead of <c>599</c> kept all 627 Cli tests green.
+/// That branch is why the <c>int</c> overloads exist at all, so it gets a test of its own.
+/// </summary>
+[TestClass]
+public class HttpStatusExpressionTests
+{
+    [TestMethod]
+    public void EmitsTheEnumFormForAStatusDotNetNames()
+    {
+        HttpStatusExpression.For(404).ShouldBe("HttpStatusCode.NotFound");
+        HttpStatusExpression.For(200).ShouldBe("HttpStatusCode.OK");
+    }
+
+    /// <summary>
+    /// The entry the explicit table exists for — <c>ToString()</c> returns <c>RedirectKeepVerb</c>.
+    /// </summary>
+    [TestMethod]
+    public void PrefersTheHttpSpecNameForAnAmbiguousStatus()
+    {
+        HttpStatusExpression.For(307).ShouldBe("HttpStatusCode.TemporaryRedirect");
+    }
+
+    /// <summary>
+    /// A bare number, never a cast. The generated call binds it to the <c>int</c> overload, which is
+    /// the whole reason both overloads exist.
+    /// </summary>
+    [TestMethod]
+    public void EmitsABareNumberForAStatusDotNetDoesNotName()
+    {
+        HttpStatusExpression.For(599).ShouldBe("599");
+        HttpStatusExpression.For(599).ShouldNotContain("HttpStatusCode");
+    }
+}
+```
+
+Verify it discriminates: change the unnamed branch to prepend `"(HttpStatusCode)"`, confirm
+`EmitsABareNumberForAStatusDotNetDoesNotName` fails, revert.
+
 - [ ] **Step 1: Write the coupling guard**
 
 It must read **both files as text**, the way `PackageVersionCouplingTests` reads its three sites — `InTest.Architecture.Tests` has no `InternalsVisibleTo` grant to either package, and this task must not add one.
