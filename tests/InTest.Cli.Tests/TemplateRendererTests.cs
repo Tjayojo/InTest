@@ -149,22 +149,25 @@ public class TemplateRendererTests
     [TestMethod]
     public void CallsTheContractAssertionWhenASchemaIsKnown()
     {
-        Render(Plan()).ShouldContain("ShouldMatchContractAsync");
+        Render(Plan()).ShouldContain("ExpectContract(");
     }
 
     [TestMethod]
     public void FallsBackToStatusOnlyWhenNoSchemaIsDeclared()
     {
         var rendered = Render(Plan(schemaKey: null));
-        rendered.ShouldContain("ShouldMatchStatusAsync");
-        rendered.ShouldNotContain("ShouldMatchContractAsync");
+        rendered.ShouldContain("ExpectStatus(");
+        rendered.ShouldNotContain("ExpectContract(");
     }
 
-    [TestMethod]
-    public void ThreadsTheCancellationTokenSoCooperativeCancellationWorks()
-    {
-        Render(Plan()).ShouldContain("TestContext.CancellationToken");
-    }
+    // [one-terminal-call]: the cancellation-threading guard moved to
+    // InTest.Runtime.Tests/ApiTestCoreExpectTests.ExpectStatusHonoursTheSeamTokenBeforeSending.
+    // It cannot live here any more: after the pull seam no raw generated case names cancellation at
+    // all, so there is no string for a template-level assertion to match. Note that
+    // TemplateRendererClientTests.PassesTheCancellationTokenByNameRatherThanPositionally still passes
+    // and still mentions TestContext.CancellationToken — but it covers the *client call expression*
+    // (the typed client's own cancellationToken: argument), not InTest's send. Do not read it as
+    // proof that this branch is still covered.
 
     [TestMethod]
     [DataRow("GET", DisplayName = "non-mutating")]
@@ -197,8 +200,6 @@ public class TemplateRendererTests
         var rendered = Render(PlanWithBody());
 
         rendered.ShouldContain("FixtureBody(\"createOrder\")");
-        rendered.ShouldContain("new StringContent(");
-        rendered.ShouldContain("application/json");
     }
 
     [TestMethod]
@@ -232,7 +233,7 @@ public class TemplateRendererTests
 
         rendered.ShouldContain("RequireFixture(\"getOrderById\")");
         rendered.IndexOf("RequireFixture(", StringComparison.Ordinal)
-            .ShouldBeLessThan(rendered.IndexOf("new HttpRequestMessage(", StringComparison.Ordinal));
+            .ShouldBeLessThan(rendered.IndexOf("await ExpectContract(", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -359,7 +360,7 @@ public class TemplateRendererTests
 
         rendered.ShouldNotContain("\r\n\r\n\r\n");
         rendered.ShouldNotContain("\r\n\r\n    }");
-        rendered.ShouldContain("    {\r\n        using var request",
+        rendered.ShouldContain("    {\r\n        await Expect",
             customMessage: "no RequireFixture line and no leftover blank line ahead of it");
     }
 
@@ -386,7 +387,7 @@ public class TemplateRendererTests
 
         rendered.ShouldContain("RequireMultipleIdentities();");
         rendered.IndexOf("RequireMultipleIdentities(", StringComparison.Ordinal)
-            .ShouldBeLessThan(rendered.IndexOf("new HttpRequestMessage(", StringComparison.Ordinal));
+            .ShouldBeLessThan(rendered.IndexOf("await ExpectStatus(", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -404,7 +405,7 @@ public class TemplateRendererTests
 
         rendered.ShouldContain("using var _ = UseIdentity(IdentitySlot.Secondary);");
         rendered.IndexOf("UseIdentity(", StringComparison.Ordinal)
-            .ShouldBeLessThan(rendered.IndexOf("new HttpRequestMessage(", StringComparison.Ordinal));
+            .ShouldBeLessThan(rendered.IndexOf("await ExpectStatus(", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -468,7 +469,7 @@ public class TemplateRendererTests
         rendered.ShouldNotContain("\r\n\r\n\r\n");
         rendered.ShouldNotContain("\r\n\r\n    }");
         rendered.ShouldContain(
-            "    {\r\n        RequireMultipleIdentities();\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        using var request",
+            "    {\r\n        RequireMultipleIdentities();\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        await Expect",
             customMessage: "guard and override must sit on adjacent lines, with exactly one blank line before the request");
     }
 
@@ -480,7 +481,7 @@ public class TemplateRendererTests
         rendered.ShouldNotContain("\r\n\r\n\r\n");
         rendered.ShouldNotContain("\r\n\r\n    }");
         rendered.ShouldContain(
-            "    {\r\n        using var _ = UseIdentity(IdentitySlot.None);\r\n\r\n        using var request",
+            "    {\r\n        using var _ = UseIdentity(IdentitySlot.None);\r\n\r\n        await Expect",
             customMessage: "no guard line for a 401 case, and no leftover blank line ahead of the override");
     }
 
@@ -519,7 +520,7 @@ public class TemplateRendererTests
         var requireMultiple = rendered.IndexOf("RequireMultipleIdentities();", StringComparison.Ordinal);
         var requireLacks = rendered.IndexOf("RequireSecondaryIdentityLacks(", StringComparison.Ordinal);
         var useIdentity = rendered.IndexOf("using var _ = UseIdentity(", StringComparison.Ordinal);
-        var buildRequest = rendered.IndexOf("new HttpRequestMessage(", StringComparison.Ordinal);
+        var buildRequest = rendered.IndexOf("await ExpectStatus(", StringComparison.Ordinal);
 
         requireMultiple.ShouldBeLessThan(requireLacks);
         requireLacks.ShouldBeLessThan(useIdentity);
@@ -578,7 +579,7 @@ public class TemplateRendererTests
         rendered.ShouldNotContain("\r\n\r\n\r\n");
         rendered.ShouldNotContain("\r\n\r\n    }");
         rendered.ShouldContain(
-            "    {\r\n        RequireMultipleIdentities();\r\n        RequireSecondaryIdentityLacks(\"orders.write\");\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        using var request",
+            "    {\r\n        RequireMultipleIdentities();\r\n        RequireSecondaryIdentityLacks(\"orders.write\");\r\n        using var _ = UseIdentity(IdentitySlot.Secondary);\r\n\r\n        await Expect",
             customMessage: "both guards and the override sit on adjacent lines, with exactly one blank line before the request");
     }
 
