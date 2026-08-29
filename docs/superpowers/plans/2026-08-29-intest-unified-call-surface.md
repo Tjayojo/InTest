@@ -267,6 +267,7 @@ read against a real API."
 Create `tests/InTest.Runtime.Tests/ApiTestCoreExpectTests.cs`:
 
 ```csharp
+using System.Net;
 using System.Reflection;
 using Shouldly;
 
@@ -357,19 +358,39 @@ public class ApiTestCoreExpectTests
     }
 
     /// <summary>
+    /// Observes <see cref="ApiTestCore"/>'s own default, which requires a subclass that does
+    /// <b>not</b> override the seam. <see cref="TestableApiTestCore"/> overrides it, so a test
+    /// written against that subclass cannot see the base implementation at all — it would pass even
+    /// if the base threw, which is exactly the "green for a reason unrelated to what it guards"
+    /// failure this project keeps finding. Verified by mutation: making the base body
+    /// <c>throw new NotSupportedException()</c> must turn this test red.
+    /// </summary>
+    private sealed class UnoverriddenApiTestCore : ApiTestCore
+    {
+        public CancellationToken ExposedTestCancellationToken => TestCancellationToken;
+    }
+
+    /// <summary>
     /// The seam's default must be <see cref="CancellationToken.None"/>, not a throw: the neutral
     /// package has no way to obtain a real token, and a base class that threw would make
     /// <see cref="ApiTestCore"/> unusable to any adapter that has not overridden it yet.
     /// </summary>
     [TestMethod]
-    public void TestCancellationTokenDefaultsToNone()
+    public void TestCancellationTokenDefaultsToNoneWhenNotOverridden()
     {
-        var core = new TestableApiTestCore { TokenToReturn = CancellationToken.None };
+        var core = new UnoverriddenApiTestCore();
 
         core.ExposedTestCancellationToken.ShouldBe(CancellationToken.None);
     }
 }
 ```
+
+> **Why the extra subclass.** The obvious version of this test —
+> `new TestableApiTestCore { TokenToReturn = CancellationToken.None }` then asserting the result is
+> `None` — is a tautology: it asserts that an override returns the value it was just assigned, and
+> it passes even when `ApiTestCore`'s own default throws. An earlier revision of this plan
+> prescribed exactly that, and it was caught by mutation rather than by review. **Do not collapse
+> the two subclasses back into one.**
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -377,7 +398,10 @@ public class ApiTestCoreExpectTests
 dotnet test tests/InTest.Runtime.Tests --filter "FullyQualifiedName~ApiTestCoreExpectTests"
 ```
 
-Expected: **compile error** — `'ApiTestCore' does not contain a definition for 'TestCancellationToken'` (the `protected override` has nothing to override).
+Expected: **compile error** —
+`error CS0115: '…TestableApiTestCore.TestCancellationToken': no suitable method found to override`.
+(Not `CS1061 'does not contain a definition for'` — that is what the compiler emits for a missing
+*member reference*; an `override` with nothing to bind to is CS0115.)
 
 - [ ] **Step 3: Add the seam to `ApiTestCore`**
 
@@ -550,11 +574,8 @@ public Task ExposedExpectStatus(int expectedStatus, HttpMethod method, string ur
     ExpectStatus(expectedStatus, method, url, body);
 ```
 
-Add to the file's usings:
-
-```csharp
-using System.Net;
-```
+(`using System.Net;` is already at the top of this file from Task 2 — `System.Net` is **not** in
+this project's implicit usings, which carry `System.Net.Http` but not `System.Net`.)
 
 - [ ] **Step 2: Run to verify they fail**
 
