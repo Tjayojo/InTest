@@ -109,10 +109,36 @@ public async Task FailureMessageOmitsTheNameForAStatusDotNetDoesNotName()
         ApiResponseAssertions.ShouldMatchStatusAsync(
             response, 200, "test-id", TimeSpan.FromMilliseconds(1)));
 
-    ex.Message.ShouldContain("expected 200 OK, got 599");
-    ex.Message.ShouldNotContain("599 ");
+    // "got 599 (" pins the number as immediately followed by the elapsed clause, with no name
+    // spliced in between. This is the assertion that discriminates:
+    //   correct        -> "got 599 (1ms)"          contains it
+    //   name wrongly added -> "got 599 Unnamed (1ms)"  does not
+    //   stray trailing space -> "got 599  (1ms)"       does not
+    ex.Message.ShouldContain("expected 200 OK, got 599 (");
+}
+
+/// <summary>
+/// The table's own contract, tested directly rather than through a formatted message —
+/// <c>InTest.Runtime.csproj</c> grants <c>InternalsVisibleTo</c> to this assembly, so there is no
+/// reason to infer it from message text.
+/// </summary>
+[TestMethod]
+public void HttpStatusNamesResolvesTheAmbiguousCodesToTheirHttpSpecNames()
+{
+    // The entry that made an explicit table necessary: ToString() returns RedirectKeepVerb here.
+    HttpStatusNames.For(307).ShouldBe("TemporaryRedirect");
+
+    HttpStatusNames.For(200).ShouldBe("OK");
+    HttpStatusNames.For(422).ShouldBe("UnprocessableEntity");
+    HttpStatusNames.For(599).ShouldBeNull();
 }
 ```
+
+> **An earlier revision of this plan asserted `ShouldNotContain("599 ")` here and it could never
+> pass.** The message reads `got 599 (1ms)`, so the space before the elapsed clause makes `"599 "` a
+> substring no matter what `Describe` returns — and it would not have discriminated a real defect
+> either, since a buggy trailing space produces a message containing that substring too. Caught by an
+> implementer who stopped rather than adjusting the assertion to fit the output.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -120,7 +146,9 @@ public async Task FailureMessageOmitsTheNameForAStatusDotNetDoesNotName()
 dotnet test tests/InTest.Runtime.Tests --filter "FullyQualifiedName~ApiResponseAssertionsTests"
 ```
 
-Expected: **4 failed** — the three updated assertions plus the new test.
+Expected: **5 failed** — the three updated assertions plus the two new tests (the second fails to
+compile-or-run only once `HttpStatusNames` exists; if the file does not build yet, that is the
+expected red for it).
 
 - [ ] **Step 3: Create the name table**
 
@@ -228,7 +256,7 @@ private static string Describe(int status)
 dotnet test tests/InTest.Runtime.Tests
 ```
 
-Expected: **PASS** (265 — 264 plus the new unnamed-status test).
+Expected: **PASS** (266 — 264 plus the two new tests).
 
 - [ ] **Step 6: Commit**
 
