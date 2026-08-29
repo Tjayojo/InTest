@@ -1,9 +1,41 @@
 # Unified call surface for generated tests
 
-**Status:** Design · Revision 6
+**Status:** Design · Revision 7
 **Date:** 2026-08-27
 **Scope:** Piece 1 of two. Piece 2 — making the typed-client path the default — is explicitly out
 of scope and gets its own cycle.
+
+**Revision note — rev 7.** Fifth review, and the first where the reviewer **implemented** the design
+rather than reading it — template plus a real `ApiTestCore`/`ApiTestBase`, so the Golden suite could
+build and run.
+
+**The headline is a validation, and it belongs above the defect list: the design as specified compiles
+and runs.** `dotnet build InTest.sln` — 0 warnings, 0 errors under `TreatWarningsAsErrors=true`.
+`CompileVerificationTests` 7/7. `GeneratedSuiteExecutionTests` 22/23, the single failure being one
+assertion this document already predicted. The `protected override` seam across the package boundary
+compiles clean.
+
+Three blocking defects, two of them introduced by rev 6 itself:
+
+1. **§8 was never updated when §1 adopted the middle option.** Four sites still scoped the change to
+   the raw branch, and §8's vacuity analysis was calibrated to that abandoned scope — measurably
+   false under the adopted one. An implementer following §8 literally would have shipped
+   `ExpectCapturedStatus`/`ExpectCapturedContract` with no caller: this document's own definition of
+   dead code, the argument it used one section earlier to fold P1 in.
+2. **Rev 6's "a forcing mechanism already exists" for `examples/` was false.** It was reached by
+   reading `ExampleProjectVersionMarkerTests`' comment and treating it as the test's behaviour. The
+   assertions compare the three markers to each other and never to `CliVersion.Current`. Retracted;
+   the honest mechanism is a release-checklist step, labelled as weaker than a test.
+3. **"Four entry points, each with a required-body overload"** gave the captured pair a body
+   parameter they can never use, and propagated "eight signatures" into §4's cost argument. Six.
+
+**§8's test inventory is now measured and must not be re-derived by reading.** Every revision that
+hand-derived it got it wrong — three consecutively. The measurement found a bucket no revision had
+named: an assertion that stays **green for a reason unrelated to what it guards**
+(`TemplateRendererClientTests.cs:401`, satisfied by the pinned catch filter after the change), which
+is more dangerous than a vacuous one because nothing goes red to announce it. It also found
+`TemplateRendererTests.cs:160`, which neither the author nor the reviewer had named, and **corrected
+rev 6's cost estimate downward** for direct `Expect*` tests — one reflection hatch, not two.
 
 **Revision note — rev 6.** Worked through with the reviewer rather than another review round.
 Two rev-5 edits had not landed as meant: `[prefer-the-platform]`'s four bullets appeared **twice**
@@ -72,12 +104,18 @@ The stopwatch, the cancellation token and `TestId` are threaded by hand into eve
 `ShouldMatchContractAsync`, and a `...Captured...` pair that exists only because PR #6's
 typed-client path captures responses differently.
 
-**Scope, stated plainly because rev 2 left it ambiguous.** Piece 1 consolidates the **raw branch
-only**. The client branch keeps its stopwatch, its pinned `try` / exception-filter / `catch`, and its
-explicit `ShouldMatchCaptured*` call — moving that filter into the runtime is exactly what
-`[one-terminal-call]` argues against. So piece 1 *widens* the gap between the two branches in the
-short term: a raw case becomes one call while a client case stays around ten lines. That is a
-deliberate trade, not an oversight. What converges is the assertion layer beneath both; the emitted
+**Scope, stated plainly because rev 2 left it ambiguous — and revised again below.** Piece 1 was
+scoped to the **raw branch only**. The client branch keeps its stopwatch and its pinned `try` /
+exception-filter / `catch` — moving that filter into the runtime is exactly what
+`[one-terminal-call]` argues against. Under that scope piece 1 *widened* the gap between the two
+branches in the short term: a raw case became one call while a client case stayed around ten lines.
+
+**That trade is superseded.** The middle option adopted immediately below keeps the `try` and the
+stopwatch exactly where they are but collapses the client branch's *assertion* into
+`ExpectCapturedStatus`/`ExpectCapturedContract`, so the gap **narrows** instead. The paragraph above
+is retained because the reasoning about the filter still holds and §7's risk analysis rests on it —
+but wherever this document says "raw branch only", the adopted scope is raw **and** the client
+assertion. What converges is the assertion layer beneath both; the emitted
 shapes converge in piece 2 or not at all.
 
 **A cheaper middle option exists, and it is adopted.** Rev 5 left this open; it is now decided,
@@ -146,10 +184,12 @@ await ExpectStatus(204, HttpMethod.Delete,
     InTestUrl.Build("/api/orders/{id}", FixtureParameter("delete_api_orders_id", "id")));
 ```
 
-**Four entry points**, each with a required-body overload for `POST`/`PUT`/`PATCH` — see the body
-resolution below for why the "optional trailing argument" convenience was withdrawn. Two serve the
-raw branch (`ExpectStatus`, `ExpectContract`) and two the client branch (`ExpectCapturedStatus`,
-`ExpectCapturedContract`, adopted below). The contract forms keep the schema key **explicit**,
+**Four entry points.** Two serve the raw branch (`ExpectStatus`, `ExpectContract`) and two the
+client branch (`ExpectCapturedStatus`, `ExpectCapturedContract`, adopted in §1). **The required-body
+overload belongs to the raw pair only** — see the body resolution below for why the "optional
+trailing argument" convenience was withdrawn, and note that the captured pair never build a request:
+the adopter's typed client sends the body, so a body parameter on them would be public surface with
+no possible caller. **Six signatures, not eight.** The contract forms keep the schema key **explicit**,
 because it cannot be derived: `TestPlanBuilder.ResolveSchemaKey` returns either a component name
 (`"ProblemDetails"`) or a synthesized `op:{key}:{status}:application/json`, and the first is not
 recoverable from key and status alone.
@@ -199,9 +239,13 @@ await ExpectContract(201, "Order", HttpMethod.Post,
 **`ArgumentNullException.ThrowIfNull(body)` closes the null hole, not the fail-loudly hole.** It
 only fires if the generated code called the body overload at all. A template regression that emits
 the *no-body* form for a `has_body` case sends nothing, asserts a status, and passes green — the
-guard never runs. **Close it where it actually lives:** a `TemplateRendererTests` assertion that a
-`has_body` case emits the body argument. Without that the overload is ceremony, and the hole this
-whole paragraph exists to close stays open.
+guard never runs. **Close it where it actually lives — and that guard already exists.**
+`TemplateRendererTests.RendersAStringContentBodyFromTheFixture` (line 195) already asserts that a
+body-bearing plan renders `FixtureBody("createOrder")`, `new StringContent(` and `application/json`.
+The implementer's job is to **update its expected strings to the new call shape, not to write a new
+test** — an earlier revision described this as work to be created, which risks someone adding a
+duplicate while deleting the original. Without it the overload is ceremony and the hole this
+paragraph exists to close stays open.
 
 Rejected: a fluent chain (`Operation(key).Delete(path).ShouldReturn(204)`). Three reasons, any one
 sufficient.
@@ -250,8 +294,12 @@ the reference was both wrong and ambiguous across two files. Pre-1.0 the excepti
 internal consolidation is not the same as taking it deliberately. Adapters give the same
 consolidation at no compatibility cost.
 
-**After `[one-terminal-call]` the raw pair have zero in-repo callers**, so
-`ApiResponseAssertionsTests` becomes the only thing keeping them honest. They keep direct test
+**After `[one-terminal-call]` the raw pair have no callers in generated code** — though not zero
+in-repo callers, because §8 leaves `examples/` un-regenerated and their committed output calls
+`ShouldMatchStatusAsync`/`ShouldMatchContractAsync` 37 times across four files. Those calls are
+compiled against the published `0.1.0-preview.1`, which is exactly the compatibility case this
+decision protects. Once the examples are regenerated the count goes to zero, and
+`ApiResponseAssertionsTests` becomes the only thing keeping the pair honest. They keep direct test
 coverage; adapters with no caller and no test are dead code wearing a compatibility label.
 
 **The compatibility argument cuts both ways, and rev 2 only applied one edge.** Declining to delete
@@ -326,7 +374,10 @@ cannot expose both. §3 lines 172-177 list three candidate resolutions and rejec
 *a base class exposing no client at all*, rejected because it "pushes a resolve line into every
 test."
 
-`[one-terminal-call]` **is that third resolution with its objection removed.** Generated raw cases
+`[one-terminal-call]` **is that third resolution applied to generated code only, with its objection
+removed.** The distinction matters: `Client` stays exposed on `ApiTestCore` for hand-written
+partials, so this is not the full "base class exposing no client" the spec rejected — it is that
+resolution where it was actually blocking. Generated raw cases
 stop touching `Client`, and they do not gain a resolve line — they gain `ExpectStatus`, which is
 less code, not more. Today every raw case names `HttpRequestMessage`, `Client.SendAsync` and
 `HttpResponseMessage`: three `HttpClient`-specific types in the generated file, in every case. After
@@ -399,7 +450,8 @@ option there is no P1 at all.**
 
 **Decided: the pull seam, for a reason the "one argument per call" framing understates.** The cost is
 not one argument; it is one argument on **every signature and every call site**. Four methods each
-with a required-body overload is eight signatures, and `TestContext.CancellationToken` returns to
+with a required-body overload on the raw pair is six signatures, and `TestContext.CancellationToken`
+returns to
 every generated line. That is precisely what `[one-terminal-call]` exists to remove: `TestContext` is
 the MSTest-specific type in the generated file, and re-admitting it to every call would leave the raw
 branch as un-portable as the client branch is today — while this change's whole claim is that the
@@ -462,7 +514,9 @@ decodes unconditionally. `ShouldMatchContractAsync` already decodes every time, 
 status-only path changes.
 
 **The timing window shifts.** The stopwatch currently brackets `SendAsync` alone; inside the
-consolidated call it would also cover body materialization. Reported milliseconds change in every
+consolidated call it would also cover the UTF-8 *decode* — not materialization, since the first
+risk bullet above establishes that `SendAsync(request, ct)` is `ResponseContentRead` and already
+buffers the body inside the stopwatch. Reported milliseconds change in every
 failure message. Cosmetic, but stated because §5 promises identical outcomes.
 
 **Cancellation behaviour changes, and "identical outcomes" does not cover it.**
@@ -474,8 +528,13 @@ outcomes, so it is an exception stated here rather than a `GeneratedSuiteExecuti
 **A pre-existing gap this design inherits unchanged.** `TestPlanBuilder` keys operations by the BCL
 `HttpMethod` rather than a closed enum, so a spec carrying a non-standard verb (OpenAPI 3.2's
 `additionalOperations`) makes `ToPascalMethod` emit `HttpMethod.Purge` and the generated file will
-not compile. True today; `ExpectStatus` taking an `HttpMethod` inherits it as-is. Named so it is a
-known gap rather than a latent one.
+not compile. `ExpectStatus` taking an `HttpMethod` inherits the gap as-is.
+
+**This one is reasoned, not measured** — the distinction `CLAUDE.md` requires. What *is* confirmed in
+source: `TestPlanBuilder.cs:65` iterates `pathItem.Operations` with no verb filter, and
+`TemplateRenderer.ToPascalMethod` is generic over the verb string, so nothing guards the path. What is
+**not** established is whether Microsoft.OpenApi surfaces an `additionalOperations` verb into that
+dictionary at all. An implementer should not report this as a confirmed defect without running it.
 
 **Docs that must move in the same change — the earlier list was short.** In the 2026-08-16 spec:
 §9's typed-client section, the `### Contract tests` sample (~1202, *already* stale — it shows
@@ -483,8 +542,8 @@ known gap rather than a latent one.
 sample (~1318), the `### Auth contract tests` sample (~1402), and the prose at ~1337 calling
 `ShouldMatchContractAsync`/`ShouldMatchStatusAsync` "the form you will actually see generated". In
 `docs/getting-started.md`: line 290 ("every generated case keeps building its own
-`HttpRequestMessage`, byte-for-byte identical to a build without the section") and line 371. `CLAUDE.md` requires the spec to change alongside the
-behaviour.
+`HttpRequestMessage`, byte-for-byte identical to a project with no `client` section at all") and
+line 371. `CLAUDE.md` requires the spec to change alongside the behaviour.
 
 ## 8. Files touched
 
@@ -494,46 +553,99 @@ behaviour.
 - `src/InTest.Runtime.MSTest/ApiTestBase.cs` — overrides `TestCancellationToken` (P1). No
   signature changes.
 - `src/InTest.Cli/Rendering/Templates/mstest-class.scriban` and `TemplateRenderer.cs` — emit the
-  consolidated call for the **raw branch only**; role gating unchanged.
-- **`tests/InTest.Cli.Tests/TemplateRendererTests.cs`** — ordering assertions anchored on
-  `IndexOf("new HttpRequestMessage(")` and assertions naming `ShouldMatchStatusAsync` /
-  `ShouldMatchContractAsync`. These break loudly, which is fine.
-- **`tests/InTest.Cli.Tests/TemplateRendererClientTests.cs` — the one that fails *quietly*.**
-  Lines **349**, 357, 358 and 403 — rev 3's list of three was itself incomplete, which is the very
-  defect this entry exists to prevent. 357/358/403 assert `ShouldNotContain("new
-  HttpRequestMessage(")` and `ShouldNotContain("Client.SendAsync(")`; **349** asserts
-  `ShouldNotContain("ShouldMatchContractAsync(
-            response,")` while its paired
-  positive at 348 asserts on the *client* branch, which this change does not touch — so that pair
-  cannot fail as a unit either. Once the raw branch stops emitting those strings, all four keep
-  passing while discriminating nothing — the raw-versus-client separation they exist to
-  prove silently evaporates, and their paired positive control at line 426 is the half that fails,
-  so the pair does not fail as a unit. **Replace the discriminator in the same change** — assert on
-  `ExpectStatus(` versus `ApiClient<` — so the vacuity is closed rather than discovered later, if
-  at all. This is the "a suite silently matching nothing cannot read as green" rule that
-  `assert-trx-results.ps1` exists for.
-- **`tests/InTest.Runtime.Tests/ApiResponseAssertionsTests.cs`** — directly in P2's blast radius.
-- **`tests/InTest.Golden.Tests/GeneratedSuiteExecutionTests.cs` — absent from rev 3's list
-  entirely**, and it is the suite `CLAUDE.md` calls the only one proving generated code both
-  compiles *and* runs. Line 1070 asserts `ShouldNotContain("new HttpRequestMessage(")` and goes
-  vacuous exactly as above, with its positives at 1062/1065/1066 still passing. The comment at line
-  1812 describing "a bare `HttpRequestMessage`/`Client.SendAsync` pair" also goes stale.
-- **A home for direct tests of `ExpectStatus`/`ExpectContract`.** Rev 3 named none, leaving
-  disposal, body pass-through and token honouring covered only end-to-end through Golden's happy
-  path. `ApiTestCoreCaptureTests.cs` and `ApiTestBaseTests.cs` already establish the
-  test-only-subclass pattern via `InternalsVisibleTo` — but calling them "the obvious place"
-  understates the work. Both deliberately avoid `InTestRun.InitializeAsync`; the former sets
-  `ApiTestCore._scope` by reflection precisely because `BeginTest` needs a live `InTestRun.Root`.
-  `ExpectStatus` needs `Client` (`{ get; private set; }`, set only inside `BeginTest`);
-  `ExpectContract` needs `Schemas` → `InTestRun.Schemas`, a static loaded from a real
-  `spec-schemas.json` on disk. Budget two more reflection hatches, a stub `HttpMessageHandler` and a
-  hand-built `SchemaBundle` — an implementer who hits this mid-change will fall back to Golden-only
-  coverage, which is the one thing this entry exists to prevent.
+  consolidated call for the raw branch **and** the consolidated assertion for the client branch (the
+  adopted scope; earlier revisions said "raw branch only"). Role gating unchanged.
+
+**This inventory is measured, not derived.** Every earlier revision hand-derived it and every earlier
+revision got it wrong — three in a row, and rev 6's own scope decision invalidated rev 5's list. The
+tables below come from applying the change in a clone: template plus a real `ApiTestCore`/`ApiTestBase`
+implementation, so the Golden suite could build and run. **Do not re-derive them by reading.**
+
+**Headline, and it should temper the alarm in the rest of this section: the design compiles and
+runs.** `dotnet build InTest.sln` succeeded with **0 warnings, 0 errors** under
+`TreatWarningsAsErrors=true`. `GeneratedSuiteExecutionTests`: **22 passed, 1 failed**.
+`CompileVerificationTests`: **7 passed, 0 failed** — including hostile spec text, the NSwag convention
+call, integer/long path parameters and the self-closing client-map override.
+`GeneratedSuiteBuildsAndPassesAgainstALiveService`, the auth-over-the-wire cases, the mixed-idiom
+class and the run-twice idempotency case all pass green. Exactly **one** Golden assertion breaks.
+
+*Caveat on scope of the measurement: **P2 was not implemented** in the harness — the raw pair are
+still the real implementations rather than adapters over the captured pair. So §7's
+cancellation-on-match and UTF-8-decode deltas are* not *exercised by these numbers and remain
+reasoned.*
+
+**Bucket 1 — fails loudly.** No risk; the implementer cannot miss these.
+
+| file | lines |
+|---|---|
+| `TemplateRendererTests.cs` | 152, 159, **166**, 200, 201, 235, 362, 389, 407, 471, 483, 522, 581 (12 test methods) |
+| `TemplateRendererClientTests.cs` | 348, 383, 402, 417, 426 (5 methods) |
+| `GeneratedSuiteExecutionTests.cs` | 1066 (1 method) |
+| `GoldenFileTests.cs` | `OutputMatchesTheGoldenFile` — whole-file compare |
+
+**Bucket 2 — goes vacuous. Each needs its discriminator replaced, not merely to survive the edit.**
+
+| file:line | today | replace with |
+|---|---|---|
+| `TemplateRendererTests.cs:160` | `ShouldNotContain("ShouldMatchContractAsync")` | `ShouldNotContain("ExpectContract(")` |
+| `TemplateRendererClientTests.cs:349` | `ShouldNotContain("ShouldMatchContractAsync(
+            response,")` | `ShouldNotContain("ExpectContract(")` |
+| `TemplateRendererClientTests.cs:357` | `ShouldNotContain("new HttpRequestMessage(")` | `ShouldNotContain("ExpectStatus(")` |
+| `TemplateRendererClientTests.cs:358` | `ShouldNotContain("Client.SendAsync(")` | `ShouldNotContain("ExpectContract(")` |
+| `TemplateRendererClientTests.cs:403` | `ShouldNotContain("new HttpRequestMessage(")` | `ShouldNotContain("ExpectStatus(")` |
+| `TemplateRendererClientTests.cs:404` | `ShouldNotContain("ShouldMatchCapturedContractAsync(")` | `ShouldNotContain("ExpectCapturedContract(")` |
+| `GeneratedSuiteExecutionTests.cs:1069` | `ShouldNotContain("ShouldMatchCapturedContractAsync(")` | `ShouldNotContain("ExpectCapturedContract(")` |
+| `GeneratedSuiteExecutionTests.cs:1070` | `ShouldNotContain("new HttpRequestMessage(")` | `ShouldNotContain("ExpectStatus(")` |
+
+`TemplateRendererTests.cs:160` was named by no previous revision, and by neither party in review until
+it was measured — which is the entire argument for not hand-deriving this table.
+
+**Only one of these sits in a test that still reports green** —
+`EmitsNoRawHttpRequestBuildingForAClientRoutedCase` (357/358), measured `Passed: 1`. The rest fail at
+a sibling positive, so the implementer will already be in the file. **That is not safety.** Rewriting
+348 and leaving 349, or 1066 and leaving 1069/1070, yields a green test discriminating nothing.
+
+**Bucket 3 — survives and still discriminates.** Everything else, including all whitespace guards
+(they caught a real stray-blank-line defect during the measurement), `StartsTheStopwatchBeforeTheTryBlock`
+(335-340), the `ApiClient<` guards at 384/416, and 22 of 23 `GeneratedSuiteExecutionTests`. Also
+`TemplateRendererClientTests.cs:385` (`ShouldNotContain("LastCapturedResponse")`) — it *looks* like it
+should go vacuous and does not: the pinned `catch … when (InTestAmbient.LastCapturedResponse.Value?.Value
+is null)` keeps that substring in client output, so the guard still trips on a regression.
+
+**Bucket 4 — stays green for a reason unrelated to what it guards. One member, and it is real.**
+`TemplateRendererClientTests.cs:401` (`ShouldContain("LastCapturedResponse")`) was written to pin *the
+assertion call consuming the captured response*. After the change it is satisfied by the pinned catch
+filter instead — measured by updating only line 402 and leaving 401 untouched: `Passed: 1`. Delete it
+as redundant (402 now carries the real claim) or retarget it to something the catch filter cannot
+satisfy. **This is the most dangerous category in the section**, because nothing goes red to announce it.
+
+**Cancellation coverage needs an explicit statement, or a reader will conclude nothing was lost.**
+`TemplateRendererTests.ThreadsTheCancellationTokenSoCooperativeCancellationWorks` (166) **fails** — it
+renders a raw-only plan, so `TestContext.CancellationToken` genuinely disappears. It is bucket 1, not a
+silent loss. But after this change `TemplateRendererClientTests.cs:266`
+(`PassesTheCancellationTokenByNameRatherThanPositionally`) becomes the **only** surviving
+`TestContext.CancellationToken` assertion in the repository, and it covers the *client call
+expression* — Kiota's own `cancellationToken:` argument — **not InTest's send**. "Cancellation is still
+covered by a fast test" would then be technically true and materially false.
+
+  **Its replacement, with a corrected cost.** Nothing at template level can guard this after the pull
+  seam, because no raw generated case names cancellation at all. It moves to `ApiTestCore`: a test-only
+  subclass overriding `TestCancellationToken` with an already-cancelled token, asserting `ExpectStatus`
+  throws `OperationCanceledException` before the stub handler is invoked. **Rev 6's cost estimate here
+  was inflated and would have pushed an implementer to Golden-only coverage** — the one outcome this
+  entry exists to prevent. Measured: the **status-only** form needs no `SchemaBundle` (only
+  `ExpectContract` touches `InTestRun.Schemas`) and no live `InTestRun.Root` — only `Client`, which is
+  `{ get; private set; }` and reachable with a single reflection hatch of the same shape
+  `ApiTestCoreCaptureTests` already uses for `_scope`. So: **one hatch plus a stub `HttpMessageHandler`**,
+  not two hatches plus a hand-built bundle.
+
+- **`tests/InTest.Runtime.Tests/ApiResponseAssertionsTests.cs`** — directly in P2's blast radius, and
+  the one area these measurements do not cover, since the harness did not implement P2.
 - **`tests/InTest.Cli.Tests/TemplateEscapingGuardTests.cs`** — it parses the template and classifies
   each `tc.<name>` by quote parity, mechanically enforcing one of the three text-safety rules
   `CLAUDE.md` calls non-negotiable. The new shape keeps `expected_status`/`http_method_pascal` bare
-  and the `*_literal` fields quoted, so it *should* pass unchanged. State that as a checked
-  conclusion rather than leaving it unmentioned.
+  and the `*_literal` fields quoted, so it passes unchanged — **measured, not predicted**: it passed
+  in both harness variants (raw-branch-only and the adopted scope).
 - `tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt` — regenerated golden file.
 - **`examples/Catalog.ApiTests/`, `examples/Orders.ApiTests/` — DO NOT regenerate blindly.**
   Both pin `<PackageReference Include="InTest.Runtime" Version="0.1.0-preview.1" />` — the
@@ -556,27 +668,44 @@ behaviour.
   fail-loudly non-negotiable. And leaving them is mechanically free: nothing under `.github/` or
   `scripts/` references `examples`, neither project is in the solution, so nothing goes red and
   nothing goes silently green — nothing runs.
-  **A forcing mechanism already exists — do not invent a second one.** `examples/` must be touched
-  at `0.1.0-preview.2` regardless of this change, for an unrelated reason:
-  `ExampleProjectVersionMarkerTests`' `RuntimePackageReferencePattern` deliberately matches *either*
-  `InTest.Runtime` or `InTest.Runtime.MSTest`, and its comment states why — the adapter "does not
-  exist yet — it ships with the next release", so "migrating each example is a one-line
-  `PackageReference` id edit" once it is published. That edit is mandatory, already documented, and
-  lands in exactly the release this change ships in. **Regeneration rides along with it**, so the
-  decision cannot silently become an oversight.
-  Two cheap reinforcements, both in this change: extend that comment to say the migration edit is
-  also when to regenerate, and add a matching note beside each example's existing preview-pin
-  comment (*this committed output predates the unified call surface; regenerate when the
-  `PackageReference` id moves to `InTest.Runtime.MSTest`*).
-  **Do not add a new failing test here.** That same comment ends *"do NOT 'fix' that migration by
-  touching `examples/` preemptively"* — a guard that goes red now would be pressure to do precisely
-  that, against an instruction the codebase already states.
-- The template header's `using System.Diagnostics;` and `using System.Text;` — after the change a
-  class with no client-routed case uses neither. Not a build error (the scaffold sets `Nullable` but
+  **Correction — rev 6 claimed a forcing mechanism already exists. It does not.** That claim was
+  reached by reading `ExampleProjectVersionMarkerTests`' comment and treating it as the test's
+  behaviour. The assertions say otherwise: `ThreeVersionMarkersAgreeAcrossEveryExample` compares the
+  three markers **to each other** (`intestVersion != cliVersion`, `intestVersion != runtimeVersion`)
+  and never against `CliVersion.Current`, and `RuntimePackageReferencePattern` deliberately matches
+  *either* package id. So all three markers can agree at `0.1.0-preview.1` indefinitely, with the old
+  id, and the suite stays green. Combined with the verified facts that nothing under `.github/` or
+  `scripts/` references `examples/` and neither project is in `InTest.sln`, **nothing whatsoever
+  forces regeneration.** The outcome this entry exists to prevent is exactly what the decision
+  permits.
+  **The forcing point cannot be a test, and that is the actual reason none exists.** The trigger is
+  "at the next publish", which no assertion can express: a check comparing `examples/` to
+  `CliVersion.Current` would go red on `main` the moment the CLI moves ahead, and stay red for the
+  whole development cycle — pressure to migrate `examples/` preemptively, which
+  `ExampleProjectVersionMarkerTests`' comment explicitly forbids (*"do NOT 'fix' that migration by
+  touching `examples/` preemptively"*). A permanently-red guard is not a forcing mechanism; it is a
+  broken build people learn to ignore.
+  **So put it where per-release human steps already live:** `CONTRIBUTING.md`'s "Publishing
+  checklist" (line 564), as a line requiring both example projects be regenerated and their
+  `PackageReference` id moved to `InTest.Runtime.MSTest` before the tag is cut. Reinforce with a note
+  beside each example's existing preview-pin comment (*this committed output predates the unified
+  call surface; regenerate when the `PackageReference` id moves*), and extend the marker test's
+  comment to point at the checklist. **This is weaker than a test and must be labelled as such** — it
+  is a documented human step, and the honest statement is that `examples/` staleness is caught by
+  release discipline, not by CI.
+- The template header's `using System.Diagnostics;` and `using System.Text;`. These behave
+  **differently** and the earlier note conflated them. `Encoding` appears at exactly one place in the
+  template — line 103, the raw body arm — and the client branch never used it, so `using System.Text;`
+  becomes unused in **every** generated class, not merely one with no client-routed case.
+  `using System.Diagnostics;` behaves as stated: the client branch keeps its stopwatch, so only a
+  class with no client-routed case stops needing it. Not a build error (the scaffold sets `Nullable` but
   not `TreatWarningsAsErrors`, and unused usings are IDE-only), but the header is a file this change
   touches.
 - The design spec §9 and `docs/getting-started.md`.
 
-**A cost worth naming:** because piece 1 consolidates only the raw branch, the golden file and both
-`examples/` projects take a shape churn now and another in piece 2 — two reviewed diffs for
-adopters instead of one.
+**A cost worth naming, and the adopted scope reduces it.** The golden file and both `examples/`
+projects still take a shape churn now and another in piece 2 — two reviewed diffs for adopters
+instead of one. But because the middle option consolidates the client *assertion* as well, piece 2's
+remaining churn is confined to moving cases from the raw branch to the client branch, rather than
+also restating how every client case asserts. Rev 5 framed this cost against the raw-branch-only
+scope, where it was larger.
