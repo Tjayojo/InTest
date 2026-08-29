@@ -1071,7 +1071,7 @@ Expected: **12 failed**. The measured list, by line and by what each asserts:
 | 166 | `ShouldContain("TestContext.CancellationToken")` | **delete the test** — see Step 4 |
 | 200 | `ShouldContain("new StringContent(")` | delete — the runtime builds the content now |
 | 201 | `ShouldContain("application/json")` | delete — same |
-| 235 | `IndexOf("new HttpRequestMessage(")` ordering vs `RequireFixture(` | anchor on `"await ExpectStatus("` |
+| 235 | `IndexOf("new HttpRequestMessage(")` ordering vs `RequireFixture(` | anchor on `"await ExpectContract("` — **not** `ExpectStatus`, see below |
 | 362, 471, 483, 581 | anchor `"…\r\n\r\n        using var request"` | anchor on `"        await Expect"` |
 | 389 | `IndexOf("new HttpRequestMessage(")` vs `RequireMultipleIdentities(` | anchor on `"await Expect"` |
 | 407 | `IndexOf("new HttpRequestMessage(")` vs `UseIdentity(` | anchor on `"await Expect"` |
@@ -1079,11 +1079,20 @@ Expected: **12 failed**. The measured list, by line and by what each asserts:
 
 - [ ] **Step 2: Update the straightforward positives**
 
-For lines 152 and 159, replace the asserted string as in the table. For the ordering assertions (235, 389, 407, 522) replace only the `IndexOf` anchor:
+For lines 152 and 159, replace the asserted string as in the table. For the ordering assertions
+(235, 389, 407, 522) replace only the `IndexOf` anchor:
 
 ```csharp
-var buildRequest = rendered.IndexOf("await ExpectStatus(", StringComparison.Ordinal);
+var buildRequest = rendered.IndexOf("await ExpectContract(", StringComparison.Ordinal);
 ```
+
+**Which terminal call each test emits differs, so render the fixture and look rather than copying an
+anchor from this plan.** Measured: line 235's `CallsRequireFixtureBeforeBuildingTheRequest` builds
+its plan with `schemaKey: "Order"`, so it emits `await ExpectContract(`. The other three use
+`PlanAuth(...)`, whose `SchemaKey` is always null, so `await ExpectStatus(` is correct there — and
+the bare prefix `"await Expect"` is safer still, since these tests care about *a* raw terminal call,
+not which one. An earlier revision of this plan gave `ExpectStatus` for all four and was wrong
+for 235.
 
 For the four blank-line anchors (362, 471, 483, 581), replace `using var request` with `await Expect`:
 
