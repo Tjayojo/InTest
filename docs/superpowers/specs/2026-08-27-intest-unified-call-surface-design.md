@@ -1,9 +1,17 @@
 # Unified call surface for generated tests
 
-**Status:** Design · Revision 4
+**Status:** Design · Revision 5
 **Date:** 2026-08-27
 **Scope:** Piece 1 of two. Piece 2 — making the typed-client path the default — is explicitly out
 of scope and gets its own cycle.
+
+**Revision note — rev 5.** Fourth review. Core sound again; every named decision held. Three
+blockers, and one retracts a claim this document made twice. **`[prefer-the-platform]` said no
+HTTP-library alternative had ever been recorded. That is false** — the 2026-08-16 spec names Flurl
+ten times, shipped it as the *primary* HTTP pack in its own rev 2, and deferred it to a v2 backlog
+with reasoning, including the non-2xx behaviour this document presented as a fresh finding. Also:
+§8 prescribed regenerating `examples/`, which cannot compile; and the body argument's prohibition
+had no mechanism and misattributed today's guard.
 
 **Revision note — rev 4.** Reviewed again. The core was judged sound and every load-bearing claim
 in §2, §3, §4 and §7 was independently re-confirmed in source. Four fixes: §8's vacuity list was
@@ -61,6 +69,19 @@ short term: a raw case becomes one call while a client case stays around ten lin
 deliberate trade, not an oversight. What converges is the assertion layer beneath both; the emitted
 shapes converge in piece 2 or not at all.
 
+**A cheaper middle option exists and this document should not ship without ruling on it.** The only
+alternative considered so far is moving the client branch's pinned `try`/filter/`catch` into the
+runtime, which `[one-terminal-call]` rightly rejects. There is a third: collapse only the client
+branch's *assertion* ceremony — something like `await ExpectCaptured(200, "Order",
+stopwatch.Elapsed)`, folding `LastCapturedResponse`, `Schemas`, `TestId` and the token — while
+leaving the pinned `try`/`catch` and the stopwatch exactly where they are. That **narrows** the gap
+instead of widening it, touches nothing `[one-terminal-call]` argues against, and dissolves the
+two-diffs-for-adopters cost this document closes on.
+
+For a product whose thesis is "the generated test is the product", shipping a release where the
+newest feature yields the ugliest file is a poor trade when a cheaper one is available. **Adopt it
+or reject it on the record — silence is the one option not available.**
+
 ## 2. What revision 1 got wrong
 
 Recorded rather than quietly replaced, because the reasoning that produced an error is the
@@ -111,6 +132,11 @@ await ExpectContract(404, "ProblemDetails", HttpMethod.Delete,
 What moves inside is exactly the plumbing — `Schemas`, `TestId`, the stopwatch and the cancellation
 token. Seven arguments become four.
 
+**The `url` parameter is a `string`, not a `Uri`.** `QueryExpression` emits
+` + InTestUrl.BuildQuery(...)` as a concatenation *outside* the `InTestUrl.Build(...)` call, so a
+`Uri` parameter would silently break every query-carrying success case. All three worked examples
+here happen to be query-free, which is exactly how that would go unnoticed.
+
 **Two qualifications the claim "nothing describing what the test does is hidden" needs.**
 
 `Encoding.UTF8` and `"application/json"` move out of the generated file into the runtime. They are
@@ -118,11 +144,21 @@ hardcoded in the template today, so this is a lateral move rather than a new ass
 are facts about the request leaving the code the adopter reads, and the claim should not paper over
 that.
 
-And **a null body on a case the generator decided has one must throw, not degrade.** `FixtureBody`
-returns `string?`, and the template's `FixtureBody(key)!` throws loudly today. A `string? body =
-null` parameter treated as "no body" would let such a case silently send nothing and still pass —
-`CLAUDE.md`'s named anti-pattern. The optional argument is a convenience for cases that genuinely
-have no body; it must not become a way for a body-bearing case to lose one quietly.
+**The body needs a mechanism, not a prohibition — and rev 4 got today's guard wrong.**
+
+`FixtureBody(key)!` does **not** throw. `!` is the null-forgiving operator, a compile-time no-op
+that emits nothing. What throws today is `StringContent`'s own `ArgumentNullException`. An
+implementer who believes the `!` is the guard will pass `FixtureBody(key)!` into an optional
+parameter and get precisely the silent degradation this paragraph forbids.
+
+**And the stated ergonomic conflicts with the stated requirement.** "No separate overload" and "a
+body-bearing case must fail loudly" cannot both hold with `string? body = null`. Resolve it in
+favour of loudness: **a separate required-body overload**, `ExpectStatus(int, HttpMethod, string,
+string body)` with `ArgumentNullException.ThrowIfNull(body)`. The "no separate overload" convenience
+is withdrawn — it was an ergonomic preference, and it loses to `CLAUDE.md`'s named anti-pattern.
+
+The implementer must show the emitted `POST`/`PUT`/`PATCH` case. It is the only shape carrying this
+risk and no worked example of it appears anywhere in this document.
 
 Rejected: a fluent chain (`Operation(key).Delete(path).ShouldReturn(204)`). Three reasons, any one
 sufficient.
@@ -203,9 +239,37 @@ not a registry the runtime consults.
 
 ### `[prefer-the-platform]` — no HTTP-client library
 
-Evaluated and rejected: Flurl, and third-party HTTP builders generally. The reasoning was never
-recorded before — no HTTP-library alternative appears anywhere in the spec or `CONTRIBUTING.md`,
-which made this an unexamined default rather than a decision. It is now a decision.
+**Retraction first.** Revisions 2–4 of this document said the reasoning "was never recorded
+before" and called the BCL choice "an unexamined default". **That is wrong.** The 2026-08-16 design
+spec names Flurl ten times: its own rev 2 shipped Flurl as the **primary** HTTP pack with
+`HttpClient` second (line 167), rev 3 cut to one pack and moved Flurl to the **v2 backlog** (lines
+180, 2603, 2634), and line 949 records that a construct existed "only because Flurl throws by
+default" — the very argument this section presented as a fresh finding. `IFlurlClient` is named at
+§3 line 172 and §5 line 475 as a designed-for v2 axis.
+
+So this is **not a new decision. It is v1 confirming a decision already made**, and the reasoning
+below is corroboration, not novelty:
+
+- **Flurl throws on non-2xx by default, and asserting on non-2xx is the job.** Three of the four
+  cases generated per operation are error cases. Every call would need `AllowAnyHttpStatus()`,
+  fighting the library's central ergonomic. (Already recorded at spec line 949.)
+- **`AppendPathSegment` does not model an OpenAPI path.** The spec supplies the template
+  `/api/orders/{id}`, and that template is also the key the plan and `coverage-report.json` are
+  built on. Flurl composes URLs from segments you already have; here the requirement is
+  substitution *into* a template, which you would write yourself and then hand to Flurl.
+- **`WithOAuthBearer` would be a regression.** Auth is applied by `AuthHandler`, a
+  `DelegatingHandler` on the `HttpClient`, driven by `ITestTokenProvider` and identity slots. That
+  covers every request without per-call code — including the typed-client path, where InTest does
+  not build the request at all.
+- **It would ship to adopters.** `InTest.Runtime` is published, so any dependency it takes lands
+  transitively in every adopter's test project.
+
+**Open question this raises, which this document must not answer silently.** §5's "Frozen vs.
+additive axes" still lists an HTTP pack as a v2 axis the architecture is designed to admit. Nothing
+here closes that axis — `ExpectStatus`/`ExpectContract` are new *surface*, not a new *constraint*,
+and a future pack would reimplement them. But if the intent is that v1's consolidation forecloses a
+second pack, **§5 becomes dead text and must be retired in the same change.** Decide it; do not
+leave two documents disagreeing.
 
 - **Flurl throws on non-2xx by default, and asserting on non-2xx is the job.** Three of the four
   cases generated per operation are error cases. Every call would need `AllowAnyHttpStatus()`,
@@ -268,6 +332,18 @@ stale and cancellation never reaches the request. That is a behaviour change hid
 *(The `[Timeout]` replacement is the reviewer's reasoning about MSTest internals and is **not
 verified here**. The pull seam is preferred regardless: it is purely additive, preserves today's
 read-at-call-time semantics exactly, and needs no compatibility argument at all.)*
+
+**The simplest option was never weighed, and it deletes P1 entirely.** The token could just stay an
+argument: `await ExpectStatus(204, HttpMethod.Delete, url, TestContext.CancellationToken)`. That
+preserves read-at-call-time — the pull seam's own justification — adds no virtual member, needs no
+compatibility argument, and keeps cancellation visible in the code the adopter reads. Cost: one
+argument per call. **Under that option there is no P1**, so a prerequisite billed as "correct
+independently, shippable alone" rests on a choice this document never made explicitly. Decide it.
+
+Related and also unstated: the client branch still emits `cancellationToken:
+TestContext.CancellationToken` inside the client call expression. After a pull seam a mixed
+generated file spells the same token two ways, and the client branch stays un-portable to a
+non-MSTest adapter.
 
 Rev 3's whole overload discussion — `ApiTestCore.cs`'s existing `BeginTest` compatibility overload,
 its IL-level reasoning, whether to take the pre-1.0 exception — **evaporates**, because a new
@@ -335,8 +411,13 @@ outcomes, so it is an exception stated here rather than a `GeneratedSuiteExecuti
 not compile. True today; `ExpectStatus` taking an `HttpMethod` inherits it as-is. Named so it is a
 known gap rather than a latent one.
 
-**Docs that must move in the same change:** §9's typed-client section and its `### Contract tests`
-sample, and `docs/getting-started.md`. `CLAUDE.md` requires the spec to change alongside the
+**Docs that must move in the same change — the earlier list was short.** In the 2026-08-16 spec:
+§9's typed-client section, the `### Contract tests` sample (~1202, *already* stale — it shows
+`TestData.Get` and `Schemas.Order`, both long removed), the `### Declared-error contract tests`
+sample (~1318), the `### Auth contract tests` sample (~1402), and the prose at ~1337 calling
+`ShouldMatchContractAsync`/`ShouldMatchStatusAsync` "the form you will actually see generated". In
+`docs/getting-started.md`: line 290 ("every generated case keeps building its own
+`HttpRequestMessage`, byte-for-byte identical to a build without the section") and line 371. `CLAUDE.md` requires the spec to change alongside the
 behaviour.
 
 ## 8. Files touched
@@ -374,9 +455,33 @@ behaviour.
 - **A home for direct tests of `ExpectStatus`/`ExpectContract`.** Rev 3 named none, leaving
   disposal, body pass-through and token honouring covered only end-to-end through Golden's happy
   path. `ApiTestCoreCaptureTests.cs` and `ApiTestBaseTests.cs` already establish the
-  test-only-subclass pattern via `InternalsVisibleTo` and are the obvious place.
+  test-only-subclass pattern via `InternalsVisibleTo` — but calling them "the obvious place"
+  understates the work. Both deliberately avoid `InTestRun.InitializeAsync`; the former sets
+  `ApiTestCore._scope` by reflection precisely because `BeginTest` needs a live `InTestRun.Root`.
+  `ExpectStatus` needs `Client` (`{ get; private set; }`, set only inside `BeginTest`);
+  `ExpectContract` needs `Schemas` → `InTestRun.Schemas`, a static loaded from a real
+  `spec-schemas.json` on disk. Budget two more reflection hatches, a stub `HttpMessageHandler` and a
+  hand-built `SchemaBundle` — an implementer who hits this mid-change will fall back to Golden-only
+  coverage, which is the one thing this entry exists to prevent.
+- **`tests/InTest.Cli.Tests/TemplateEscapingGuardTests.cs`** — it parses the template and classifies
+  each `tc.<name>` by quote parity, mechanically enforcing one of the three text-safety rules
+  `CLAUDE.md` calls non-negotiable. The new shape keeps `expected_status`/`http_method_pascal` bare
+  and the `*_literal` fields quoted, so it *should* pass unchanged. State that as a checked
+  conclusion rather than leaving it unmentioned.
 - `tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt` — regenerated golden file.
-- `examples/Catalog.ApiTests/`, `examples/Orders.ApiTests/` — regenerated.
+- **`examples/Catalog.ApiTests/`, `examples/Orders.ApiTests/` — DO NOT regenerate blindly.**
+  Both pin `<PackageReference Include="InTest.Runtime" Version="0.1.0-preview.1" />` — the
+  *published* package, not a `ProjectReference`. Neither is in `InTest.sln`; nothing in
+  `.github/workflows/` or `scripts/ci/` builds them; `ExampleProjectVersionMarkerTests` only checks
+  that the three version markers agree. So regenerating emits `ExpectStatus(`/`ExpectContract(`,
+  members that **do not exist in `0.1.0-preview.1`**, and **no test in this repository would
+  notice**. This is the exact first-row compat break `[captured-is-the-single-shape]` names in the
+  abstract, prescribed as an action three sections later. Both Golden suites are safe — they
+  substitute a `ProjectReference`; `examples/` is the sole exposure.
+  **Decide explicitly, do not default:** leave them un-regenerated until the next publish (they then
+  show the old shape until `0.1.0-preview.2`), or move them to a `ProjectReference` (which breaks the
+  "an adopter restores from nuget.org" premise their own csproj comment states), or accept two broken
+  examples and say so. Silence here ships a green run and two dead example projects.
 - The template header's `using System.Diagnostics;` and `using System.Text;` — after the change a
   class with no client-routed case uses neither. Not a build error (the scaffold sets `Nullable` but
   not `TreatWarningsAsErrors`, and unused usings are IDE-only), but the header is a file this change
