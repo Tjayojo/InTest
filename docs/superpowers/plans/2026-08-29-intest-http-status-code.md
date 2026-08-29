@@ -712,6 +712,59 @@ here with the reason attached."
 
 ---
 
+### Task 14: The Golden suite also asserts the old message shape
+
+**Task 10 changed the failure-message format and this plan accounted for only three of the six
+assertions that pin it.** The other three live in `GeneratedSuiteExecutionTests.cs` — they run a
+generated suite against a stub that returns the wrong status, then assert on the text the generated
+test printed. They were missed because Task 10's survey searched `tests/InTest.Runtime.Tests` rather
+than the whole tree, and nothing caught it until the full solution ran: Tasks 10–13 each ran only the
+fast suites, by design, and the two filtered Golden runs in Task 13 touched a different test.
+
+**Result: Golden was 3 failed / 47 passed while every other suite was green.** A branch in that state
+looks finished from any fast-suite run.
+
+**Files:**
+- Modify: `tests/InTest.Golden.Tests/GeneratedSuiteExecutionTests.cs`
+
+- [ ] **Step 1: Update the three assertions**
+
+| line | today | becomes |
+|---|---|---|
+| 659 | `failureText.ShouldContain("expected 200, got 500", …)` | `"expected 200 OK, got 500 InternalServerError"` |
+| 874 | `failureText.ShouldContain("expected 200, got 500", …)` | `"expected 200 OK, got 500 InternalServerError"` |
+| 1148 | `failureText.ShouldContain("expected 204, got 200", …)` | `"expected 204 NoContent, got 200 OK"` |
+
+Locate each by content rather than by line number, and **keep each assertion's existing
+`customMessage`** — those explain what the surrounding test is proving and are not this task's to
+rewrite. Check the comment immediately above line 659 too: it paraphrases the expected text
+("expected 200 … got 500") and goes stale with the assertion.
+
+- [ ] **Step 2: Verify**
+
+```bash
+dotnet test tests/InTest.Golden.Tests
+```
+
+Expected: **50 passed, 0 failed.** This is the slow suite — pass an explicit `timeout: 600000`, and
+do not shorten the command if it runs long. Report the wall-clock time.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/InTest.Golden.Tests/GeneratedSuiteExecutionTests.cs
+git commit -m "test: update the Golden suite's failure-message assertions
+
+Three assertions in GeneratedSuiteExecutionTests pin the contract-failure message text and
+were missed when the message gained status names. They run a generated suite against a stub
+returning the wrong status and assert on what the generated test printed.
+
+Golden was 3 failed / 47 passed while every other suite was green — the fast suites cannot
+see this, which is why the full solution has to run before a branch is called done."
+```
+
+---
+
 ## Verification
 
 The orchestrator runs the full solution — **do not run the Golden suite from a subagent.** It takes
