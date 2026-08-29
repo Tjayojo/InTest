@@ -654,9 +654,10 @@ public class GeneratedSuiteExecutionTests
         var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
             .Select(e => e.Value).FirstOrDefault() ?? "";
 
-        // InTest's own verdict: expected 200 (the operation's declared Success status), got 500 —
-        // ShouldMatchCapturedContractAsync's own Failure() message shape.
-        failureText.ShouldContain("expected 200, got 500",
+        // InTest's own verdict: expected 200 OK (the operation's declared Success status), got 500
+        // InternalServerError — ShouldMatchCapturedContractAsync's own Failure() message shape,
+        // which now names both the status code and its reason phrase rather than the bare number.
+        failureText.ShouldContain("expected 200 OK, got 500 InternalServerError",
         customMessage: $"GetStatus_ClientRouted did not fail with InTest's own expected-vs-actual status message:{Environment.NewLine}{test.Output}");
 
         // The negative half that actually proves [captured-response-is-the-verdict]: the client's
@@ -871,7 +872,7 @@ public class GeneratedSuiteExecutionTests
         var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
             .Select(e => e.Value).FirstOrDefault() ?? "";
 
-        failureText.ShouldContain("expected 200, got 500",
+        failureText.ShouldContain("expected 200 OK, got 500 InternalServerError",
         customMessage: $"GetStatus_Contract did not fail with InTest's own expected-vs-actual status message:{Environment.NewLine}{test.Output}");
 
         failureText.ShouldNotContain("FakeOrdersApiClient: request failed",
@@ -1145,7 +1146,7 @@ public class GeneratedSuiteExecutionTests
         var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
             .Select(e => e.Value).FirstOrDefault() ?? "";
 
-        failureText.ShouldContain("expected 204, got 200",
+        failureText.ShouldContain("expected 204 NoContent, got 200 OK",
         customMessage: $"Ping_Contract did not fail with InTest's own expected-vs-actual status message:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(1, test.Output);
