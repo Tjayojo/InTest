@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -82,6 +84,91 @@ public abstract class ApiTestCore
     /// </para>
     /// </summary>
     protected virtual CancellationToken TestCancellationToken => CancellationToken.None;
+
+    /// <summary>
+    /// [one-terminal-call]: the raw branch's whole HTTP ceremony — build the request, start the
+    /// stopwatch, send with the seam's token, stop, assert — behind one call. Before this, every
+    /// generated raw case spelled all five steps out, which meant every generated case named
+    /// <c>HttpRequestMessage</c>, <c>Client.SendAsync</c> and <c>HttpResponseMessage</c> directly.
+    /// <para>
+    /// <paramref name="url"/> is a <see cref="string"/> and deliberately not a <see cref="Uri"/>: the
+    /// generator emits query strings by concatenating <c>InTestUrl.BuildQuery(...)</c> *outside* the
+    /// <c>InTestUrl.Build(...)</c> call, so what arrives here is a string expression rather than a
+    /// composed URI. Taking <see cref="Uri"/> would force a parse the generator has no reason to pay.
+    /// </para>
+    /// </summary>
+    protected Task ExpectStatus(int expectedStatus, HttpMethod method, string url) =>
+        SendAndAssertAsync(expectedStatus, schemaKey: null, method, url, body: null);
+
+    /// <inheritdoc cref="ExpectStatus(int, HttpMethod, string)"/>
+    /// <remarks>
+    /// The required-body overload. Deliberately a separate overload rather than an optional
+    /// <c>string? body = null</c> parameter: a body-bearing case whose body silently resolved to null
+    /// would send an empty request and assert a status against it, which is exactly the
+    /// "plausible default that lets a suite pass while asserting nothing" CLAUDE.md forbids.
+    /// </remarks>
+    protected Task ExpectStatus(int expectedStatus, HttpMethod method, string url, string body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return SendAndAssertAsync(expectedStatus, schemaKey: null, method, url, body);
+    }
+
+    /// <summary>
+    /// [one-terminal-call]: the contract form. <paramref name="schemaKey"/> stays explicit because it
+    /// cannot be derived at runtime — <c>TestPlanBuilder.ResolveSchemaKey</c> returns either a
+    /// component name or a synthesized <c>op:{key}:{status}:application/json</c>, and the first is not
+    /// recoverable from operation key and status alone.
+    /// </summary>
+    protected Task ExpectContract(int expectedStatus, string schemaKey, HttpMethod method, string url) =>
+        SendAndAssertAsync(expectedStatus, schemaKey, method, url, body: null);
+
+    /// <inheritdoc cref="ExpectContract(int, string, HttpMethod, string)"/>
+    /// <remarks>The required-body overload — see <see cref="ExpectStatus(int, HttpMethod, string, string)"/>.</remarks>
+    protected Task ExpectContract(
+        int expectedStatus, string schemaKey, HttpMethod method, string url, string body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return SendAndAssertAsync(expectedStatus, schemaKey, method, url, body);
+    }
+
+    /// <summary>
+    /// The single implementation behind all four raw entry points. <paramref name="schemaKey"/> null
+    /// means status-only.
+    /// </summary>
+    private async Task SendAndAssertAsync(
+        int expectedStatus, string? schemaKey, HttpMethod method, string url, string? body)
+    {
+        ArgumentNullException.ThrowIfNull(method);
+        ArgumentNullException.ThrowIfNull(url);
+
+        // Read the seam once per call, not once per use: the contract is read-at-call-time, and a
+        // single call is one logical moment.
+        var cancellationToken = TestCancellationToken;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var request = new HttpRequestMessage(method, url);
+        if (body is not null)
+        {
+            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await Client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        stopwatch.Stop();
+
+        if (schemaKey is null)
+        {
+            await ApiResponseAssertions.ShouldMatchStatusAsync(
+                response, expectedStatus, TestId, stopwatch.Elapsed, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            await ApiResponseAssertions.ShouldMatchContractAsync(
+                response, expectedStatus, schemaKey, Schemas, TestId, stopwatch.Elapsed, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
 
     /// <summary>
     /// The current test's correlation id, computed once by <see cref="BeginTest"/> and cleared by

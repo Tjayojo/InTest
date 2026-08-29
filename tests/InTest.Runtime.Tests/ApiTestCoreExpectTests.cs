@@ -38,6 +38,12 @@ public class ApiTestCoreExpectTests
         protected override CancellationToken TestCancellationToken => TokenToReturn;
 
         public CancellationToken ExposedTestCancellationToken => TestCancellationToken;
+
+        public Task ExposedExpectStatus(int expectedStatus, HttpMethod method, string url) =>
+            ExpectStatus(expectedStatus, method, url);
+
+        public Task ExposedExpectStatus(int expectedStatus, HttpMethod method, string url, string body) =>
+            ExpectStatus(expectedStatus, method, url, body);
     }
 
     /// <summary>
@@ -112,5 +118,77 @@ public class ApiTestCoreExpectTests
         var core = new UnoverriddenApiTestCore();
 
         core.ExposedTestCancellationToken.ShouldBe(CancellationToken.None);
+    }
+
+    [TestMethod]
+    public async Task ExpectStatusSendsTheMethodAndUrlAndPassesOnAMatch()
+    {
+        var (core, handler) = Harness(HttpStatusCode.NoContent);
+
+        await core.ExposedExpectStatus(204, HttpMethod.Delete, "/api/orders/42");
+
+        handler.CallCount.ShouldBe(1);
+        handler.LastRequest!.Method.ShouldBe(HttpMethod.Delete);
+        handler.LastRequest!.RequestUri!.AbsolutePath.ShouldBe("/api/orders/42");
+    }
+
+    [TestMethod]
+    public async Task ExpectStatusThrowsWithTheRunFactsOnAMismatch()
+    {
+        var (core, _) = Harness(HttpStatusCode.InternalServerError, "boom");
+
+        var ex = await Should.ThrowAsync<ContractAssertionException>(() =>
+            core.ExposedExpectStatus(204, HttpMethod.Delete, "/api/orders/42"));
+
+        ex.Message.ShouldContain("expected 204");
+        ex.Message.ShouldContain("got 500");
+        ex.Message.ShouldContain("boom");
+    }
+
+    /// <summary>
+    /// The body overload exists so a body-bearing case cannot silently send nothing — see the design's
+    /// §3. ArgumentNullException.ThrowIfNull is the runtime half; the generator half is
+    /// TemplateRendererTests.RendersAStringContentBodyFromTheFixture.
+    /// </summary>
+    [TestMethod]
+    public async Task ExpectStatusWithABodySendsItAsJson()
+    {
+        var (core, handler) = Harness(HttpStatusCode.Created);
+
+        await core.ExposedExpectStatus(201, HttpMethod.Post, "/api/orders", "{\"id\":1}");
+
+        handler.LastRequestBody.ShouldBe("{\"id\":1}");
+        handler.LastRequest!.Content!.Headers.ContentType!.MediaType.ShouldBe("application/json");
+    }
+
+    [TestMethod]
+    public async Task ExpectStatusWithANullBodyThrowsRatherThanSendingNothing()
+    {
+        var (core, handler) = Harness(HttpStatusCode.Created);
+
+        await Should.ThrowAsync<ArgumentNullException>(() =>
+            core.ExposedExpectStatus(201, HttpMethod.Post, "/api/orders", null!));
+
+        handler.CallCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The replacement for TemplateRendererTests.ThreadsTheCancellationTokenSoCooperativeCancellationWorks,
+    /// which this change deletes: after the pull seam no generated raw case names cancellation at all,
+    /// so the guard has to live here. Asserts the token is honoured BEFORE the handler runs — a token
+    /// merely passed through but never observed would still let the request go out.
+    /// </summary>
+    [TestMethod]
+    public async Task ExpectStatusHonoursTheSeamTokenBeforeSending()
+    {
+        var (core, handler) = Harness(HttpStatusCode.NoContent);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        core.TokenToReturn = cts.Token;
+
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            core.ExposedExpectStatus(204, HttpMethod.Delete, "/api/orders/42"));
+
+        handler.CallCount.ShouldBe(0);
     }
 }
