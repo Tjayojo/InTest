@@ -4,7 +4,6 @@
 // </auto-generated>
 #nullable enable
 using System.Diagnostics;
-using System.Text;
 using InTest.Runtime;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -88,32 +87,19 @@ public partial class {{ class_name }} : {{ base_class }}
         stopwatch.Stop();
 
 {{~ if tc.schema_key_literal ~}}
-        await ApiResponseAssertions.ShouldMatchCapturedContractAsync(
-            LastCapturedResponse, {{ tc.expected_status }}, "{{ tc.schema_key_literal }}", Schemas, TestId, stopwatch.Elapsed,
-            TestContext.CancellationToken);
+        await ExpectCapturedContract({{ tc.expected_status }}, "{{ tc.schema_key_literal }}", stopwatch.Elapsed);
 {{~ else ~}}
-        await ApiResponseAssertions.ShouldMatchCapturedStatusAsync(
-            LastCapturedResponse, {{ tc.expected_status }}, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+        await ExpectCapturedStatus({{ tc.expected_status }}, stopwatch.Elapsed);
 {{~ end ~}}
 {{~ else ~}}
-        using var request = new HttpRequestMessage(
-            HttpMethod.{{ tc.http_method_pascal }},
-            InTestUrl.Build("{{ tc.path_template_literal }}"{{ tc.path_argument_list }}){{ tc.query_expression }});
-{{~ if tc.has_body ~}}
-        request.Content = new StringContent(FixtureBody("{{ tc.operation_key_literal }}")!, Encoding.UTF8, "application/json");
-{{~ end ~}}
-
-        var stopwatch = Stopwatch.StartNew();
-        using var response = await Client.SendAsync(request, TestContext.CancellationToken);
-        stopwatch.Stop();
-
 {{~ if tc.schema_key_literal ~}}
-        await ApiResponseAssertions.ShouldMatchContractAsync(
-            response, {{ tc.expected_status }}, "{{ tc.schema_key_literal }}", Schemas, TestId, stopwatch.Elapsed,
-            TestContext.CancellationToken);
+        await ExpectContract({{ tc.expected_status }}, "{{ tc.schema_key_literal }}", HttpMethod.{{ tc.http_method_pascal }},
+            InTestUrl.Build("{{ tc.path_template_literal }}"{{ tc.path_argument_list }}){{ tc.query_expression }}{{ if tc.has_body }},
+            FixtureBody("{{ tc.operation_key_literal }}")!{{ end }});
 {{~ else ~}}
-        await ApiResponseAssertions.ShouldMatchStatusAsync(
-            response, {{ tc.expected_status }}, TestId, stopwatch.Elapsed, TestContext.CancellationToken);
+        await ExpectStatus({{ tc.expected_status }}, HttpMethod.{{ tc.http_method_pascal }},
+            InTestUrl.Build("{{ tc.path_template_literal }}"{{ tc.path_argument_list }}){{ tc.query_expression }}{{ if tc.has_body }},
+            FixtureBody("{{ tc.operation_key_literal }}")!{{ end }});
 {{~ end ~}}
 {{~ end ~}}
     }
