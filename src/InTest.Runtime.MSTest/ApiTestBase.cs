@@ -51,6 +51,13 @@ public abstract class ApiTestBase : ApiTestCore
     public void ApiTestCleanup() => EndTest();
 
     /// <summary>
+    /// [one-terminal-call]: the MSTest half of <see cref="ApiTestCore.TestCancellationToken"/>. Reads
+    /// <c>TestContext.CancellationToken</c> on every access, deliberately — see the base member's doc
+    /// for why caching it would break cancellation.
+    /// </summary>
+    protected override CancellationToken TestCancellationToken => TestContext.CancellationToken;
+
+    /// <summary>
     /// Turns <see cref="ApiTestCore.MultipleIdentitiesSkipReason"/>'s reason string into the
     /// actual MSTest skip a generated 403 case observes.
     /// <para>

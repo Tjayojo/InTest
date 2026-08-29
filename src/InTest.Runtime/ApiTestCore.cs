@@ -63,6 +63,27 @@ public abstract class ApiTestCore
     protected string RunId => InTestRun.RunIdValue;
 
     /// <summary>
+    /// [one-terminal-call]: how a cancellation token reaches the consolidated call without this
+    /// neutral class naming a test framework. A <b>pull</b> seam — read at the moment of use — not a
+    /// push seam that stashes a token at <c>BeginTest</c>.
+    /// <para>
+    /// The distinction is load-bearing and was established by reading MSTest's own behaviour, not
+    /// assumed: MSTest replaces the <c>CancellationTokenSource</c> behind
+    /// <c>TestContext.CancellationToken</c> per test (this is how <c>[Timeout]</c> is implemented), so
+    /// a token captured once at <c>BeginTest</c> and reused would be stale — cancellation would never
+    /// reach the request. Reading through this property at call time preserves today's
+    /// read-at-call-time semantics exactly.
+    /// </para>
+    /// <para>
+    /// Defaults to <see cref="CancellationToken.None"/> rather than throwing: an adapter that has not
+    /// overridden this is not broken, it simply has no token to offer, and a throwing default would
+    /// make this class unusable to it. <c>ApiTestBase</c> in <c>InTest.Runtime.MSTest</c> overrides it
+    /// with <c>TestContext.CancellationToken</c>.
+    /// </para>
+    /// </summary>
+    protected virtual CancellationToken TestCancellationToken => CancellationToken.None;
+
+    /// <summary>
     /// The current test's correlation id, computed once by <see cref="BeginTest"/> and cleared by
     /// <see cref="EndTest"/> — not recomputed on every read the way the pre-split property
     /// (<c>InTestId.ForTest(TestHost.RunIdValue, TestContext.TestDisplayName)</c>, evaluated
