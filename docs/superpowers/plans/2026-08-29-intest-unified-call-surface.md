@@ -1090,8 +1090,16 @@ Kiota's argument, not InTest's send."
 | line | today | change to |
 |---|---|---|
 | 348 | `ShouldContain("ShouldMatchCapturedContractAsync(\r\n            LastCapturedResponse, 200, …")` | `ShouldContain("await ExpectCapturedContract(200, \"Order\", stopwatch.Elapsed);")` |
-| 383, 417, 426 | `ShouldContain("new HttpRequestMessage(")` | `ShouldContain("await ExpectStatus(")` |
+| 383, 417, 426 | `ShouldContain("new HttpRequestMessage(")` | the terminal call that case actually emits — see the note below |
 | 402 | `ShouldContain("ShouldMatchCapturedStatusAsync(\r\n            LastCapturedResponse, …")` | `ShouldContain("await ExpectCapturedStatus(200, stopwatch.Elapsed);")` |
+
+**On 383, 417 and 426:** these three assert that a *raw* case in a client-routed class still builds
+its own request. Whether each now emits `await ExpectStatus(` or `await ExpectContract(` depends on
+whether that test's plan fixture declares a schema key — **do not guess**. Run the file first and
+read the Shouldly diff, which prints the rendered output and shows you which form appeared.
+Asserting on the bare prefix `"await Expect"` is also acceptable and is arguably better: what these
+tests actually care about is "a raw terminal call rather than a client call", not which of the two
+it is.
 
 - [ ] **Step 2: Replace the five vacuous discriminators**
 
