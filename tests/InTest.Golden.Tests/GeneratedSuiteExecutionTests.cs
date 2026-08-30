@@ -445,7 +445,8 @@ public class GeneratedSuiteExecutionTests
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
-        var test = await ProcessRunner.RunAsync("dotnet", $"test \"{_root}\" --no-build --nologo");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests");
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         // The assertion that matters: the suite ran and passed. A FileNotFoundException for
         // appsettings.json, an unresolvable schema bundle, or a broken base URL all fail here
@@ -507,9 +508,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_ClientRouted\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -578,9 +580,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_ClientRouted\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -635,9 +638,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_ClientRouted\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -729,9 +733,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -798,9 +803,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -853,9 +859,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -942,9 +949,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1002,9 +1010,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1074,9 +1083,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~Ping_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~Ping_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1127,9 +1137,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~Ping_Contract\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~Ping_Contract");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1259,8 +1270,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         // The misdiagnosis this task exists to close: readiness must never be what failed here.
         test.Output.ShouldNotContain("ReadinessTimeoutException",
@@ -1359,8 +1371,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1447,8 +1460,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1508,7 +1522,8 @@ public class GeneratedSuiteExecutionTests
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
-        var test = await ProcessRunner.RunAsync("dotnet", $"test \"{_root}\" --no-build --nologo");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests");
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         // If SkippedFixture ran instead of being skipped, it throws and AssemblyInitialize fails
         // every test — the real signal. The suite must still pass.
@@ -1564,8 +1579,9 @@ public class GeneratedSuiteExecutionTests
         // "GetStatus_Contract" (no "By") does not match "GetStatusById_Contract" as a substring,
         // so this filter runs only the fixture-free operation and never touches the one with the
         // still-unresolved sentinel.
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetStatus_Contract\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         test.ExitCode.ShouldBe(0,
         $"the filtered run should pass — nothing calls RequireFixture for the one operation with a " +
@@ -1610,9 +1626,10 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --filter \"FullyQualifiedName~GetWidgetById_NotFound\" " +
-        $"--logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For(
+            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetWidgetById_NotFound");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1691,8 +1708,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1821,8 +1839,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1933,8 +1952,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -2144,8 +2164,9 @@ public class GeneratedSuiteExecutionTests
     private async Task RunAndAssertBothOperationsPassAsync(string label)
     {
         var resultsDir = Path.Combine(_root, "TestResults", label);
-        var test = await ProcessRunner.RunAsync("dotnet",
-        $"test \"{_root}\" --no-build --nologo --logger \"trx;LogFileName=results.trx\" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
+        var test = await ProcessRunner.RunAsync(
+            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"[{label}] expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -2426,4 +2447,46 @@ public class GeneratedSuiteExecutionTests
 
     // RunAsync moved to ProcessRunner (Task 10 item 6) — shared with CompileVerificationTests
     // and ScaffoldCompileVerificationTests, which duplicated this exact block.
+
+    /// <summary>
+    /// [harness-port-comes-first]: the harness must run either framework, and the two need different
+    /// invocations — not because of the trx logger (a plain `dotnet test` with no logger fails
+    /// identically) but because `dotnet test` uses the VSTest target, which the .NET 10 SDK refuses for
+    /// a Microsoft.Testing.Platform project: "Testing with VSTest target is no longer supported by
+    /// Microsoft.Testing.Platform on .NET 10 SDK and later."
+    /// <para>
+    /// The reverse is equally true and is why this cannot be a wholesale port: the MSTest scaffold sets
+    /// no <c>OutputType</c> and no <c>EnableMSTestRunner</c>, so it builds a <b>dll</b> and there is no
+    /// executable to invoke. Each framework has exactly one invocation that works.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void RunGeneratedSuiteArgumentsDifferByFramework()
+    {
+        var mstest = GeneratedSuiteRunner.For("mstest", "/tmp/proj", "Orders.ApiTests", trxPath: "r.trx");
+        mstest.FileName.ShouldBe("dotnet");
+        mstest.Arguments.ShouldContain("test");
+        mstest.Arguments.ShouldContain("--logger");
+
+        var xunit = GeneratedSuiteRunner.For("xunit", "/tmp/proj", "Orders.ApiTests", trxPath: "r.trx");
+        xunit.FileName.ShouldEndWith("Orders.ApiTests.exe");
+        xunit.Arguments.ShouldContain("-result-trx");
+        xunit.Arguments.ShouldNotContain("dotnet test");
+    }
+
+    /// <summary>
+    /// `--filter` is a `dotnet test` option. The direct runner rejects it outright
+    /// (<c>error: unknown option: --filter</c>); its equivalent is <c>-filterVSTest</c>, which takes the
+    /// same query string. Twelve call sites in this file pass a filter, so getting this wrong is not a
+    /// single-site mistake.
+    /// </summary>
+    [TestMethod]
+    public void RunGeneratedSuiteTranslatesTheFilterArgumentPerFramework()
+    {
+        GeneratedSuiteRunner.For("mstest", "/tmp/p", "P", filter: "FullyQualifiedName~Foo")
+            .Arguments.ShouldContain("--filter \"FullyQualifiedName~Foo\"");
+
+        GeneratedSuiteRunner.For("xunit", "/tmp/p", "P", filter: "FullyQualifiedName~Foo")
+            .Arguments.ShouldContain("-filterVSTest \"FullyQualifiedName~Foo\"");
+    }
 }
