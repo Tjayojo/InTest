@@ -1,12 +1,29 @@
 # xUnit framework pack
 
-**Status:** Design · Revision 2
+**Status:** Design · Revision 3
 **Date:** 2026-08-30
 **Scope:** xUnit only. NUnit follows the same path afterwards and is explicitly out of scope here —
 see §8 for what this design owes it.
 
 **Baseline:** `main` at `038c06b`. **Nothing from PR #8** — that branch is shelved, and this design
 takes no dependency on the unified call surface. Where the two would have interacted, §7 says so.
+
+**Revision note — rev 3.** Second review, again by building rather than reading. **Rev 2's
+claim-labelling held** — every §3 entry the reviewer probed reproduced, several character-for-character,
+and §6's architectural claim survived a second independent build. The reviewer also ported the golden
+expectation file mechanically and compiled it clean against a real adapter, so "a template set plus an
+adapter" is now measured twice by two people.
+
+The defects clustered in exactly the two sections a plan's first tasks would be written from:
+
+- **The harness recipe rev 2 called "measured working" could not be reproduced** — it produces
+  `Zero tests ran`, exit 5. The one-sentence *aside* is the path that works. Rev 2's emphasis was
+  inverted, and would have put task 1 on the failing path. `[harness-port-comes-first]` is rewritten.
+- **The port was attributed to the wrong cause and is roughly four times larger** than rev 2 said.
+- **§4 excluded the one test that compiles the raw scaffold**, so nothing would ever have compiled the
+  xUnit scaffold at all.
+- **Nothing said how a user selects xUnit.** That is public CLI surface under §3's semver rule, not a
+  plan task — `[framework-is-an-init-flag]` now decides it.
 
 **Revision note — rev 2.** First review, and the reviewer **built a working `InTest.Runtime.xUnit`
 in a clone and compiled it** rather than reasoning about it. The headline is that rev 1's central
@@ -80,6 +97,11 @@ reference xunit.v3.extensibility.core instead.
 metadata for a package the shipped artifact never references. `xunit.v3` is still the right
 reference for a *generated adopter project*, which is executable.
 
+**The policy outcome, recorded rather than assigned** (checked 2026-08-30): all three packages are
+**Apache-2.0, listed, with no deprecation notice and no vulnerability advisories**, published
+2026-08-15, owner `xunit`. `CONTRIBUTING.md` names deprecation and vulnerability metadata as the
+specific thing to check, so the answer belongs here rather than an instruction to go and look.
+
 **v3 rather than v2 is forced, not preferred.** Generated bodies pass a cancellation token to five
 sites in `mstest-class.scriban` (lines 93, 96, 107, 113, 116). v3 supplies
 `TestContext.Current.CancellationToken`; **v2 has no equivalent**, so a v2 pack would have to invent
@@ -96,7 +118,7 @@ every part of that mapping fails:
 |---|---|
 | `SendDiagnosticMessage` | prints **nothing** by default; needs `-diagnostics` on the command line |
 | `TestContext.Current.TestOutputHelper` at assembly scope | **null** (`pipelineStage=TestAssemblyExecution; outputHelperNull=True`) |
-| `AddWarning` at assembly scope | explicitly refused: *"Attempted to log a test warning message while not running a test"* |
+| `AddWarning` at assembly scope | refused, and **silently** — the call returns without throwing, and the message *"Attempted to log a test warning message while not running a test (pipeline stage = TestAssemblyExecution)"* only appears under `-diagnostics`. An implementer reading "refused" as "throws" would write a guard that never fires |
 | `Console.WriteLine` | **reached the operator on a passing default run** |
 
 So the mapping is **`Console.WriteLine` at assembly scope, and `AddWarning` / `ITestOutputHelper`
@@ -111,24 +133,54 @@ asserts the aggregated report reaches process output on a passing run. Rev 1's m
 
 ### `[harness-port-comes-first]` — the Golden suite cannot run an xUnit v3 project today
 
-**Rev 1 treated §4 as a matrix-sizing question. It is a harness port, and the port must be costed
-before the matrix question is even answerable.**
+**This is a harness port, and it must be costed before the matrix question in §4 is even
+answerable.**
 
-Every `GeneratedSuiteExecutionTests` shell-out uses `--logger "trx;LogFileName=results.trx"`
-(`:512`, `:583`, `:640`, `:734`, `:803`). On the .NET 10 SDK against xunit.v3 4.0.0 that does not
-degrade — it errors:
+**The cause is `dotnet test`'s VSTest default, not a logger flag.** Rev 2 blamed
+`--logger "trx;LogFileName=results.trx"` and named five call sites. Measured: plain
+`dotnet test "$_root" --no-build --nologo`, with no logger argument at all, produces the identical
+error on an xunit.v3 4.0.0 project:
 
 ```
 error : Testing with VSTest target is no longer supported by Microsoft.Testing.Platform
 on .NET 10 SDK and later.
 ```
 
-The measured working recipe needs four changes together: `<OutputType>Exe</OutputType>`; a
-`global.json` carrying `{"test":{"runner":"Microsoft.Testing.Platform"}}`; a
-`Microsoft.Testing.Extensions.TrxReport` reference; and `dotnet test <proj> -- --report-trx
---report-trx-filename r.trx`. Running the built executable directly with `-result-trx <file>` also
-works and needs no opt-in — **weigh those two**, because the second avoids the `global.json`
-entirely.
+So this hits **every** `dotnet test` shell-out in `GeneratedSuiteExecutionTests`, not the five that
+happen to pass a logger.
+
+**Use the built executable directly. Do not use `dotnet test`.**
+
+```
+./bin/Debug/net10.0/<project>.exe -result-trx out.trx
+```
+
+Verified: writes a real trx, reports `NotExecuted` for a skipped case with the reason in `<StdOut>`,
+exits 1 on failure and 0 on success. **No `global.json`, no extra package, no opt-in.**
+
+**Rev 2 prescribed the opposite and it does not work.** Its four-part recipe —
+`<OutputType>Exe</OutputType>` plus a `global.json` carrying
+`{"test":{"runner":"Microsoft.Testing.Platform"}}` plus a `Microsoft.Testing.Extensions.TrxReport`
+reference plus `dotnet test <proj> -- --report-trx --report-trx-filename r.trx` — produces
+`Zero tests ran`, exit code 5. Reproduced on SDK **10.0.400, 10.0.303 and 10.0.111**, with
+`--project`, and with `TestingPlatformDotnetTestSupport=true`.
+
+**One qualification, because it changes what an implementer should conclude.** An MSTest 4.3.3
+control project with `EnableMSTestRunner` under the same `global.json` *also* reports
+`Zero tests ran`. So what is broken is `dotnet test`'s Microsoft.Testing.Platform handshake **on this
+machine**, not anything xUnit-specific — plain VSTest `dotnet test` works here fine. That recipe may
+well work elsewhere. It does not matter: the direct-exe path works everywhere and needs no opt-in, so
+there is no reason to depend on the one that is environment-sensitive. **Do not spend implementation
+time trying to make `dotnet test` work.**
+
+**The port is roughly four times larger than rev 2 implied.** Three things change, not one:
+
+- **Every** `dotnet test` shell-out becomes a direct-exe invocation, not the five with loggers.
+- **Twelve call sites pass `--filter "FullyQualifiedName~…"`.** The direct runner rejects it
+  (`error: unknown option: --filter`); the equivalent is `-filterVSTest "<same query>"`, verified
+  working. Mechanical, but nothing would have told an implementer to look.
+- **Console output format changes wholesale**, so every `test.Output.ShouldContain(...)` assertion
+  needs re-checking against real xUnit runner output rather than assumed to survive.
 
 `scripts/ci/assert-trx-results.ps1` and `scripts/local-e2e-test.ps1` rest on the same VSTest
 assumption and are in scope.
@@ -161,7 +213,7 @@ error CS0433: The type 'ApiTestBase' exists in both 'InTest.Runtime.MSTest' and 
 error CS0433: The type 'TestHost' exists in both …
 ```
 
-(12+ occurrences.) So the xUnit adapter's internals need a **new, separate, xUnit-based test
+(**40** occurrences, measured.) So the xUnit adapter's internals need a **new, separate, xUnit-based test
 project** — a fifth suite, with knock-on changes to CI's `fast` job and `assert-trx-results.ps1`.
 That is the real price of the same-namespace choice; the choice is still right, and the price belongs
 here rather than in an implementer's surprise.
@@ -218,6 +270,11 @@ private readonly Template _classTemplate = Template.Parse(LoadEmbedded("mstest-c
 A field initialiser with the filename baked in. It becomes a constructor-time selection keyed on
 `project.framework`, with the value reaching `TemplateRenderer` from the already-loaded config.
 
+**Every case body changes in one specific way, and it is not optional.** `Xunit.TestContext` has no
+*static* `CancellationToken`, so all five sites become `TestContext.Current.CancellationToken`.
+Confirmed: the golden expectation file ported with exactly that substitution compiles clean against a
+real adapter under `TreatWarningsAsErrors=true`.
+
 **Two templates, not one with conditionals.** A single template branching on framework inside every
 block would be harder to read and would put a third framework's concerns back into one file. The
 MSTest template is **121 lines** and the xUnit one will be mostly identical; that duplication is the
@@ -236,6 +293,29 @@ missed.
 It gains `"xunit"` on the same terms. Its doc records that defaulting was considered and rejected;
 that reasoning is unchanged.
 
+### `[framework-is-an-init-flag]` — how a user actually picks xUnit
+
+Rev 2 described the reader (`[config-opens-by-one-value]`) and the output
+(`[scaffold-per-framework]`) and **never said how the value gets set**. Today `init` takes
+`--project`, `--name`, `--spec` and `--client-lockfile` (`Program.cs:52-56`) and writes
+`"framework": "mstest"` as a literal (`InitCommand.cs:418`).
+
+**`init` gains `--framework <mstest|xunit>`, defaulting to `mstest`.**
+
+This is not a detail a plan can settle task-by-task, which is why it is a named decision. §3 places
+"the CLI's commands, flags and exit codes" under semver, and §5's command-surface table is the
+contract — the same table the 2026-08-16 spec records as having gone stale three times from exactly
+this kind of omission. So:
+
+- **§5's command table changes in the same commit**, not afterwards.
+- **A bad value exits `2`**, matching §5's "an argument was refused" convention — not `1`, which
+  means work outstanding.
+- **Defaulting to `mstest` here is not the defaulting `ConfigLoader` refuses.** That refusal is about
+  `intest.json` never carrying an implicit framework; a CLI flag with a documented default writes an
+  *explicit* value into the file, which is the behaviour that rule exists to guarantee.
+- **`upgrade` and `generate --check` need no framework awareness** — both read the value from
+  `intest.json`, which is where it now always is.
+
 ### `[scaffold-per-framework]` — `init` emits a materially different project
 
 `init` writes 11 files (`InitCommand.cs:410-637`). Rev 1 named only the package references and the
@@ -250,8 +330,9 @@ assembly-setup file. The real set:
   `[assembly: DoNotParallelize]` (`InitCommand.cs:509`) plus an MSBuild guard target (`:495-499`).
   **xUnit v3 parallelizes by default** — measured banner `parallel mode = collections [22 threads]`,
   and a two-class probe reached `MAXCONCURRENT=2`. A scaffolded xUnit suite would run concurrently
-  **against a deployed API**, silently reversing a deliberate decision that §11 and §106 both rest
-  on. The analogue is `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, and
+  **against a deployed API**, silently reversing a deliberate decision that §11 rests on, and
+  that §2's constraints table names as one of the three models that are not interchangeable between
+  frameworks. The analogue is `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, and
   `[Fact(DisableParallelization = true)]` exists in 4.0.0 to carry `tc.mutates`.
 
 ### `[profile-loses-its-first-source]` — the run-settings profile has no xUnit equivalent
@@ -260,6 +341,11 @@ The MSTest scaffold writes `{projectName}.runsettings` (`:623-634`) carrying
 `<TestRunParameters><Parameter name="profile" …>`, read by `TestHost.ProfileFromRunSettings` and
 ranked **first** in `InTestRun.ResolveProfile` (`InTestRun.cs:586-590`: runsettings →
 `INTEST_PROFILE` → config default → `"local"`).
+
+**That same file carries a second capability rev 2 missed:**
+`<MSTest><TestTimeout>60000</TestTimeout></MSTest>`. xUnit's `[Fact(Timeout = …)]` is per-test, not a
+global default, so there is no scaffold-level equivalent. Name it, decide it, document it — the same
+treatment as the profile.
 
 xUnit v3 / Microsoft.Testing.Platform has no runsettings equivalent, so the xUnit adapter passes
 `null` and **the highest-precedence profile mechanism does not exist for xUnit adopters.** Rev 1's
@@ -285,6 +371,7 @@ same marking. Every claim this document relies on:
 | `AssemblyFixtureAttribute` and generic `AssemblyFixtureAttribute<T>` exist; work with `IAsyncLifetime`; no collision with the neutral `InTest.Runtime.IAssemblyFixture` | **verified** |
 | `ITestOutputHelper` exists in `Xunit` but is **null outside a running test** | **verified** |
 | `TestContext.Current.CancellationToken` | **verified** — compiled and run |
+| Inside `IAsyncLifetime.InitializeAsync`, `TestContext.Current.Test` is non-null, `TestDisplayName` is populated and `TestOutputHelper` is non-null; `DisposeAsync` runs on pass, fail **and** skip | **verified** — load-bearing, since this is where the adapter must call `BeginTest`/`EndTest` |
 | `xunit.v3` download count | **unverified offline** — §18 recorded 38,574,301 on 2026-08-17 |
 
 ---
@@ -296,9 +383,11 @@ harness can execute one xUnit project.
 
 `InTest.Golden.Tests` is the only suite proving generated code both **compiles and runs**. It holds
 **50 tests**, but they do not all scale with a framework axis, and rev 1's breakdown was wrong:
-`CompileVerificationTests` (6) and `GeneratedSuiteExecutionTests` (23) shell out to real `dotnet
-build` / `dotnet test`; `CliExitCodeTests` (14), `MSBuildEvaluationTests` (2) and
-`ScaffoldCompileVerificationTests` (1) do not. **Only the first 29 grow.**
+`CompileVerificationTests` (6), `GeneratedSuiteExecutionTests` (23) **and
+`ScaffoldCompileVerificationTests` (1)** shell out to a real `dotnet build`; `CliExitCodeTests` (14)
+does not, and `MSBuildEvaluationTests` (2) shells out only to `dotnet msbuild -getProperty`. **30
+grow, not 29** — rev 2 put `ScaffoldCompileVerificationTests` on the wrong side, and that single
+misclassification is the subject of the correction below.
 
 `CLAUDE.md` is explicit that this is a budget, not a fact — wall-clock grows roughly linearly with
 the number of generated-code shapes and has no fixed ceiling. **Take the current figures from
@@ -316,11 +405,21 @@ case" and was wrong by three:
   omitting them would mean never compiling the thing the version decision was made for.
 - **`ValidationReportWithAProblemSurfacesOnAPassingRun`.** The only test proving the `Warn` contract
   — exactly what `[warn-needs-a-real-sink]` shows the obvious mapping breaks.
-- **Hostile spec text.** The *escaping* is framework-independent (`CSharpLiteral`), but under xUnit
-  hostile text lands in `[Fact(DisplayName = …)]`, and per `[display-name-is-not-metadata]` that
-  value flows into an HTTP header via `InTestId`. `Slugify` very likely contains it — but the blast
-  radius genuinely differs between frameworks, so "framework-independent by construction" is the
-  wrong reason to omit it.
+- **Hostile spec text.** The *escaping* is framework-independent (`CSharpLiteral`), and
+  `InTestId.Slugify` (`InTestId.cs:43-86`) **definitively** contains it — it reduces to `[a-z0-9-]`,
+  caps at 120 characters and hash-suffixes on non-ASCII loss. Rev 2 hedged with "very likely"; the
+  answer is forty lines of reading away and is now stated. The case still belongs in the xUnit
+  subset, but for the correct reason: under xUnit the hostile text becomes the trx `testName`
+  attribute and the runner's console line, **both of which the Golden harness itself parses**.
+
+- **`ScaffoldCompileVerificationTests`.** It calls `InitCommand.Run` and builds the raw scaffold —
+  **the only test in the repository that compiles scaffold output at all**. That scaffold is exactly
+  what `[scaffold-per-framework]` changes materially: `<OutputType>Exe</OutputType>` (which this
+  document calls "a hard build error without it"), the `AssemblyFixture` class and assembly
+  attribute, `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, and a different
+  package set. **Under rev 2's matrix nothing would ever have compiled the xUnit scaffold.** Every
+  one of those items is a hard build failure or a silent correctness reversal, and this test is the
+  only thing that would catch any of them.
 
 Genuinely safe to keep MSTest-only: integer path parameters, the NSwag convention call, query
 composition — all `TestPlanBuilder` / `TemplateRenderer` logic.
