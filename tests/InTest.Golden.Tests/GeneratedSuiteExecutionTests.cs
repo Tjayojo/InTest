@@ -400,6 +400,11 @@ public class GeneratedSuiteExecutionTests
                                                                   }
                                                                   """;
 
+    // The literal every InitCommand.Run(_root, …) call below scaffolds under, and the projectName
+    // GeneratedSuiteCommand.For needs on its xunit branch to compute the built assembly's path —
+    // pulled out once so the two never drift against each other.
+    private const string ProjectName = "Stub.ApiTests";
+
     private string _root = null!;
     private GoldenApiStub _stub = null!;
 
@@ -428,7 +433,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedSuiteBuildsAndPassesAgainstALiveService()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -445,7 +450,7 @@ public class GeneratedSuiteExecutionTests
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests");
+        var mstest = GeneratedSuiteCommand.For("mstest", _root, ProjectName);
         var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         // The assertion that matters: the suite ran and passed. A FileNotFoundException for
@@ -484,7 +489,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task ClientRoutedSuccessCaseCatchesASchemaViolationAfterTheClientDeserializes()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -508,10 +513,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -562,7 +566,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task ClientRoutedSuccessCaseReceivesAUsableDeserializedResult()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -580,10 +584,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -622,7 +625,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task ClientRoutedSuccessCaseSurfacesInTestsOwnContractFailureNotTheClientsException()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -638,10 +641,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_ClientRouted", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -700,7 +702,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedSuccessCaseCatchesASchemaViolationAfterTheClientDeserializes()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -733,10 +735,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -788,7 +789,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedSuccessCaseReceivesAConformingBody()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -803,10 +804,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -844,7 +844,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedSuccessCaseSurfacesInTestsOwnContractFailureNotTheClientsException()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -859,10 +859,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -913,7 +912,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedCaseWarnsWhenAnExceptionIsSwallowedAfterACapture()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -949,10 +948,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -995,7 +993,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedCaseStillRethrowsWhenNothingWasCaptured()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -1010,10 +1008,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1056,7 +1053,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -1083,10 +1080,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~Ping_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~Ping_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1122,7 +1118,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -1137,10 +1133,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~Ping_Contract");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~Ping_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1204,7 +1199,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
@@ -1257,7 +1252,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task ReadinessProbeSurvivesAThrowingApiHandler()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -1270,9 +1265,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         // The misdiagnosis this task exists to close: readiness must never be what failed here.
         test.Output.ShouldNotContain("ReadinessTimeoutException",
@@ -1304,7 +1299,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task ScaffoldedConfigurationTravelsToTheOutputDirectory()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
@@ -1332,7 +1327,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -1371,9 +1366,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1435,7 +1430,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -1460,9 +1455,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1509,7 +1504,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task SkippedFixtureIsNotRunByALiveGeneratedSuite()
     {
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -1522,7 +1517,7 @@ public class GeneratedSuiteExecutionTests
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests");
+        var mstest = GeneratedSuiteCommand.For("mstest", _root, ProjectName);
         var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         // If SkippedFixture ran instead of being skipped, it throws and AssemblyInitialize fails
@@ -1562,7 +1557,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -1579,8 +1574,8 @@ public class GeneratedSuiteExecutionTests
         // "GetStatus_Contract" (no "By") does not match "GetStatusById_Contract" as a substring,
         // so this filter runs only the fixture-free operation and never touches the one with the
         // still-unresolved sentinel.
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", filter: "FullyQualifiedName~GetStatus_Contract");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, filter: "FullyQualifiedName~GetStatus_Contract");
         var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         test.ExitCode.ShouldBe(0,
@@ -1605,7 +1600,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithDeclaredNotFound);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -1626,10 +1621,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For(
-            "mstest", _root, "Stub.ApiTests", trxPath: "results.trx", filter: "FullyQualifiedName~GetWidgetById_NotFound");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetWidgetById_NotFound", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1684,7 +1678,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         RegisterTokenProvider();
@@ -1708,9 +1702,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1797,7 +1791,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         RegisterTokenProvider();
@@ -1839,9 +1833,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -1925,7 +1919,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
         RegisterTokenProvider();
@@ -1952,9 +1946,9 @@ public class GeneratedSuiteExecutionTests
         build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
 
         var resultsDir = Path.Combine(_root, "TestResults");
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -2127,7 +2121,7 @@ public class GeneratedSuiteExecutionTests
     {
         File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithItemsLifecycle);
 
-        InitCommand.Run(_root, "Stub.ApiTests", "spec.json").ShouldBe(0);
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
         PointAtStub();
 
@@ -2164,9 +2158,9 @@ public class GeneratedSuiteExecutionTests
     private async Task RunAndAssertBothOperationsPassAsync(string label)
     {
         var resultsDir = Path.Combine(_root, "TestResults", label);
-        var mstest = GeneratedSuiteRunner.For("mstest", _root, "Stub.ApiTests", trxPath: "results.trx");
-        var test = await ProcessRunner.RunAsync(
-            mstest.FileName, mstest.Arguments + $" --results-directory \"{resultsDir}\"");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
 
         var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
             .ShouldHaveSingleItem($"[{label}] expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
@@ -2449,44 +2443,80 @@ public class GeneratedSuiteExecutionTests
     // and ScaffoldCompileVerificationTests, which duplicated this exact block.
 
     /// <summary>
-    /// [harness-port-comes-first]: the harness must run either framework, and the two need different
-    /// invocations — not because of the trx logger (a plain `dotnet test` with no logger fails
-    /// identically) but because `dotnet test` uses the VSTest target, which the .NET 10 SDK refuses for
-    /// a Microsoft.Testing.Platform project: "Testing with VSTest target is no longer supported by
-    /// Microsoft.Testing.Platform on .NET 10 SDK and later."
-    /// <para>
-    /// The reverse is equally true and is why this cannot be a wholesale port: the MSTest scaffold sets
-    /// no <c>OutputType</c> and no <c>EnableMSTestRunner</c>, so it builds a <b>dll</b> and there is no
-    /// executable to invoke. Each framework has exactly one invocation that works.
-    /// </para>
+    /// Regression coverage for <see cref="GeneratedSuiteCommand.For"/> choosing the right shape per
+    /// framework — see that type for the full reasoning behind each one. Every assertion below is an
+    /// exact <c>ShouldBe</c> on the whole argument string rather than a <c>ShouldContain</c>: a
+    /// contains-check on an isolated flag can pass even when a neighboring flag was silently dropped
+    /// or the separator between two flags was wrong, and that is exactly the shape of bug this suite
+    /// exists to catch — an earlier version of
+    /// <see cref="XunitCommandInvokesTheBuiltDllDirectlyNotAnApphost"/> asserted only
+    /// <c>ShouldEndWith(".exe")</c>, which stayed green on Windows while certifying a command that
+    /// cannot run at all on the `golden` CI job's <c>ubuntu-latest</c> leg, where `dotnet build`
+    /// emits an extensionless apphost.
     /// </summary>
     [TestMethod]
-    public void RunGeneratedSuiteArgumentsDifferByFramework()
+    public void MsTestCommandUsesDotnetTestWithAllFlags()
     {
-        var mstest = GeneratedSuiteRunner.For("mstest", "/tmp/proj", "Orders.ApiTests", trxPath: "r.trx");
-        mstest.FileName.ShouldBe("dotnet");
-        mstest.Arguments.ShouldContain("test");
-        mstest.Arguments.ShouldContain("--logger");
+        var command = GeneratedSuiteCommand.For(
+            "mstest", "/tmp/proj", "P", trxPath: "r.trx", filter: "F~Foo", resultsDirectory: "/tmp/results");
 
-        var xunit = GeneratedSuiteRunner.For("xunit", "/tmp/proj", "Orders.ApiTests", trxPath: "r.trx");
-        xunit.FileName.ShouldEndWith("Orders.ApiTests.exe");
-        xunit.Arguments.ShouldContain("-result-trx");
-        xunit.Arguments.ShouldNotContain("dotnet test");
+        command.FileName.ShouldBe("dotnet");
+        command.Arguments.ShouldBe(
+            "test \"/tmp/proj\" --no-build --nologo --logger \"trx;LogFileName=r.trx\" " +
+            "--filter \"F~Foo\" --results-directory \"/tmp/results\"");
     }
 
     /// <summary>
-    /// `--filter` is a `dotnet test` option. The direct runner rejects it outright
-    /// (<c>error: unknown option: --filter</c>); its equivalent is <c>-filterVSTest</c>, which takes the
-    /// same query string. Twelve call sites in this file pass a filter, so getting this wrong is not a
-    /// single-site mistake.
+    /// The both-flags case: <c>-result-trx</c> and <c>-filterVSTest</c> together are the one place a
+    /// separator has to be inserted conditionally (see <see cref="GeneratedSuiteCommand"/>'s
+    /// <c>XunitArguments</c>), and it is untested by any test that checks the two flags in isolation.
+    /// Confirmed this actually discriminates: mutating that separator to always emit <c>""</c> turns
+    /// this test red (the exact string no longer matches — the space between the two flags is
+    /// missing) while every single-flag test stays green.
+    /// <para>
+    /// This is also the test that catches the defect the exact-match style above exists to prevent:
+    /// asserting <c>FileName.ShouldEndWith(".exe")</c> here would pass on Windows and would still be
+    /// passing today even though an apphost executable never exists on the `golden` job's
+    /// <c>ubuntu-latest</c> leg — see <see cref="GeneratedSuiteCommand"/> for why the fix is
+    /// `dotnet &lt;dll&gt;`, identical on both operating systems, instead.
+    /// </para>
     /// </summary>
     [TestMethod]
-    public void RunGeneratedSuiteTranslatesTheFilterArgumentPerFramework()
+    public void XunitCommandInvokesTheBuiltDllDirectlyNotAnApphost()
     {
-        GeneratedSuiteRunner.For("mstest", "/tmp/p", "P", filter: "FullyQualifiedName~Foo")
-            .Arguments.ShouldContain("--filter \"FullyQualifiedName~Foo\"");
+        var command = GeneratedSuiteCommand.For(
+            "xunit", "/tmp/proj", "P", trxPath: "r.trx", filter: "F~Foo", resultsDirectory: "/tmp/results");
 
-        GeneratedSuiteRunner.For("xunit", "/tmp/p", "P", filter: "FullyQualifiedName~Foo")
-            .Arguments.ShouldContain("-filterVSTest \"FullyQualifiedName~Foo\"");
+        var expectedDll = Path.Combine("/tmp/proj", "bin", "Debug", "net10.0", "P.dll");
+        var expectedTrx = Path.Combine("/tmp/results", "r.trx");
+
+        command.FileName.ShouldBe("dotnet");
+        command.Arguments.ShouldBe($"\"{expectedDll}\" -result-trx \"{expectedTrx}\" -filterVSTest \"F~Foo\"");
+    }
+
+    /// <summary>
+    /// Neither flag requested: the command is just the quoted dll path, with no trailing space and
+    /// no dangling <c>-result-trx</c>/<c>-filterVSTest</c> left over from a default. A caller that
+    /// asserts the exact argument string (as every test in this group does) should never have to
+    /// special-case a trailing space for this shape.
+    /// </summary>
+    [TestMethod]
+    public void XunitCommandOmitsFlagsThatWereNotRequested()
+    {
+        var command = GeneratedSuiteCommand.For("xunit", "/tmp/proj", "P");
+
+        command.FileName.ShouldBe("dotnet");
+        command.Arguments.ShouldBe($"\"{Path.Combine("/tmp/proj", "bin", "Debug", "net10.0", "P.dll")}\"");
+    }
+
+    /// <summary>
+    /// Anything other than the two supported literals is a programming error at the call site (a
+    /// typo, or a third framework nobody wired up yet), not a runtime condition callers should have
+    /// to handle — hence the hard throw rather than a null/empty result.
+    /// </summary>
+    [TestMethod]
+    public void ForThrowsForAnUnknownFramework()
+    {
+        Should.Throw<ArgumentOutOfRangeException>(() => GeneratedSuiteCommand.For("nunit", "/tmp/proj", "P"));
     }
 }
