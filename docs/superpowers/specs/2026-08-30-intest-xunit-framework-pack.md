@@ -1,12 +1,27 @@
 # xUnit framework pack
 
-**Status:** Design · Revision 3
+**Status:** Design · Revision 4
 **Date:** 2026-08-30
 **Scope:** xUnit only. NUnit follows the same path afterwards and is explicitly out of scope here —
 see §8 for what this design owes it.
 
 **Baseline:** `main` at `038c06b`. **Nothing from PR #8** — that branch is shelved, and this design
 takes no dependency on the unified call surface. Where the two would have interacted, §7 says so.
+
+**Revision note — rev 4.** Third review, again by building — a third independent adapter, and
+fourteen of the document's "verified/measured" claims re-established, **all of which reproduced**,
+most character-for-character. The labels are trustworthy. Every defect this round was in something
+stated **flatly and unlabelled, sitting next to a correct measurement** — which is the failure mode
+a document like this has left once its measured claims are sound.
+
+- **The parallelism attribute rev 3 prescribed does not compile.**
+  `CollectionBehavior(DisableTestParallelization = true)` is obsolete-**as-error** in 4.0.0. This was
+  the document's own single named "correctness issue", and its fix did not build.
+- **§4's matrix omitted `GoldenFileTests` entirely** — and with it the second golden expectation file
+  a second template requires.
+- Four smaller overreaches corrected, and `[frozen-axis-becomes-reachable]` added: opening
+  `project.framework` makes a frozen axis reachable that **nothing in the CLI enforces**, and rev 3
+  concluded there was no work there.
 
 **Revision note — rev 3.** Second review, again by building rather than reading. **Rev 2's
 claim-labelling held** — every §3 entry the reviewer probed reproduced, several character-for-character,
@@ -182,8 +197,20 @@ time trying to make `dotnet test` work.**
 - **Console output format changes wholesale**, so every `test.Output.ShouldContain(...)` assertion
   needs re-checking against real xUnit runner output rather than assumed to survive.
 
-`scripts/ci/assert-trx-results.ps1` and `scripts/local-e2e-test.ps1` rest on the same VSTest
-assumption and are in scope.
+`scripts/ci/assert-trx-results.ps1` rests on the same VSTest assumption (`:14`, `:22` parse
+`dotnet test --logger trx` output) and is in scope.
+
+**`scripts/local-e2e-test.ps1` does not** — rev 3 named it and was wrong. It runs `dotnet build` on
+the scaffold (`:431`) and its own header states three times that `dotnet test` is *"Deliberately out
+of scope"* (`:61`, `:76`, `:81`). It still needs changes for the fourth package and `--framework`,
+but not this one.
+
+**A fourth thing changes, and it is not optional.** A solution containing both an MSTest project and
+an xunit.v3 project fails `dotnet test <sln>` with exit 1 — the xUnit project errors on the VSTest
+target while the MSTest project runs and prints `Passed!`. That breaks `CLAUDE.md`'s documented
+`dotnet test InTest.sln  # all four suites`, and it means the fifth suite **cannot** simply be
+another `dotnet test <csproj>` step in CI's `fast` job (`build-and-test.yml:105-119`). Those knock-on
+changes follow from the frameworks coexisting in one solution, not merely from a new suite existing.
 
 ### `[snapshot-at-call-time]` — never cache `TestContext.Current`
 
@@ -213,7 +240,7 @@ error CS0433: The type 'ApiTestBase' exists in both 'InTest.Runtime.MSTest' and 
 error CS0433: The type 'TestHost' exists in both …
 ```
 
-(**40** occurrences, measured.) So the xUnit adapter's internals need a **new, separate, xUnit-based test
+(**40** lines, which is **20** unique diagnostic sites — MSBuild prints each twice.) So the xUnit adapter's internals need a **new, separate, xUnit-based test
 project** — a fifth suite, with knock-on changes to CI's `fast` job and `assert-trx-results.ps1`.
 That is the real price of the same-namespace choice; the choice is still right, and the price belongs
 here rather than in an implementer's surprise.
@@ -281,7 +308,8 @@ MSTest template is **121 lines** and the xUnit one will be mostly identical; tha
 cheaper half of the trade.
 
 **`TemplateEscapingGuardTests` must run against both.** It parses the template source and classifies
-each `tc.<name>` by quote parity (`:96`, over `LoadEmbeddedTemplate("mstest-class.scriban")`),
+each `tc.<name>` by quote parity (the `LoadEmbeddedTemplate("mstest-class.scriban")` call is at
+`:97`),
 mechanically enforcing one of the three text-safety rules `CLAUDE.md` calls non-negotiable. A second
 template the guard does not read has **no text-safety enforcement at all**. This is the single most
 important test change in the work, and it is easy to miss precisely because nothing fails when it is
@@ -307,7 +335,9 @@ This is not a detail a plan can settle task-by-task, which is why it is a named 
 contract — the same table the 2026-08-16 spec records as having gone stale three times from exactly
 this kind of omission. So:
 
-- **§5's command table changes in the same commit**, not afterwards.
+- **§5's command table changes in the same commit**, not afterwards — and note its **Writes**
+  column is framework-dependent too, not just its flag list: it names `*.runsettings`, which has no
+  purpose under xUnit.
 - **A bad value exits `2`**, matching §5's "an argument was refused" convention — not `1`, which
   means work outstanding.
 - **Defaulting to `mstest` here is not the defaulting `ConfigLoader` refuses.** That refusal is about
@@ -315,6 +345,36 @@ this kind of omission. So:
   *explicit* value into the file, which is the behaviour that rule exists to guarantee.
 - **`upgrade` and `generate --check` need no framework awareness** — both read the value from
   `intest.json`, which is where it now always is.
+
+### `[frozen-axis-becomes-reachable]` — opening `project.framework` makes an unenforced promise observable
+
+§5 makes the test framework a **frozen axis** and promises *"Attempting to change a frozen axis fails
+with a real error"*. That promise is currently unreachable for the framework only because v1 ships
+one value.
+
+**Nothing in the CLI enforces it.** A grep across `src/InTest.Cli` finds no frozen-axis enforcement
+at all — the sole hit is a doc comment at `ConfigLoader.cs:270`. So the day `"xunit"` is accepted, an
+adopter can edit one string in `intest.json`, run `generate`, and receive a wholesale-rewritten
+`Generated/` targeting a framework their `.csproj`, `AssemblyInfo.cs` and `.runsettings` do not
+match. §5's promise becomes false in an observable way.
+
+**Rev 3 reached the opposite conclusion** — *"`upgrade` and `generate --check` need no framework
+awareness — both read the value from `intest.json`"* — which is true of *reading* and silent on
+*changing*, and which a plan would faithfully encode as "no task here".
+
+**Decision: `generate` detects the mismatch and refuses.** The detection already has a precedent to
+copy rather than invent: `UpgradeCommand.DetectRuntimeReferenceMismatch` compares `intest.json`
+against the adapter `PackageReference` in the `.csproj`. The same comparison answers this — a project
+whose config says `"xunit"` while its `.csproj` references `InTest.Runtime.MSTest` has changed a
+frozen axis, and that is detectable without recording any new state.
+
+**The exit code is the implementer's to confirm against §5's table**, not to assume: a refused
+configuration is most likely `2`, but `generate --check` already uses `4` for a version mismatch and
+the two should not disagree by accident.
+
+**This debt predates this design** — identifier naming is also frozen and also unenforced — and
+fixing that generally is out of scope. What is in scope is not *shipping* the first reachable case
+with nothing behind it.
 
 ### `[scaffold-per-framework]` — `init` emits a materially different project
 
@@ -332,8 +392,29 @@ assembly-setup file. The real set:
   and a two-class probe reached `MAXCONCURRENT=2`. A scaffolded xUnit suite would run concurrently
   **against a deployed API**, silently reversing a deliberate decision that §11 rests on, and
   that §2's constraints table names as one of the three models that are not interchangeable between
-  frameworks. The analogue is `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, and
-  `[Fact(DisableParallelization = true)]` exists in 4.0.0 to carry `tc.mutates`.
+  frameworks. The analogue is:
+
+  ```csharp
+  [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+  ```
+
+  **Not `CollectionBehavior(DisableTestParallelization = true)`, which rev 3 prescribed and which
+  does not compile:**
+
+  ```
+  error CS0619: 'CollectionBehaviorAttribute.DisableTestParallelization' is obsolete:
+  'Please set ParallelizationAttribute.Mode instead. This property will be removed in the next
+  major version.'
+  ```
+
+  `ObsoleteAttribute.IsError` is `True`, so this is a hard error regardless of
+  `TreatWarningsAsErrors`; `MaxParallelThreads` and `ParallelAlgorithm` on that attribute are
+  obsolete-as-error too. Verified compiling, with runner banner `parallel mode = none`. **Note the
+  namespaces — neither is where a reader would guess:** `ParallelizationAttribute` is in `Xunit.v3`,
+  `ParallelMode` in `Xunit.Sdk` (asm `xunit.v3.common`).
+
+  `[Fact(DisableParallelization = true)]` **is** correct and is not obsolete — it carries
+  `tc.mutates`.
 
 ### `[profile-loses-its-first-source]` — the run-settings profile has no xUnit equivalent
 
@@ -342,7 +423,14 @@ The MSTest scaffold writes `{projectName}.runsettings` (`:623-634`) carrying
 ranked **first** in `InTestRun.ResolveProfile` (`InTestRun.cs:586-590`: runsettings →
 `INTEST_PROFILE` → config default → `"local"`).
 
-**That same file carries a second capability rev 2 missed:**
+**Correction to rev 3's framing: the delta is smaller than stated.** The `<Parameter name="profile" …>`
+line is **commented out by design** (`InitCommand.cs:629`) — the canonical spec records why:
+*"Commented out. `<RunSettingsFilePath>` loads it unconditionally, which made `INTEST_PROFILE`
+unreachable."* So `INTEST_PROFILE` is already the primary mechanism for MSTest adopters out of the
+box. **xUnit loses an opt-in, not a default**, and `docs/getting-started.md` must not assert a
+difference that mostly is not there.
+
+**That same file carries a second capability rev 2 missed, and this half stands:**
 `<MSTest><TestTimeout>60000</TestTimeout></MSTest>`. xUnit's `[Fact(Timeout = …)]` is per-test, not a
 global default, so there is no scaffold-level equivalent. Name it, decide it, document it — the same
 treatment as the profile.
@@ -384,10 +472,19 @@ harness can execute one xUnit project.
 `InTest.Golden.Tests` is the only suite proving generated code both **compiles and runs**. It holds
 **50 tests**, but they do not all scale with a framework axis, and rev 1's breakdown was wrong:
 `CompileVerificationTests` (6), `GeneratedSuiteExecutionTests` (23) **and
-`ScaffoldCompileVerificationTests` (1)** shell out to a real `dotnet build`; `CliExitCodeTests` (14)
-does not, and `MSBuildEvaluationTests` (2) shells out only to `dotnet msbuild -getProperty`. **30
-grow, not 29** — rev 2 put `ScaffoldCompileVerificationTests` on the wrong side, and that single
-misclassification is the subject of the correction below.
+`ScaffoldCompileVerificationTests` (1)** shell out to a real `dotnet build`; `CliExitCodeTests` (15
+discovered — 14 methods, one carrying two `[DataRow]`s) does not, and `MSBuildEvaluationTests` (2)
+shells out only to `dotnet msbuild -getProperty`.
+
+**`GoldenFileTests` (3) is the class rev 3 forgot, and it is the one with a deliverable attached.**
+`OutputMatchesTheGoldenFile`, `GenerationIsDeterministic` and `EveryCaseIsCategorizedContract` pin the
+template's byte-for-byte output against `tests/InTest.Golden.Tests/Expected/OrdersTests.g.cs.txt`.
+**A second template needs a second expectation file** — checked in, and regenerated by the same
+`INTEST_UPDATE_GOLDEN=1` path. Rev 3 accounted for 47 of 50 discovered tests and twice insisted the
+previous breakdown was wrong; this is the third correction to the same paragraph, which is reason to
+take the count from `--list-tests` rather than from any prose, including this.
+
+**33 grow, not 29** — the 30 shell-outs plus `GoldenFileTests`' three.
 
 `CLAUDE.md` is explicit that this is a budget, not a fact — wall-clock grows roughly linearly with
 the number of generated-code shapes and has no fixed ceiling. **Take the current figures from
@@ -418,8 +515,13 @@ case" and was wrong by three:
   document calls "a hard build error without it"), the `AssemblyFixture` class and assembly
   attribute, `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, and a different
   package set. **Under rev 2's matrix nothing would ever have compiled the xUnit scaffold.** Every
-  one of those items is a hard build failure or a silent correctness reversal, and this test is the
-  only thing that would catch any of them.
+  one of those items is a hard build failure that this test would catch — **except the parallelism
+  attribute, which it cannot.** A missing `[assembly: Parallelization(...)]` compiles perfectly; a
+  build-only test is blind to it. The MSTest analogue is guarded by a text assertion in a different
+  suite entirely — `tests/InTest.Cli.Tests/InitCommandTests.cs:357`,
+  `ShouldContain("[assembly: DoNotParallelize]")` — and the xUnit scaffold needs its counterpart
+  there. Rev 3 called parallelism "a correctness issue" and then assigned it to a test that cannot
+  see it.
 
 Genuinely safe to keep MSTest-only: integer path parameters, the NSwag convention call, query
 composition — all `TestPlanBuilder` / `TemplateRenderer` logic.
@@ -514,6 +616,11 @@ Out of scope, but the design should not paint it into a corner:
   running under it — before any matrix work.
 - `CompileVerificationTests` and `GeneratedSuiteExecutionTests` for the corrected xUnit subset in §4.
 - `TemplateEscapingGuardTests` **against both templates**.
+- **A second golden expectation file for the xUnit template**, checked in and regenerated through the
+  same `INTEST_UPDATE_GOLDEN=1` path — `GoldenFileTests` is what pins byte-for-byte output, and rev 3
+  omitted it from both §4 and this list.
+- **A scaffold text assertion for the xUnit parallelism attribute**, beside
+  `InitCommandTests.cs:357`'s MSTest one — no build-only test can catch its absence.
 - `NeutralityTests` and `pack-and-verify.ps1` **extended** to cover the fourth package, and confirmed
   to fail if it is not an adapter / not packed.
 - `PackageVersionCouplingTests` extended, and confirmed to fail when a version disagrees.
