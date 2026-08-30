@@ -513,7 +513,7 @@ case" and was wrong by three:
   **the only test in the repository that compiles scaffold output at all**. That scaffold is exactly
   what `[scaffold-per-framework]` changes materially: `<OutputType>Exe</OutputType>` (which this
   document calls "a hard build error without it"), the `AssemblyFixture` class and assembly
-  attribute, `[assembly: CollectionBehavior(DisableTestParallelization = true)]`, and a different
+  attribute, `[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]`, and a different
   package set. **Under rev 2's matrix nothing would ever have compiled the xUnit scaffold.** Every
   one of those items is a hard build failure that this test would catch — **except the parallelism
   attribute, which it cannot.** A missing `[assembly: Parallelization(...)]` compiles perfectly; a
