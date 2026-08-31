@@ -56,8 +56,9 @@ INTEST_UPDATE_GOLDEN=1 dotnet test tests/InTest.Golden.Tests --filter "FullyQual
 `InTest.Golden.Tests` shells out to `dotnet build` and `dotnet test` on scaffolded temp projects
 and runs generated suites against an in-process HTTP stub. It is slow and it is the only suite
 that proves generated code both compiles *and* runs — do not skip it when changing the template,
-the renderer, or the scaffold. **Measured locally, 2026-08-31: ~4m13s
-warm — but ~9m43s from a *fresh worktree*, and both numbers are real.** The gap is the whole reason
+the renderer, or the scaffold. **Measured locally, 2026-08-31: ~7m37s
+warm at 71 cases — but it ran past 10m on the first run after the NUnit packages appeared, and both
+numbers are real.** The gap is the whole reason
 this figure needs a qualifier rather than a value: the temp projects these tests scaffold each run a
 real `dotnet build`, so a cold NuGet cache and cold obj/bin pay full restore-and-compile cost on
 every one of them, while a warm repeat reuses all of it. Quote which one you measured, or the next
@@ -67,15 +68,26 @@ case shells out to a real `dotnet build` (some also `dotnet test`) on a freshly 
 project, so the suite's wall-clock time grows roughly linearly with the number of generated-code
 shapes under test — it has no fixed ceiling the way an in-process suite would. It has grown before:
 this doc quoted ~90–107s at one point, then ~3m9s–3m17s after that was corrected, then ~3m49s–3m50s, and now
-**~4m13s** after the xUnit framework pack added six Golden cases and a second golden expectation
-file per spec, each step tracking real cases added (this branch alone added three new
-`CompileVerificationTests` cases and substantially grew `GeneratedSuiteExecutionTests`). Expect the
+~4m13s after the xUnit framework pack, and now **~7m37s** after the NUnit pack added
+eight more cases (six shell-out cases plus a third golden expectation file per spec), each step
+tracking real cases added. Expect the
 next reader's own measurement to be higher still if more shapes have been added since — treat
 whatever figure is quoted here as a floor to size a timeout against, not a number to assert against.
 A tool's default command timeout (commonly ~2 minutes) cuts this off mid-flight, which reads as a
 hang rather than a slow-but-healthy run; pass an explicit timeout well past the figure above (see
 the `golden` CI figure below for how much further it can run under load) rather than shortening the
-command or assuming it stalled.
+command or assuming it stalled. **This suite has now outgrown the ~10-minute ceiling some tools
+impose as a maximum rather than a default** — a cold run hit exactly 10m00s and was killed, which
+looks identical to a hang and is not one. When the available timeout cannot be raised past the
+figure above, run it in the background and collect the result, rather than concluding it stalled.
+
+Two things distort this measurement badly enough to be worth naming, because both have produced
+"the docs are wrong" reports that were really measurement errors. **Concurrent load:** the same
+71-case suite measured 12m14s while three other agents were building in sibling worktrees, against
+7m37s alone — a ~60% inflation, because nearly all of this suite's wall-clock time is real
+`dotnet build` shell-outs competing for the same cores. **Cold NuGet cache:** the first run after a
+new package id enters the scaffolded projects pays a full restore on *every* temp project. Never
+compare a figure measured under either condition against one measured without.
 
 Running the sample APIs requires specific environment variables (ports, issuer/authority pairing,
 `ASPNETCORE_ENVIRONMENT=Development`). See `samples/README.md`; getting them wrong produces
