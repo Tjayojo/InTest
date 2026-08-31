@@ -1,7 +1,7 @@
 name: Release
 
-# Publishes InTest.Cli, InTest.Runtime and InTest.Runtime.MSTest to nuget.org via NuGet Trusted
-# Publishing (OIDC) --
+# Publishes InTest.Cli, InTest.Runtime, InTest.Runtime.MSTest and InTest.Runtime.xUnit to
+# nuget.org via NuGet Trusted Publishing (OIDC) --
 # [tag-is-the-release] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md): a tag
 # produces a *publishable* artifact, and this workflow is what actually publishes it.
 # [publish-stays-manual] is retired by this file, not silently -- see
@@ -103,7 +103,7 @@ name: Release
 #
 # ---- The `release` job: GitHub Release, deliberately AFTER publish, deliberately separate --------
 # `release` creates the GitHub Release for the tag: title, notes drawn from CHANGELOG.md's section
-# for this version, all three packages' .nupkg/.snupkg attached. Two decisions, both deliberate:
+# for this version, all four packages' .nupkg/.snupkg attached. Two decisions, both deliberate:
 #
 # 1. AFTER publish, not before and not in parallel (`needs: [pack, publish]`). A GitHub Release is a
 #    public, human-facing claim that a version shipped. Creating it before `publish` runs, or racing
@@ -203,7 +203,7 @@ jobs:
       # conditional use of it: every trigger of *this* workflow is a tag push by construction (see
       # the `on:` block above), so [tag-is-the-release]'s "no prerelease height on a tagged build"
       # check always applies.
-      - name: Pack and verify InTest.Cli / InTest.Runtime / InTest.Runtime.MSTest
+      - name: Pack and verify InTest.Cli / InTest.Runtime / InTest.Runtime.MSTest / InTest.Runtime.xUnit
         run: >-
           ./scripts/ci/pack-and-verify.ps1
           -RepoRoot ${{ github.workspace }}
@@ -375,8 +375,20 @@ jobs:
           $tag = '${{ github.ref_name }}'
           $dir = '${{ runner.temp }}/intest-release-pack'
           $assets = Get-ChildItem -Path "$dir/*.nupkg", "$dir/*.snupkg"
-          if ($assets.Count -ne 6) {
-            Write-Host "::error::Expected 6 release assets (InTest.Cli/InTest.Runtime/InTest.Runtime.MSTest x .nupkg/.snupkg), found $($assets.Count) in $dir."
+
+          # Derived from the shipped-package-id list, not a literal number: a fifth package
+          # landing here without this list being extended fails loudly on a name mismatch instead
+          # of silently under-counting. This check runs AFTER `dotnet nuget push` above -- by the
+          # time it fires, the packages are already on nuget.org, permanently (a version can never
+          # be re-pushed). A hardcoded count here is the one place in this whole plan where a
+          # stale value turns an already-succeeded, irreversible publish into a job failure with
+          # nothing left to roll back -- keeping the count a function of the same package-id list
+          # a human reads is the cheapest insurance against that ever recurring for a fifth
+          # package.
+          $packageIds = @('InTest.Cli', 'InTest.Runtime', 'InTest.Runtime.MSTest', 'InTest.Runtime.xUnit')
+          $expectedAssetCount = $packageIds.Count * 2 # .nupkg + .snupkg per package
+          if ($assets.Count -ne $expectedAssetCount) {
+            Write-Host "::error::Expected $expectedAssetCount release assets ($($packageIds -join '/') x .nupkg/.snupkg), found $($assets.Count) in $dir."
             exit 1
           }
 

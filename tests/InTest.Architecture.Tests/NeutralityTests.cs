@@ -28,9 +28,12 @@ namespace InTest.Architecture.Tests;
 /// without inheriting MSTest, silently regains an MSTest dependency again. Only a test that reads
 /// the .csproj can see that; the compiler has no opinion on unused references.
 /// <see cref="AdapterPackageDeclaresItsTestFramework"/> is that guard's mirror image: without it,
-/// emptying or deleting src/InTest.Runtime.MSTest/ would make the neutral-package guard pass
-/// trivially (an MSTest reference genuinely nowhere in the repo) while the product itself is
-/// broken, because nothing ships an MSTest adapter for InTest.Runtime any more.
+/// emptying or deleting src/InTest.Runtime.MSTest/ (or, since the xUnit framework pack task,
+/// src/InTest.Runtime.xUnit/) would make the neutral-package guard pass trivially (a test-framework
+/// reference genuinely nowhere in the repo) while the product itself is broken, because nothing
+/// ships that adapter for InTest.Runtime any more. It is parameterised over both adapters via
+/// <c>[DataRow]</c> precisely so it cannot go blind to one of them the way a single hardcoded
+/// csproj path once did.
 /// <see cref="NeutralSourcesDoNotReferenceMSTest"/>, kept below, is a fast, legible secondary of
 /// its own within this same layer: it fails with one sentence naming §3 instead of forty
 /// CS0246s, and — unlike the compiler — it still catches a commented-out <c>using</c> or a stale
@@ -212,26 +215,39 @@ public class NeutralityTests
 
     /// <summary>
     /// The mirror image of <see cref="NeutralPackageDeclaresNoTestFrameworkDependency"/>, needed
-    /// so that guard cannot pass vacuously: without this test, deleting or emptying
-    /// src/InTest.Runtime.MSTest/ (or quietly dropping its MSTest reference, or its
+    /// so that guard cannot pass vacuously: without this test, deleting or emptying an adapter
+    /// project directory (or quietly dropping its test-framework reference, or its
     /// <c>ProjectReference</c> back to the neutral project) would leave "no test framework
     /// PackageReference anywhere named InTest.Runtime.csproj" trivially true while the shipped
-    /// product no longer has an MSTest adapter at all — a real regression the neutral-package
-    /// guard alone cannot see, because it only ever looks at one file.
+    /// product no longer has that adapter at all — a real regression the neutral-package guard
+    /// alone cannot see, because it only ever looks at one file.
     /// <para>
-    /// Checks both halves of what makes InTest.Runtime.MSTest an adapter rather than a copy: it
-    /// must declare <c>MSTest.TestFramework</c> as a <c>PackageReference</c> (so it is genuinely
-    /// an MSTest package), and it must declare a <c>ProjectReference</c> back to
+    /// Parameterised over every adapter that ships alongside the neutral InTest.Runtime package —
+    /// InTest.Runtime.MSTest and InTest.Runtime.xUnit — via <c>[DataRow]</c>, rather than one
+    /// hardcoded csproj path. Before the xUnit framework pack task, this method named only
+    /// src/InTest.Runtime.MSTest/InTest.Runtime.MSTest.csproj directly; that hardcoding would have
+    /// passed vacuously for InTest.Runtime.xUnit by simply never looking at it — deleting or
+    /// breaking that adapter alone would have left this guard, and the whole suite, green. A
+    /// per-adapter <c>[DataRow]</c> makes adding a future third adapter (an NUnit one, say) fail
+    /// the same way today's guard already fails for a broken MSTest or xUnit adapter: by omission
+    /// from this list, not by silent vacuity.
+    /// </para>
+    /// <para>
+    /// Checks both halves of what makes each project an adapter rather than a copy: it must
+    /// declare its own test framework's package as a <c>PackageReference</c> (so it is genuinely
+    /// coupled to that framework), and it must declare a <c>ProjectReference</c> back to
     /// ../InTest.Runtime/InTest.Runtime.csproj (so it is genuinely an *adapter* for the neutral
-    /// package rather than an unrelated MSTest-coupled project that happens to share a name).
+    /// package rather than an unrelated test-framework-coupled project that happens to share a
+    /// naming convention).
     /// </para>
     /// </summary>
     [TestMethod]
-    public void AdapterPackageDeclaresItsTestFramework()
+    [DataRow("InTest.Runtime.MSTest", "MSTest.TestFramework", DisplayName = "InTest.Runtime.MSTest / MSTest.TestFramework")]
+    [DataRow("InTest.Runtime.xUnit", "xunit.v3.extensibility.core", DisplayName = "InTest.Runtime.xUnit / xunit.v3.extensibility.core")]
+    public void AdapterPackageDeclaresItsTestFramework(string adapterProjectName, string testFrameworkPackageId)
     {
-        const string relativePath = "src/InTest.Runtime.MSTest/InTest.Runtime.MSTest.csproj";
-        var csprojPath = Path.Combine(
-        RepoRoot(), "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj");
+        var relativePath = $"src/{adapterProjectName}/{adapterProjectName}.csproj";
+        var csprojPath = Path.Combine(RepoRoot(), "src", adapterProjectName, $"{adapterProjectName}.csproj");
 
         var packageIds = ReadPackageReferenceIds(csprojPath);
         packageIds.ShouldNotBeEmpty(
@@ -239,11 +255,12 @@ public class NeutralityTests
         "shape changed and NeutralityTests.ReadPackageReferenceIds no longer finds them, or " +
         "this guard is passing vacuously — do not leave it silently disabled.");
 
-        packageIds.ShouldContain("MSTest.TestFramework",
-        $"{relativePath} no longer declares a PackageReference to MSTest.TestFramework. Without " +
-        "it this project is not an MSTest adapter at all, which would let " +
-        "NeutralPackageDeclaresNoTestFrameworkDependency pass vacuously — the neutral package " +
-        "having no MSTest reference is meaningless if nothing else in the repo has one either.");
+        packageIds.ShouldContain(testFrameworkPackageId,
+        $"{relativePath} no longer declares a PackageReference to {testFrameworkPackageId}. " +
+        $"Without it this project is not a {testFrameworkPackageId}-based adapter at all, which " +
+        "would let NeutralPackageDeclaresNoTestFrameworkDependency pass vacuously — the neutral " +
+        "package having no test-framework reference is meaningless if nothing else in the repo " +
+        "has one either.");
 
         var doc = XDocument.Load(csprojPath);
         var projectReferences = doc.Descendants("ProjectReference")
@@ -260,6 +277,6 @@ public class NeutralityTests
         $"{relativePath} no longer has a ProjectReference to ../InTest.Runtime/" +
         "InTest.Runtime.csproj. Without it this project is not an adapter for the neutral " +
         "package at all, which would let NeutralPackageDeclaresNoTestFrameworkDependency pass " +
-        "vacuously in the same way a missing MSTest.TestFramework reference would.");
+        $"vacuously in the same way a missing {testFrameworkPackageId} reference would.");
     }
 }

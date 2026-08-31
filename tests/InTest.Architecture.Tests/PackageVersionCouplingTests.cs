@@ -94,20 +94,32 @@ public class PackageVersionCouplingTests
         new(@"<PackageVersion\s+Include=""([^""]+)""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
 
     /// <summary>
-    /// The one package InitCommand.cs's scaffold hardcodes a version for that is not a
-    /// Directory.Packages.props entry — see this class's own doc comment for why. Anything else
+    /// The adapter package ids InitCommand.cs's scaffold hardcodes a version for that are not
+    /// Directory.Packages.props entries — see this class's own doc comment for why. Anything else
     /// found in a scaffold with no matching central entry is a real gap (Directory.Packages.props
     /// missing an entry, or a name that doesn't match), and must fail loudly rather than be
     /// silently skipped — see <see cref="AssertScaffoldMatchesCentral"/>.
     /// <para>
-    /// This is the MSTest adapter's package id, <c>InTest.Runtime.MSTest</c> — the runtime split
+    /// <c>InTest.Runtime.MSTest</c> is the MSTest adapter's package id — the runtime split
     /// (<c>src/InTest.Runtime.MSTest/</c>) moved the scaffold's own reference from the neutral
     /// <c>InTest.Runtime</c> package to the adapter, which ProjectReferences the neutral package
-    /// transitively. Both packages still declare their types in <c>namespace InTest.Runtime</c>, so
-    /// nothing else in the scaffold (e.g. <c>testBaseClass</c>) needed to change alongside this.
+    /// transitively. <c>InTest.Runtime.xUnit</c> joins it here for the same reason, added by the
+    /// xUnit framework pack task (<c>src/InTest.Runtime.xUnit/</c>) — it is checked the same way
+    /// as the MSTest adapter, not as a third-party dependency, because it too is InTest's own
+    /// packed version rather than a Directory.Packages.props entry. All adapters still declare
+    /// their types in <c>namespace InTest.Runtime</c>, so nothing else in the scaffold (e.g.
+    /// <c>testBaseClass</c>) needs to change alongside this.
+    /// </para>
+    /// <para>
+    /// A <see cref="HashSet{T}"/> rather than a single <c>const string</c>: naming exactly one
+    /// adapter by scalar const was correct when only InTest.Runtime.MSTest existed, but stopped
+    /// being able to express "either shipped adapter" the moment a second one joined — this is a
+    /// change of shape, not merely of value, and <see cref="AssertScaffoldMatchesCentral"/> below
+    /// tests membership in this set rather than equality against a single string.
     /// </para>
     /// </summary>
-    private const string RuntimeSelfVersionedPackage = "InTest.Runtime.MSTest";
+    private static readonly HashSet<string> RuntimeSelfVersionedPackages =
+        new(StringComparer.Ordinal) { "InTest.Runtime.MSTest", "InTest.Runtime.xUnit" };
 
     /// <summary>
     /// The exact text InitCommand.cs's scaffold is expected to carry as the MSTest adapter's
@@ -181,8 +193,8 @@ public class PackageVersionCouplingTests
     /// <summary>
     /// Extracts every <c>&lt;PackageReference Include="..." Version="..." /&gt;</c> from
     /// <paramref name="relativePath"/> (relative to the repo root) and checks each one against
-    /// <paramref name="central"/> — Directory.Packages.props for everything except
-    /// <see cref="RuntimeSelfVersionedPackage"/>, which is checked against
+    /// <paramref name="central"/> — Directory.Packages.props for everything except a member of
+    /// <see cref="RuntimeSelfVersionedPackages"/>, which is checked against
     /// <see cref="RuntimeVersionExpression"/> instead (a fixed, expected source-text shape, not a
     /// value read from <paramref name="runtimeSelfVersion"/> — see this class's own doc comment).
     /// <paramref name="runtimeSelfVersion"/> itself is unused inside this method; it stays a
@@ -217,7 +229,7 @@ public class PackageVersionCouplingTests
             var package = match.Groups[1].Value;
             var scaffoldVersion = match.Groups[2].Value;
 
-            if (package == RuntimeSelfVersionedPackage)
+            if (RuntimeSelfVersionedPackages.Contains(package))
             {
                 // [scaffold-reads-itself]: the fast, in-process half of the InTest.Runtime guard.
                 // There is no version literal here any more to compare against a central value —
@@ -248,7 +260,7 @@ public class PackageVersionCouplingTests
                 $"Directory.Packages.props has no PackageVersion entry for it at all. Either " +
                 $"add one, or — if this package is deliberately not centrally versioned, the " +
                 $"way InTest.Runtime is — add it to " +
-                $"PackageVersionCouplingTests.RuntimeSelfVersionedPackage's reasoning and give " +
+                $"PackageVersionCouplingTests.RuntimeSelfVersionedPackages's reasoning and give " +
                 $"it the same treatment.");
                 continue;
             }
@@ -281,11 +293,15 @@ public class PackageVersionCouplingTests
     /// docs/superpowers/plans/2026-08-23-trunk-based-versioning.md actually asks for: "an
     /// assertion that the scaffold emits the running version." Runs the real <c>init</c> scaffold
     /// into a throwaway directory — the same <c>InitCommand.Run</c> call
-    /// <c>InTest.Cli.Tests.InitCommandTests</c> exercises — and reads back the InTest.Runtime
+    /// <c>InTest.Cli.Tests.InitCommandTests</c> exercises — and reads back the adapter
     /// <c>PackageReference</c>'s <c>Version</c> attribute from the <c>.csproj</c> <c>init</c>
     /// actually wrote, rather than InitCommand.cs's source text (which
     /// <see cref="InitCommandScaffoldVersionsMatchTheCenter"/> above already checks, mechanically,
-    /// at the source level via <see cref="RuntimeVersionExpression"/>).
+    /// at the source level via <see cref="RuntimeVersionExpression"/>). This call site passes no
+    /// framework argument, so it exercises <c>init</c>'s default framework (MSTest) — the
+    /// resulting scaffold's adapter reference is matched by membership in
+    /// <see cref="RuntimeSelfVersionedPackages"/> rather than a hardcoded literal, so this test
+    /// keeps working unchanged regardless of which adapter the default happens to be.
     /// <para>
     /// <b>Proven to discriminate, not merely written and trusted.</b> Under an ordinary build,
     /// this assembly's own <see cref="CliVersion.Current"/> and the scaffold's emitted value are
@@ -325,7 +341,7 @@ public class PackageVersionCouplingTests
             Match? runtimeMatch = null;
             foreach (Match candidate in PackageReferencePattern.Matches(csprojText))
             {
-                if (candidate.Groups[1].Value == RuntimeSelfVersionedPackage)
+                if (RuntimeSelfVersionedPackages.Contains(candidate.Groups[1].Value))
                 {
                     runtimeMatch = candidate;
                     break;
@@ -333,12 +349,13 @@ public class PackageVersionCouplingTests
             }
 
             runtimeMatch.ShouldNotBeNull(
-            "the scaffolded .csproj has no InTest.Runtime.MSTest PackageReference at all — " +
-            "InitCommand.cs's scaffold shape has changed; update this test alongside it.");
+            "the scaffolded .csproj has no adapter PackageReference (InTest.Runtime.MSTest or " +
+            "InTest.Runtime.xUnit) at all — InitCommand.cs's scaffold shape has changed; update " +
+            "this test alongside it.");
 
             runtimeMatch!.Groups[2].Value.ShouldBe(CliVersion.Current,
-            "the scaffolded InTest.Runtime.MSTest PackageReference must carry the running intest's " +
-            "own version — see [scaffold-reads-itself].");
+            $"the scaffolded {runtimeMatch.Groups[1].Value} PackageReference must carry the " +
+            "running intest's own version — see [scaffold-reads-itself].");
         }
         finally
         {

@@ -1,16 +1,20 @@
 <#
 .SYNOPSIS
-    Packs InTest.Cli, InTest.Runtime and InTest.Runtime.MSTest at whatever version this checkout's
-    git history resolves (a real merge commit on main, or an exact tag), then verifies the three
-    artifacts agree with each other, with what the packed InTest.Cli actually scaffolds, and --
-    since the runtime-framework split -- with each other's declared package dependencies.
+    Packs InTest.Cli, InTest.Runtime, InTest.Runtime.MSTest and InTest.Runtime.xUnit at whatever
+    version this checkout's git history resolves (a real merge commit on main, or an exact tag),
+    then verifies the four artifacts agree with each other, with what the packed InTest.Cli
+    actually scaffolds, and -- since the runtime-framework split -- with each other's declared
+    package dependencies.
 
 .DESCRIPTION
     Task 3 of docs/superpowers/plans/2026-08-23-trunk-based-versioning.md ("CI produces the
-    versions"), extended by the NuGet-trusted-publishing task with a fourth check, and further
+    versions"), extended by the NuGet-trusted-publishing task with a fourth check, further
     extended by the runtime-framework-split task (InTest.Runtime split into a neutral package and
-    an InTest.Runtime.MSTest adapter, Task 10) with a fifth and sixth. Six things are proven here
-    that a green `dotnet pack` alone does not prove:
+    an InTest.Runtime.MSTest adapter, Task 10) with a fifth and sixth, and further still by the
+    xUnit-framework-pack task (Task 9), which added InTest.Runtime.xUnit as a second adapter
+    sibling of InTest.Runtime.MSTest and folded it into every check below rather than adding a
+    parallel, un-verified fourth package. Six things are proven here that a green `dotnet pack`
+    alone does not prove -- each now spans every adapter present, not just InTest.Runtime.MSTest:
 
     1. [scaffold-reads-itself] (Task 1) end to end against a *packed* build, not just a `dotnet
        run` build the way scripts/local-e2e-test.ps1 already covers it: the InTest.Runtime.MSTest
@@ -136,6 +140,7 @@ $ScaffoldRoot = (Resolve-Path -LiteralPath $ScaffoldRoot).Path
 $CliProject = Join-Path $RepoRoot 'src' 'InTest.Cli' 'InTest.Cli.csproj'
 $RuntimeProject = Join-Path $RepoRoot 'src' 'InTest.Runtime' 'InTest.Runtime.csproj'
 $MSTestProject = Join-Path $RepoRoot 'src' 'InTest.Runtime.MSTest' 'InTest.Runtime.MSTest.csproj'
+$XUnitProject = Join-Path $RepoRoot 'src' 'InTest.Runtime.xUnit' 'InTest.Runtime.xUnit.csproj'
 
 function Invoke-Dotnet {
     param(
@@ -360,16 +365,20 @@ function Assert-NoTestFrameworkDependency {
     Write-Host "[$Label] confirmed no MSTest/xUnit/NUnit/Microsoft.NET.Test.Sdk dependency in the nuspec (dependencies present: $((@($dependencies | ForEach-Object { $_.id })) -join ', '))." -ForegroundColor Green
 }
 
-# Check 6 from .DESCRIPTION: InTest.Runtime.MSTest's nuspec must depend on InTest.Runtime at
-# exactly the version that was actually packed alongside it (lower bound, to tolerate the
-# ProjectReference range form -- see Get-DependencyLowerBound), and must also depend on
-# MSTest.TestFramework as a positive control, so the InTest.Runtime check above cannot pass
-# vacuously because dependency parsing silently found nothing at all.
+# Check 6 from .DESCRIPTION: each adapter's nuspec must depend on InTest.Runtime at exactly the
+# version that was actually packed alongside it (lower bound, to tolerate the ProjectReference
+# range form -- see Get-DependencyLowerBound), and must also depend on its own test framework as a
+# positive control, so the InTest.Runtime check above cannot pass vacuously because dependency
+# parsing silently found nothing at all. -PositiveControlPackageId is MSTest.TestFramework for
+# InTest.Runtime.MSTest and xunit.v3.extensibility.core for InTest.Runtime.xUnit -- the same shape
+# of check, parameterised over which adapter is being verified, rather than a second near-identical
+# function (CLAUDE.md: "Re-deriving is the recurring defect in this codebase -- don't").
 function Assert-AdapterDependsOnExactNeutralVersion {
     param(
         [Parameter(Mandatory)] $Manifest,
         [Parameter(Mandatory)] [string]$Label,
-        [Parameter(Mandatory)] [string]$ExpectedNeutralVersion
+        [Parameter(Mandatory)] [string]$ExpectedNeutralVersion,
+        [Parameter(Mandatory)] [string]$PositiveControlPackageId
     )
 
     $dependencies = Get-NuspecDependencies -NuspecXml $Manifest.NuspecXml
@@ -380,15 +389,15 @@ function Assert-AdapterDependsOnExactNeutralVersion {
     }
     $lowerBound = Get-DependencyLowerBound -VersionSpec $runtimeDependency.version
     if ($lowerBound -ne $ExpectedNeutralVersion) {
-        throw "[$Label] artifact assertion failed: depends on InTest.Runtime version '$($runtimeDependency.version)' (lower bound '$lowerBound'), expected exactly '$ExpectedNeutralVersion' -- the InTest.Runtime version actually packed in this same run. A drift here means an adopter installing InTest.Runtime.MSTest could resolve a different InTest.Runtime than the one packed alongside it."
+        throw "[$Label] artifact assertion failed: depends on InTest.Runtime version '$($runtimeDependency.version)' (lower bound '$lowerBound'), expected exactly '$ExpectedNeutralVersion' -- the InTest.Runtime version actually packed in this same run. A drift here means an adopter installing $Label could resolve a different InTest.Runtime than the one packed alongside it."
     }
 
-    $mstestDependency = $dependencies | Where-Object { $_.id -eq 'MSTest.TestFramework' } | Select-Object -First 1
-    if (-not $mstestDependency) {
-        throw "[$Label] artifact assertion failed: no dependency on MSTest.TestFramework found in the nuspec -- this is the positive control for the InTest.Runtime dependency check above; its absence means dependency parsing itself found nothing, not that the version check passed legitimately."
+    $positiveControlDependency = $dependencies | Where-Object { $_.id -eq $PositiveControlPackageId } | Select-Object -First 1
+    if (-not $positiveControlDependency) {
+        throw "[$Label] artifact assertion failed: no dependency on $PositiveControlPackageId found in the nuspec -- this is the positive control for the InTest.Runtime dependency check above; its absence means dependency parsing itself found nothing, not that the version check passed legitimately."
     }
 
-    Write-Host "[$Label] confirmed InTest.Runtime dependency lower bound '$lowerBound' matches the packed neutral version exactly, and MSTest.TestFramework dependency present (positive control)." -ForegroundColor Green
+    Write-Host "[$Label] confirmed InTest.Runtime dependency lower bound '$lowerBound' matches the packed neutral version exactly, and $PositiveControlPackageId dependency present (positive control)." -ForegroundColor Green
 }
 
 # The scaffold references InTest.Runtime.MSTest, not InTest.Runtime directly, since the
@@ -412,30 +421,34 @@ function Get-ScaffoldedMSTestAdapterVersion {
 Invoke-Dotnet -StepName 'pack InTest.Cli' -Arguments @('pack', $CliProject, '-c', 'Release', '-o', $OutputDir)
 Invoke-Dotnet -StepName 'pack InTest.Runtime' -Arguments @('pack', $RuntimeProject, '-c', 'Release', '-o', $OutputDir)
 Invoke-Dotnet -StepName 'pack InTest.Runtime.MSTest' -Arguments @('pack', $MSTestProject, '-c', 'Release', '-o', $OutputDir)
+Invoke-Dotnet -StepName 'pack InTest.Runtime.xUnit' -Arguments @('pack', $XUnitProject, '-c', 'Release', '-o', $OutputDir)
 
 # ---- Step 2 (select, by nuspec <id> -- see Get-NupkgById's own comment for why a filename glob
 # is no longer safe now that a third package's id extends the neutral package's id with a dot).
 $cliPackage = Get-NupkgById -OutputDir $OutputDir -PackageId 'InTest.Cli'
 $runtimePackage = Get-NupkgById -OutputDir $OutputDir -PackageId 'InTest.Runtime'
 $mstestPackage = Get-NupkgById -OutputDir $OutputDir -PackageId 'InTest.Runtime.MSTest'
+$xunitPackage = Get-NupkgById -OutputDir $OutputDir -PackageId 'InTest.Runtime.xUnit'
 
 # ---- Step 3 (verify, do not assume): read each artifact's actual .nuspec version rather than
 # trusting the filename or the exit code of `dotnet pack`.
 $cliVersion = Get-NuspecVersion -Manifest $cliPackage.Manifest -Label 'InTest.Cli'
 $runtimeVersion = Get-NuspecVersion -Manifest $runtimePackage.Manifest -Label 'InTest.Runtime'
 $mstestVersion = Get-NuspecVersion -Manifest $mstestPackage.Manifest -Label 'InTest.Runtime.MSTest'
+$xunitVersion = Get-NuspecVersion -Manifest $xunitPackage.Manifest -Label 'InTest.Runtime.xUnit'
 
 Write-Host ''
 Write-Host "InTest.Cli nuspec version:            $cliVersion"
 Write-Host "InTest.Runtime nuspec version:         $runtimeVersion"
 Write-Host "InTest.Runtime.MSTest nuspec version:  $mstestVersion"
+Write-Host "InTest.Runtime.xUnit nuspec version:   $xunitVersion"
 
-# Three-way equality: also the guard against InTest.Runtime.MSTest silently packing at the SDK's
-# default 1.0.0 because someone dropped its `MinVer` PackageReference -- MinVer contributes
-# nothing and fails nothing when absent, so only this check catches that regression (see
-# .DESCRIPTION point 2).
-if ($cliVersion -ne $runtimeVersion -or $cliVersion -ne $mstestVersion) {
-    throw "InTest.Cli, InTest.Runtime and InTest.Runtime.MSTest did not all pack at the same version ('$cliVersion' / '$runtimeVersion' / '$mstestVersion') -- MinVer should derive an identical version for all three from the same commit and the same Directory.Build.props configuration."
+# Four-way equality: also the guard against InTest.Runtime.MSTest or InTest.Runtime.xUnit silently
+# packing at the SDK's default 1.0.0 because someone dropped its `MinVer` PackageReference --
+# MinVer contributes nothing and fails nothing when absent, so only this check catches that
+# regression (see .DESCRIPTION point 2).
+if ($cliVersion -ne $runtimeVersion -or $cliVersion -ne $mstestVersion -or $cliVersion -ne $xunitVersion) {
+    throw "InTest.Cli, InTest.Runtime, InTest.Runtime.MSTest and InTest.Runtime.xUnit did not all pack at the same version ('$cliVersion' / '$runtimeVersion' / '$mstestVersion' / '$xunitVersion') -- MinVer should derive an identical version for all four from the same commit and the same Directory.Build.props configuration."
 }
 
 # ---- Step 3b (verify, do not assume -- the CONTRIBUTING.md "Publishing checklist" substitute described in
@@ -452,13 +465,20 @@ Assert-PackageArtifactContents -NupkgPath $mstestPackage.Path -Manifest $mstestP
     -RequireEntries @('README.md', 'icon.png') `
     -ForbidEntries @('THIRD-PARTY-NOTICES.md')
 
+Assert-PackageArtifactContents -NupkgPath $xunitPackage.Path -Manifest $xunitPackage.Manifest -Label 'InTest.Runtime.xUnit' `
+    -RequireEntries @('README.md', 'icon.png') `
+    -ForbidEntries @('THIRD-PARTY-NOTICES.md')
+
 # ---- Step 3c (the runtime-framework-split acceptance gate -- .DESCRIPTION points 5 and 6): the
-# neutral package must carry no test-framework dependency, and the adapter must depend on exactly
+# neutral package must carry no test-framework dependency, and each adapter must depend on exactly
 # the neutral version that was packed alongside it in this same run.
 Assert-NoTestFrameworkDependency -Manifest $runtimePackage.Manifest -Label 'InTest.Runtime'
 
 Assert-AdapterDependsOnExactNeutralVersion -Manifest $mstestPackage.Manifest -Label 'InTest.Runtime.MSTest' `
-    -ExpectedNeutralVersion $runtimeVersion
+    -ExpectedNeutralVersion $runtimeVersion -PositiveControlPackageId 'MSTest.TestFramework'
+
+Assert-AdapterDependsOnExactNeutralVersion -Manifest $xunitPackage.Manifest -Label 'InTest.Runtime.xUnit' `
+    -ExpectedNeutralVersion $runtimeVersion -PositiveControlPackageId 'xunit.v3.extensibility.core'
 
 $cliDll = Join-Path $RepoRoot 'src' 'InTest.Cli' 'bin' 'Release' 'net10.0' 'InTest.Cli.dll'
 if (-not (Test-Path -LiteralPath $cliDll)) {
@@ -499,8 +519,11 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedTag)) {
     if ($mstestVersion -ne $ExpectedTag) {
         throw "Tag mismatch: InTest.Runtime.MSTest packed as '$mstestVersion', expected exactly '$ExpectedTag' (the pushed tag). [tag-is-the-release] requires a tagged build's artifact to carry no prerelease height."
     }
-    Write-Host "Confirmed: all three packages were packed at exactly '$ExpectedTag', with no prerelease height." -ForegroundColor Green
+    if ($xunitVersion -ne $ExpectedTag) {
+        throw "Tag mismatch: InTest.Runtime.xUnit packed as '$xunitVersion', expected exactly '$ExpectedTag' (the pushed tag). [tag-is-the-release] requires a tagged build's artifact to carry no prerelease height."
+    }
+    Write-Host "Confirmed: all four packages were packed at exactly '$ExpectedTag', with no prerelease height." -ForegroundColor Green
 }
 
 Write-Host ''
-Write-Host "Pack-and-verify complete. InTest.Cli $cliVersion / InTest.Runtime $runtimeVersion / InTest.Runtime.MSTest $mstestVersion" -ForegroundColor Green
+Write-Host "Pack-and-verify complete. InTest.Cli $cliVersion / InTest.Runtime $runtimeVersion / InTest.Runtime.MSTest $mstestVersion / InTest.Runtime.xUnit $xunitVersion" -ForegroundColor Green
