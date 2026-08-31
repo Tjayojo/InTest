@@ -52,7 +52,7 @@ INTEST_UPDATE_GOLDEN=1 dotnet test tests/InTest.Golden.Tests --filter "FullyQual
 `InTest.Golden.Tests` shells out to `dotnet build` and `dotnet test` on scaffolded temp projects
 and runs generated suites against an in-process HTTP stub. It is slow and it is the only suite
 that proves generated code both compiles *and* runs — do not skip it when changing the template,
-the renderer, or the scaffold. **Measured locally, 2026-08-26, two consecutive runs: ~3m49s–3m50s
+the renderer, or the scaffold. **Measured locally, 2026-08-31: ~4m13s
 warm — but ~9m43s from a *fresh worktree*, and both numbers are real.** The gap is the whole reason
 this figure needs a qualifier rather than a value: the temp projects these tests scaffold each run a
 real `dotnet build`, so a cold NuGet cache and cold obj/bin pay full restore-and-compile cost on
@@ -62,8 +62,9 @@ This is a budget, not a fact: every `CompileVerificationTests` (and most `Genera
 case shells out to a real `dotnet build` (some also `dotnet test`) on a freshly scaffolded temp
 project, so the suite's wall-clock time grows roughly linearly with the number of generated-code
 shapes under test — it has no fixed ceiling the way an in-process suite would. It has grown before:
-this doc quoted ~90–107s at one point, then ~3m9s–3m17s after that was corrected, and now
-~3m49s–3m50s, each step tracking real cases added (this branch alone added three new
+this doc quoted ~90–107s at one point, then ~3m9s–3m17s after that was corrected, then ~3m49s–3m50s, and now
+**~4m13s** after the xUnit framework pack added six Golden cases and a second golden expectation
+file per spec, each step tracking real cases added (this branch alone added three new
 `CompileVerificationTests` cases and substantially grew `GeneratedSuiteExecutionTests`). Expect the
 next reader's own measurement to be higher still if more shapes have been added since — treat
 whatever figure is quoted here as a floor to size a timeout against, not a number to assert against.

@@ -1263,8 +1263,8 @@ git commit -m "test: xUnit cases in the Golden matrix
 
 [matrix-stays-representative]: the shapes whose rendering or runtime behaviour differs, not
 every shape. Includes the client-routed case (which carries the token sites that justify
-v3-only), the Warn-contract test, hostile spec text (which reaches the trx testName the
-harness parses), and the scaffold compile."
+v3-only), the Warn-contract test, hostile spec text (which proves CSharpLiteral.Escape output is valid C# inside the second
+template's literal sites), and the scaffold compile."
 ```
 
 ---
