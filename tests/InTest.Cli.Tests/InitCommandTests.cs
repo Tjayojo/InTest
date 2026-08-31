@@ -363,6 +363,58 @@ public class InitCommandTests
     }
 
     [TestMethod]
+    public void ScaffoldsAnXunitProjectWhenAskedFor()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "xunit").ShouldBe(0);
+
+        var csproj = File.ReadAllText(Path.Combine(_root, "Orders.ApiTests.csproj"));
+        csproj.ShouldContain("<OutputType>Exe</OutputType>");
+        csproj.ShouldContain("xunit.v3");
+        csproj.ShouldContain("InTest.Runtime.xUnit");
+        csproj.ShouldNotContain("MSTest.TestFramework");
+
+        File.ReadAllText(Path.Combine(_root, "intest.json")).ShouldContain("\"framework\": \"xunit\"");
+    }
+
+    /// <summary>
+    /// [scaffold-per-framework]: xUnit v3 parallelises by default (measured: "parallel mode =
+    /// collections [22 threads]"), and the MSTest scaffold deliberately pins DoNotParallelize. Without
+    /// its xUnit counterpart a scaffolded suite runs concurrently against a *deployed* API.
+    /// <para>
+    /// This assertion exists because no build-only test can catch it — a missing attribute compiles
+    /// perfectly. It is the counterpart of this file's existing
+    /// ShouldContain("[assembly: DoNotParallelize]") assertion.
+    /// </para>
+    /// <para>
+    /// Note the exact attribute: CollectionBehavior(DisableTestParallelization = true) is
+    /// obsolete-as-error in xunit.v3 4.0.0 and does not compile. ParallelizationAttribute lives in
+    /// Xunit.v3 and ParallelMode in Xunit.Sdk.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void ScaffoldsTheXunitParallelismOptOut()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "xunit");
+
+        File.ReadAllText(Path.Combine(_root, "AssemblyInfo.cs"))
+            .ShouldContain("[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]");
+    }
+
+    [TestMethod]
+    public void RefusesAnUnknownFrameworkWithExitTwo()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "junit").ShouldBe(2);
+    }
+
+    [TestMethod]
+    public void DefaultsToMsTestWhenNoFrameworkIsGiven()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(0);
+
+        File.ReadAllText(Path.Combine(_root, "intest.json")).ShouldContain("\"framework\": \"mstest\"");
+    }
+
+    [TestMethod]
     public void GuardsAgainstTheDuplicateAttributeBuildBreak()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json");

@@ -49,16 +49,30 @@ var clientLockfileOption = new Option<string>("--client-lockfile")
     DefaultValueFactory = _ => string.Empty,
 };
 
+// [framework-is-an-init-flag] (Task 5): the test framework a scaffold targets is chosen once,
+// here, and frozen for the life of the project — §5 makes it a frozen axis, and
+// ConfigLoader.RequireSupportedFramework is what `generate` enforces that against later.
+// Defaults to "mstest" rather than Required so every pre-existing 3- and 4-argument call site —
+// production and test alike — keeps compiling and keeps scaffolding an MSTest project exactly as
+// before.
+var frameworkOption = new Option<string>("--framework")
+{
+    Description = "Test framework for the scaffolded project: mstest (default) or xunit. Frozen per project — a suite cannot be migrated in place.",
+    DefaultValueFactory = _ => "mstest",
+};
+
 var init = new Command("init", "Scaffold a test project.");
 init.Options.Add(projectOption);
 init.Options.Add(nameOption);
 init.Options.Add(specOption);
 init.Options.Add(clientLockfileOption);
+init.Options.Add(frameworkOption);
 init.SetAction(parseResult => InitCommand.Run(
     parseResult.GetValue(projectOption)!,
     parseResult.GetValue(nameOption)!,
     parseResult.GetValue(specOption)!,
-    parseResult.GetValue(clientLockfileOption)!));
+    parseResult.GetValue(clientLockfileOption)!,
+    parseResult.GetValue(frameworkOption)!));
 
 var fixtures = new Command("fixtures", "Fixture maintenance.");
 var repair = new Command("repair", "Create missing fixtures and add sentinels for new required properties.");
