@@ -32,10 +32,62 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <!-- Runs on InTest.Runtime only in practice: Microsoft.NET.PackTool.targets hard-sets this
-         false for PackAsTool projects (InTest.Cli), so it is a no-op there by SDK design, not an
-         oversight here — see the readiness spec §6. -->
+    <!-- Runs on the four class libraries only in practice — InTest.Runtime,
+         InTest.Runtime.MSTest, InTest.Runtime.xUnit, InTest.Runtime.NUnit — never on InTest.Cli:
+         Microsoft.NET.PackTool.targets hard-sets this false for PackAsTool projects, so it is a
+         no-op there by SDK design, not an oversight here (readiness spec §6). -->
     <EnablePackageValidation>true</EnablePackageValidation>
+
+    <!-- [package-validation-baseline]: without PackageValidationBaselineVersion, EnablePackageValidation
+         above compares nothing — API Compat only runs against a *previous published version*, and
+         until this was set, no version was named, so package validation has been running with no
+         baseline since the day it was turned on. Set here, centrally, rather than per-project,
+         because all four class libraries are baselined against the same tag: measured directly
+         (`dotnet pack -p:PackageValidationBaselineVersion=0.1.0-preview.2`), baselining every one
+         of them at 0.1.0-preview.2 is clean — 0 API errors across all four.
+
+         Why 0.1.0-preview.2 and not 0.1.0-preview.1, InTest.Runtime's actual first publish: tried
+         it first. Baselining InTest.Runtime alone at 0.1.0-preview.1 produces three errors —
+         CP0001 for ApiTestBase, CP0001 for TestHost, CP0002 for a FixtureRunner.RunAsync overload
+         — every one of them the runtime/adapter split moving members off InTest.Runtime onto the
+         new InTest.Runtime.MSTest project. That split is not a regression; it is already public,
+         already shipped in preview.1, and already recorded as a Breaking change in CHANGELOG.md.
+         Package validation exists to catch *unintentional* breaks before they ship, not to
+         re-litigate ones a maintainer already made on purpose and already told adopters about. The
+         alternative — keep the preview.1 baseline and suppress the three errors with
+         ApiCompatGenerateSuppressionFile — was rejected: a suppression file protects nothing here
+         (the break already shipped; nothing is being caught), and it becomes a permanent artifact
+         every future reader has to open and reason about to learn it means nothing. Baselining at
+         what is actually published — the surface adopters can already see — starts guarding the
+         *next* release instead of re-flagging the last one.
+
+         Operational fact 1 — this value goes stale on its own: it must move to the version just
+         published at every release, or validation keeps comparing against an ever-older surface
+         forever. That step is now explicit in CONTRIBUTING.md's "Cutting a release, end to end"
+         list and closes the Publishing checklist's item 11, which used to record this as
+         open/undone.
+
+         Operational fact 2 — a newly added package trips this loudly, not silently, and the
+         failure mode is restore, not API Compat: MEASURED, not assumed. Setting
+         PackageValidationBaselineVersion to a version of the *current* package that has never been
+         published (`dotnet pack src/InTest.Runtime.NUnit -p:PackageValidationBaselineVersion=99.99.99-does-not-exist`)
+         fails restore outright with NU1102 ("Unable to find package InTest.Runtime.NUnit with
+         version (= 99.99.99-does-not-exist)... Nearest version: 0.1.0-preview.2"), before API
+         Compat itself ever runs — the SDK adds an implicit self-referencing PackageReference at
+         the baseline version so the baseline .nupkg can be restored and diffed against, and that
+         restore fails exactly like any other unresolvable PackageReference would. `dotnet pack`
+         does NOT still succeed; there is no silent skip. The remedy, confirmed by reversing the
+         same experiment (blanking the property back out restores a clean pack with 0 API errors):
+         a per-project override —
+
+           <PackageValidationBaselineVersion></PackageValidationBaselineVersion>
+
+         — on that one new project only, removed again the release after its own first publish
+         exists to baseline against (§8/§11 of the readiness spec already describes this shape for
+         InTest.Runtime's own first release; the same pattern now applies to whichever package is
+         newest). CONTRIBUTING.md's "Cutting a release, end to end" list names this as an explicit
+         step. -->
+    <PackageValidationBaselineVersion>0.1.0-preview.2</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- [version-from-git] (docs/superpowers/plans/2026-08-23-trunk-based-versioning.md, Task 2):

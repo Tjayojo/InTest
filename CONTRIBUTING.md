@@ -520,6 +520,17 @@ it.
    automation does not perform — ID-prefix reservation, account hygiene, flipping the README
    status callout, and (recommended, not yet configured) a required-reviewer gate on the
    `nuget-release` environment so a human still looks before an irreversible push happens.
+7. **Bump `PackageValidationBaselineVersion`** in `Directory.Build.props` to the version just
+   confirmed live on nuget.org in step 5 — for *the next* release's comparisons, not this one's.
+   This value is what `EnablePackageValidation` (also set there, for the four class libraries)
+   diffs the current API surface against; leaving it pointed at an older tag does not fail
+   anything, it just means every `dotnet pack` from here on compares against an increasingly stale
+   published surface instead of the one that actually just shipped, silently missing a break
+   introduced since. `InTest.Architecture.Tests`' `PackageValidationBaselineTests` guards the
+   property staying present and non-empty, not that it names the *current* version — that
+   currency is this human step, same shape as step 10 below's README bump. See Publishing
+   checklist item 11 and `Directory.Build.props`'s own `[package-validation-baseline]` comment for
+   the full reasoning, including the newly-added-package trap and its per-project-override remedy.
 
 **Closed by the `0.1.0-preview.1` tag push:** both `pack.yml` and `release.yml` have now
 completed real runs on GitHub Actions — trigger firing, matrix fan-out, cross-job artifact
@@ -678,16 +689,34 @@ push itself remains a real, one-time or per-release, human step — see `docs/su
     string was bumped and, for `0.1.0-preview.2`, its "not published yet" language about the three
     adapter packages was replaced with the fact of their first publish; neither release needed the
     callout rewritten from scratch.
-11. Starting with the release *after* each package's first publish: add
-    `<PackageValidationBaselineVersion>` to that package's project file, pointing at the version
-    just published — `InTest.Runtime`'s first publish was `0.1.0-preview.1`, so this release
-    (`0.1.0-preview.2`) is where its baseline version was due; checked directly against
-    `src/InTest.Runtime/InTest.Runtime.csproj` while writing this update, and it is **not there**
-    — this step has not actually been done yet for `InTest.Runtime`, unlike item 10 above.
-    `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` shipped their own
-    first version, `0.1.0-preview.2`, in this release, so their baseline versions are correctly not
-    due until the release after this one. (`InTest.Cli` never participates in package validation —
-    the SDK hard-disables it for tool packages.)
+11. **Closed.** `PackageValidationBaselineVersion` is now set — centrally, in
+    `Directory.Build.props`, next to `EnablePackageValidation`, not per-project as this item used
+    to describe — pointing at `0.1.0-preview.2`. All four class libraries
+    (`InTest.Runtime`, `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`, `InTest.Runtime.NUnit`)
+    share that one value rather than each carrying its own, because all four were measured clean
+    (0 API errors) baselined at that same tag; see `Directory.Build.props`'s own
+    `[package-validation-baseline]` comment for the full reasoning, including why
+    `0.1.0-preview.1` — `InTest.Runtime`'s actual first publish — was rejected as the baseline (it
+    produces three errors, all of them the already-shipped, already-`CHANGELOG.md`-recorded
+    runtime/adapter split, and suppressing them would protect nothing). (`InTest.Cli` still never
+    participates in package validation — the SDK hard-disables it for tool packages.)
+    `InTest.Architecture.Tests`' `PackageValidationBaselineTests` now guards this value staying
+    present and non-empty, the same way `NeutralityTests` and `ExampleProjectVersionMarkerTests`
+    guard their own silent-degradation risks. This value must move at every release — see
+    "Cutting a release, end to end" above, where that bump is now its own explicit numbered step
+    — or validation keeps comparing against an ever-older published surface instead of the one
+    that just shipped.
+    **A newly added package traded a silent skip for a loud one:** measured directly (this task),
+    pointing `PackageValidationBaselineVersion` at a version of the *current* package that was
+    never published does not let `dotnet pack` quietly succeed — it fails restore outright with
+    `NU1102` ("Unable to find package ... Nearest version: ..."), because API Compat's baseline
+    check works by adding an implicit self-referencing `PackageReference` at that version so the
+    baseline `.nupkg` can be restored and diffed against. A package added after this baseline was
+    centralised (a fifth adapter, say) has no published version yet and will hit exactly this
+    error the moment it inherits `0.1.0-preview.2` from `Directory.Build.props` — the fix is a
+    per-project override, blanked out, on that one new project only:
+    `<PackageValidationBaselineVersion></PackageValidationBaselineVersion>`, removed again the
+    release after that package's own first publish exists to baseline against.
 
 ## Testing against a local build
 
