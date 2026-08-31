@@ -86,7 +86,12 @@ internal sealed record GeneratedSuiteCommand(string FileName, string Arguments)
 
         return framework switch
         {
-            "mstest" => new GeneratedSuiteCommand(
+            // [nunit-is-vstest] (Task 6 of the NUnit framework pack plan): NUnit joins MSTest's
+            // arm here rather than getting a duplicate branch — measured, both run under classic
+            // VSTest (`dotnet test <csproj>` exits 0, `--logger "trx;LogFileName=…"` produces a
+            // trx), unlike xunit.v3's Microsoft.Testing.Platform invocation below. No new
+            // invocation shape, no direct-exe path, no -filterVSTest translation for NUnit.
+            "mstest" or "nunit" => new GeneratedSuiteCommand(
                 "dotnet", MsTestArguments(projectRoot, trxPath, filter, resultsDirectory)),
             "xunit" => new GeneratedSuiteCommand(
                 "dotnet",
@@ -96,7 +101,7 @@ internal sealed record GeneratedSuiteCommand(string FileName, string Arguments)
                     filter,
                     resultsDirectory)),
             _ => throw new ArgumentOutOfRangeException(
-                nameof(framework), framework, "expected \"mstest\" or \"xunit\"."),
+                nameof(framework), framework, "expected \"mstest\", \"nunit\", or \"xunit\"."),
         };
     }
 
