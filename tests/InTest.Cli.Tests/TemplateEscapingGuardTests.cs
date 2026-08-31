@@ -94,12 +94,19 @@ public class TemplateEscapingGuardTests
     // xunit-class.scriban existed from Task 3 onward, quoting the exact same tc.<name> fields
     // into the exact same literal positions, and nothing here ever looked at it — a future edit
     // that quoted a new, unescaped field into xunit-class.scriban would have had zero mechanical
-    // enforcement, and nothing would have failed to say so. [DataRow] over both template file
-    // names, rather than a second copy of this method, keeps the classification logic — which is
-    // the part actually worth trusting — in exactly one place.
+    // enforcement, and nothing would have failed to say so. [DataRow] over every template file
+    // name, rather than a copy of this method per template, keeps the classification logic — which
+    // is the part actually worth trusting — in exactly one place. nunit-class.scriban joined the
+    // same way for the same reason: a third template this guard does not parse has no text-safety
+    // enforcement at all, and nothing fails to say so.
+    //
+    // [DataTestMethod] is deliberately not used here even though every case is data-driven — it is
+    // analyzer-obsolete (MSTEST0044) and this repo builds with TreatWarningsAsErrors, so it would
+    // not compile. [TestMethod] + [DataRow] is the supported replacement.
     [TestMethod]
     [DataRow("mstest-class.scriban")]
     [DataRow("xunit-class.scriban")]
+    [DataRow("nunit-class.scriban")]
     public void EveryTemplateFieldReferenceIsEscapedOrExplicitlyAllowed(string templateFileName)
     {
         var template = LoadEmbeddedTemplate(templateFileName);
