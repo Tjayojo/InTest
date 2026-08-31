@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- xunit.v3 requires this; without it the build fails with the "must be executable" error. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/InTest.Runtime.xUnit/InTest.Runtime.xUnit.csproj" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+</Project>
