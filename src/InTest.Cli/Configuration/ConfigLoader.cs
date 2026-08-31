@@ -65,13 +65,13 @@ public static class ConfigLoader
         "\"Orders.ApiTests.OrdersTestBase\".";
 
     /// <summary>
-    /// <c>mstest</c> is the only value accepted today. §3 designs InTest for three frameworks —
-    /// this list grows the day a second one ships, not before; naming a future framework here
-    /// would document a capability the tool does not have.
+    /// <c>mstest</c> and <c>xunit</c> are the values accepted today. §3 designs InTest for three
+    /// frameworks — this list grows the day a framework ships, not before; naming a future
+    /// framework here would document a capability the tool does not have.
     /// </summary>
     private const string FrameworkRule =
-        "It must be the test framework generated tests target. Supported today: \"mstest\". " +
-        "InTest is designed to support additional frameworks (§3) but only ships MSTest so far.";
+        "It must be the test framework generated tests target. Supported today: \"mstest\" and " +
+        "\"xunit\". InTest is designed to support three frameworks (§3); NUnit is not supported yet.";
 
     // The optional "client" section (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md,
     // `[convention-plus-override]`). Unlike every rule above, this section is allowed to be
@@ -256,6 +256,15 @@ public static class ConfigLoader
     }
 
     /// <summary>
+    /// The values <c>project.framework</c> accepts today. §3 designs InTest for three frameworks
+    /// and this grows the day a framework ships, not before — accepting "nunit" here would
+    /// document a capability the tool does not have. See <see cref="FrameworkRule"/> for the
+    /// adopter-facing text this same list backs; the two are kept in step by both reading from
+    /// one array rather than by two independent lists agreeing by discipline.
+    /// </summary>
+    private static readonly string[] SupportedFrameworks = ["mstest", "xunit"];
+
+    /// <summary>
     /// Unlike <see cref="ReadOptionalIntestVersion"/>, <c>project.framework</c> is required — read
     /// with the same <see cref="RequireString"/> helper <c>rootNamespace</c> and
     /// <c>testBaseClass</c> already use, not the optional path. That asymmetry is the one
@@ -287,28 +296,25 @@ public static class ConfigLoader
     /// already declare it. Making the key required breaks no config this repository ships.</item>
     /// </list>
     /// <para>
-    /// The value itself accepts exactly <c>"mstest"</c> — lowercase, matching what
-    /// <c>InitCommand</c> writes — and nothing else, including differently-cased spellings like
-    /// <c>"MSTest"</c>. §5's config is adopter-facing JSON, not a C# identifier with
-    /// case-insensitive lookup rules; treating <c>"MSTest"</c> as equivalent would mean this
-    /// loader accepts spellings <c>init</c> never writes and no other setting on this surface
-    /// tolerates (<c>rootNamespace</c> and <c>testBaseClass</c> are both compared exactly as
-    /// written). One accepted spelling is also simpler to document and to grep for than a
-    /// case-insensitive set would be, with no adopter-facing upside: nothing hand-writes this key
-    /// in a different case today.
+    /// The value itself accepts exactly <c>"mstest"</c> or <c>"xunit"</c> — lowercase, matching
+    /// what <c>InitCommand</c> writes — and nothing else, including differently-cased spellings
+    /// like <c>"MSTest"</c> or <c>"xUnit"</c>. §5's config is adopter-facing JSON, not a C#
+    /// identifier with case-insensitive lookup rules; treating <c>"MSTest"</c> as equivalent would
+    /// mean this loader accepts spellings <c>init</c> never writes and no other setting on this
+    /// surface tolerates (<c>rootNamespace</c> and <c>testBaseClass</c> are both compared exactly
+    /// as written). A fixed set of accepted spellings is also simpler to document and to grep for
+    /// than a case-insensitive comparison would be, with no adopter-facing upside: nothing
+    /// hand-writes this key in a different case today.
     /// </para>
     /// </summary>
     private static string RequireSupportedFramework(JsonElement project)
     {
         var framework = RequireString(project, "project.framework", "framework", FrameworkRule);
 
-        if (framework != "mstest")
+        if (!SupportedFrameworks.Contains(framework, StringComparer.Ordinal))
         {
             throw new ConfigLoadException(
-            $"project.framework in {FileName} is \"{framework}\", which intest does not support " +
-            "yet. Supported today: \"mstest\". InTest is designed to support additional test " +
-            "frameworks (§3's \"designed for three, ships one\"), but MSTest is the only one " +
-            "implemented so far. Set project.framework to \"mstest\".");
+            $"project.framework in {FileName} is \"{framework}\", which intest does not support yet. {FrameworkRule}");
         }
 
         return framework;
