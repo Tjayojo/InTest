@@ -7,7 +7,26 @@ namespace InTest.Cli.Rendering;
 
 public sealed class TemplateRenderer
 {
-    private readonly Template _classTemplate = Template.Parse(LoadEmbedded("mstest-class.scriban"));
+    private readonly Template _classTemplate;
+
+    /// <summary>
+    /// [framework-selects-template]: one template per framework, chosen once at construction.
+    /// Two files rather than one file branching internally — the templates are ~121 lines and
+    /// mostly identical, and a third framework would otherwise add a third set of conditionals to
+    /// every block.
+    /// </summary>
+    public TemplateRenderer(string framework)
+    {
+        ArgumentNullException.ThrowIfNull(framework);
+
+        _classTemplate = framework switch
+        {
+            "mstest" => Template.Parse(LoadEmbedded("mstest-class.scriban")),
+            "xunit" => Template.Parse(LoadEmbedded("xunit-class.scriban")),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(framework), framework, "expected \"mstest\" or \"xunit\"."),
+        };
+    }
 
     /// <param name="clientTypeName">
     /// The adopter's typed-client dotted type name — <c>LoadedConfig.Client?.TypeName</c> — or

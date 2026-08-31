@@ -1963,7 +1963,7 @@ public class TestPlanBuilderTests
 
         notFound.PathParameterKinds.ShouldBe([null]);
 
-        var rendered = new TemplateRenderer().RenderClass(orders, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+        var rendered = new TemplateRenderer("mstest").RenderClass(orders, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
 
         // The DeclaredError case's own unmatchable-id splice — not the Success case's, which
         // legitimately uses FixtureParameter("getOrderById", "id") regardless of kind and is
