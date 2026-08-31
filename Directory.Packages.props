@@ -13,6 +13,9 @@
     <PackageVersion Include="MSTest.TestFramework" Version="4.3.3" />
     <PackageVersion Include="MSTest.TestAdapter" Version="4.3.3" />
     <PackageVersion Include="MSTest.Analyzers" Version="4.3.3" />
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.0" />
+    <PackageVersion Include="xunit.v3.assert" Version="4.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
   </ItemGroup>

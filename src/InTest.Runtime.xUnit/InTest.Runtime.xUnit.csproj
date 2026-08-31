@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>InTest.Runtime.xUnit</PackageId>
+    <Description>xUnit adapter for InTest-generated API integration tests. Brings in InTest.Runtime and adds the xUnit-specific TestHost and ApiTestBase types.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>testing;xunit;openapi;api-testing;test-runtime</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Both TestHost.cs and ApiTestBase.cs declare `namespace InTest.Runtime;` explicitly, so
+         compilation does not depend on this setting. It exists anyway so the SDK default
+         (InTest.Runtime.xUnit, from the project/assembly name) isn't left sitting as a trap for
+         the next file added to this project without an explicit namespace declaration. The
+         namespace deliberately matches the neutral InTest.Runtime package: an adopter moving from
+         the (now nonexistent) all-in-one package to this split only changes the PackageReference
+         id in their .csproj, never a `using` or a type name in their own source. -->
+    <RootNamespace>InTest.Runtime</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- InternalsVisibleTo grant for InTest.Runtime.XUnit.Tests only, mirroring
+         InTest.Runtime.MSTest.csproj's own InternalsVisibleTo for InTest.Runtime.Tests. This is
+         explicitly NOT an InternalsVisibleTo between InTest.Runtime and InTest.Runtime.xUnit, the
+         two shipped packages: the entire point of the split is that no such grant exists between
+         them. -->
+    <InternalsVisibleTo Include="InTest.Runtime.XUnit.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- MinVer is NOT optional here. Without it this package packs at the SDK's default 1.0.0
+         instead of the git-derived version every other shipped package carries, silently, because
+         nothing about a missing MinVer reference fails the build — it just stops contributing a
+         version. -->
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <!-- Version comes from Directory.Packages.props (central package management) — an inline
+         Version here would be a build error.
+
+         Two packages, not xunit.v3. Referencing xunit.v3 from a library fails outright:
+           "xUnit.net v3 test projects must be executable (set project property <OutputType>Exe</OutputType>).
+            If this is not a test project, reference xunit.v3.extensibility.core instead."
+         and extensibility.core alone does not carry Assert, so Assert.Skip is CS0103 without
+         xunit.v3.assert. Generated adopter projects reference xunit.v3 itself, because they are executable. -->
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="xunit.v3.assert" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The SDK turns this into a nuspec <dependency id="InTest.Runtime" ...> automatically —
+         nothing to hand-write here. -->
+    <ProjectReference Include="../InTest.Runtime/InTest.Runtime.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
