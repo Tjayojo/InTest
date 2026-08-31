@@ -129,12 +129,22 @@ jobs:
       - name: Test InTest.Runtime.XUnit.Tests
         run: dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll
 
+      # InTest.Runtime.NUnit.Tests exists for the identical CS0433 reason as the xUnit suite above
+      # (InTest.Runtime.MSTest, InTest.Runtime.xUnit and InTest.Runtime.NUnit all declare
+      # ApiTestBase/TestHost in the same namespace, so no two adapters can share a compilation) --
+      # but unlike that suite, this one is a plain `dotnet test <csproj>` step: NUnit runs under
+      # classic VSTest, like MSTest, with no xunit.v3-style "must be executable" requirement and no
+      # refusal of `dotnet test` on the .NET 10 SDK ([nunit-is-vstest], the NUnit framework pack's
+      # plan). No direct-dll invocation and no separate build step are needed here.
+      - name: Test InTest.Runtime.NUnit.Tests
+        run: dotnet test tests/InTest.Runtime.NUnit.Tests/InTest.Runtime.NUnit.Tests.csproj --logger "trx;LogFileName=InTest.Runtime.NUnit.Tests.trx" --results-directory ${{ github.workspace }}/TestResults
+
       - name: Assert the suites actually ran
         # Step 3 of the plan's Task 2: a green `dotnet test` step does not prove anything ran --
         # see the script's own header for the two source comments and the reasoning this points
         # at. This is deliberately a separate step from the three above, after all of them, so a
         # single missing/empty result cannot be masked by the other two succeeding.
-        run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Architecture.Tests, InTest.Cli.Tests, InTest.Runtime.Tests
+        run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Architecture.Tests, InTest.Cli.Tests, InTest.Runtime.Tests, InTest.Runtime.NUnit.Tests
 
   # `[fast-first]`: Golden is CLAUDE.md's "only suite that proves generated code both compiles
   # and runs" -- kept in its own parallel job, not folded into `fast` above, specifically so it
