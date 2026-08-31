@@ -12,11 +12,12 @@ project runs with `dotnet test`, an xUnit v3 one runs as a built executable (see
 development-time tool — it generates on your machine or in a pull request, never as part of the
 deployment pipeline.
 
-> **Status: v0. Working, but early — `0.1.0-preview.1` is published to nuget.org as a prerelease.**
+> **Status: v0. Working, but early — `0.1.0-preview.2` is published to nuget.org as a prerelease.**
 >
 > `intest init`, `intest generate` and `intest fixtures repair` work: together they produce a
-> compiling MSTest project whose contract tests pass against a live API. That has been verified
-> against three sample APIs, one per OpenAPI producer — see
+> compiling MSTest, xUnit or NUnit project — the framework is chosen once with `init --framework`
+> — whose contract tests pass against a live API. That has been verified against three sample
+> APIs, one per OpenAPI producer, for MSTest — see
 > [`docs/v0-acceptance.md`](docs/v0-acceptance.md). Catalog and Inventory pass in full, twice
 > each, against an unreset store. Orders — the one sample with declared `security` — generates 24
 > tests: **0 failed, 4 skipped, 20 passed**. The 4 skips are the wrong-scope 403 cases whose
@@ -24,6 +25,8 @@ deployment pipeline.
 > (`RequireSecondaryIdentityLacks`) skips each with a stated reason instead of letting it run
 > against a request that identity is genuinely authorized for (**F11, closed**). The 3
 > write-scope 403s — the cases the sample's identity pair can actually prove — ran and passed.
+> xUnit and NUnit reproduce the Catalog and Orders numbers above exactly (the framework-pack
+> acceptance run, same document); Inventory has not been run under either yet.
 > `intest fixtures repair` creates and maintains the fixture files under `fixtures/` that supply
 > request bodies and path/query parameters, so an operation that needs one no longer generates a
 > test that cannot send it — see "What day one actually looks like" below.
@@ -44,15 +47,21 @@ deployment pipeline.
 > `intest assertions add`, `intest generate --emit-plan`, and YAML input — from a file or a URL
 > alike; a URL serving YAML is refused by name rather than failing as a parse error.
 >
-> **Installable today:** `InTest.Cli` and `InTest.Runtime` `0.1.0-preview.1` are live on
-> nuget.org — `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1` resolves and
-> installs cleanly (verified by installing it into a scratch directory right after the push
-> went live). This is a v0 prerelease: breaking changes are still expected before a `0.1.0`
-> stable release. Building from source is still how you get anything past that tag. The three
-> adapter packages a generated project actually references — `InTest.Runtime.MSTest`,
-> `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit`, split out of `InTest.Runtime` so no adapter
-> ever pulls another test framework in transitively — are not published yet; build from source to
-> try any of them.
+> **Installable today:** all five packages — `InTest.Cli`, `InTest.Runtime`,
+> `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` — are live on
+> nuget.org at `0.1.0-preview.2` — `dotnet tool install -g InTest.Cli --version 0.1.0-preview.2`
+> resolves and installs cleanly, reporting
+> `0.1.0-preview.2+b7fab09cc78c5ec65563cd21d3bed74635c53d2c` — the exact tagged commit (verified by
+> installing it into a scratch directory; the install briefly failed with "not found in NuGet
+> feeds" for about four minutes right after the push, ordinary registration-index propagation lag
+> rather than a broken publish, then succeeded). This is a v0 prerelease: breaking changes are
+> still expected before a `0.1.0` stable release. Building from source is still how you get
+> anything past that tag. The three adapter packages a generated project actually references —
+> `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit`, split out of
+> `InTest.Runtime` so no adapter ever pulls another test framework in transitively — are published
+> for the first time in this release, and each resolves `InTest.Runtime 0.1.0-preview.2`
+> transitively at the exact same version (confirmed with `dotnet list package
+> --include-transitive`), the §3 compatibility contract holding at the published version.
 >
 > The design spec is still the source of truth and is worth reading before the code:
 > [`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md)
