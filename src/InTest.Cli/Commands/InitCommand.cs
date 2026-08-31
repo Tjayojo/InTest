@@ -151,10 +151,11 @@ public static class InitCommand
     /// enforces that against afterward, on whatever value <c>intest.json</c> ends up carrying.
     /// Defaults to <c>"mstest"</c>, last of the parameter list, so every pre-existing 3- and
     /// 4-argument call site — production and test alike — keeps compiling and keeps scaffolding
-    /// an MSTest project exactly as before. Only <c>"mstest"</c> and <c>"xunit"</c> are accepted —
-    /// matching <c>ConfigLoader</c>'s own <c>SupportedFrameworks</c> list exactly, so `init` never
-    /// writes an <c>intest.json</c> that `generate` would then refuse to load — refused with exit
-    /// 2 before any write, the same treatment every other argument on this surface gets.
+    /// an MSTest project exactly as before. Only <c>"mstest"</c>, <c>"xunit"</c> and
+    /// <c>"nunit"</c> are accepted — matching <c>ConfigLoader</c>'s own <c>SupportedFrameworks</c>
+    /// list exactly, so `init` never writes an <c>intest.json</c> that `generate` would then
+    /// refuse to load — refused with exit 2 before any write, the same treatment every other
+    /// argument on this surface gets.
     /// </param>
     public static int Run(string projectRoot, string projectName, string specSource, string clientLockfilePath = "", string framework = "mstest")
     {
@@ -188,17 +189,18 @@ public static class InitCommand
         // on this surface — and before the intest.json-already-exists check below, same reasoning
         // as --name above: an invalid value is invalid regardless of what is already on disk.
         // Matches ConfigLoader.SupportedFrameworks exactly, so `init` never writes a framework
-        // value `generate` would refuse to load a moment later.
-        if (framework != "mstest" && framework != "xunit")
+        // value `generate` would refuse to load a moment later. All three frameworks §3 designs
+        // InTest for now ship, so — unlike ConfigLoader.FrameworkRule before this pack — there is
+        // no remaining roadmapped-but-unsupported framework to name as "not supported yet"; a
+        // value outside this set is refused outright.
+        if (framework != "mstest" && framework != "xunit" && framework != "nunit")
         {
             Console.Error.WriteLine(
-            $"--framework '{framework}' is not supported. Pass mstest (default) or xunit to " +
-            "`intest init --framework` — InTest is designed to support three frameworks (§3); " +
-            "NUnit is not supported yet.");
+            $"--framework '{framework}' is not supported. Pass mstest (default), xunit or nunit " +
+            "to `intest init --framework` — the three frameworks InTest is designed to support " +
+            "(§3).");
             return ExitCode.ToolError;
         }
-
-        var isXunit = framework == "xunit";
 
         // [lockfile-recovery]: --spec and --client-lockfile name the same thing two different
         // ways, so giving both is a contradiction, not a preference — refused before either is
@@ -484,32 +486,51 @@ public static class InitCommand
         // either escaping rule exists to guard against. A build that somehow produced an
         // informational version outside that grammar would be a build-system defect to fix at the
         // source, not a value either escaper could safely paper over here.
-        // [scaffold-per-framework] (Task 5): five of the eleven scaffolded files differ by
-        // framework. The .csproj is one of them — <OutputType>, <RunSettingsFilePath>, the
-        // package references, and the MSTest-only parallelism guard target all differ — composed
-        // here as fragments and spliced into one shared template below, the same technique
-        // clientSection above already uses, rather than two near-duplicate templates that could
-        // silently drift apart.
+        // [scaffold-per-framework] (Task 5, extended by Task 3 of the NUnit framework pack plan):
+        // five of the eleven scaffolded files differ by framework. The .csproj is one of them —
+        // <OutputType>, <RunSettingsFilePath>, the package references, and the MSTest-only
+        // parallelism guard target all differ — composed here as fragments and spliced into one
+        // shared template below, the same technique clientSection above already uses, rather than
+        // three near-duplicate templates that could silently drift apart.
+        //
+        // A framework switch, not a boolean, from here down: an isXunit/isNunit pair of booleans
+        // would have four reachable states for three real frameworks — the shape a fourth
+        // framework would turn into a real bug. The guard above already narrows `framework` to
+        // exactly "mstest", "xunit" or "nunit" before any of these run, so each switch's default
+        // arm (UnreachableFramework) is defensive rather than reachable — same discipline as
+        // GenerateCommand.ResolveClientKind.
         //
         // xunit.v3 must be marked <OutputType>Exe</OutputType> — referencing xunit.v3 itself from
         // a library project fails outright ("xUnit.net v3 test projects must be executable"; see
         // InTest.Runtime.xUnit.csproj's own comment for the measured error text). A generated
         // adopter project is exactly that: executable, unlike InTest.Runtime.xUnit itself, which
-        // references xunit.v3.extensibility.core + xunit.v3.assert instead.
+        // references xunit.v3.extensibility.core + xunit.v3.assert instead. NUnit needs no such
+        // marker: [one-package] measured that `NUnit` alone compiles an ordinary class library,
+        // the same as MSTest, so nunit joins mstest's arm here rather than xunit's.
         //
         // <RunSettingsFilePath> and the *.runsettings file it points at are an MSTest/VSTest-only
-        // mechanism (the profile MSTest's TestContext reads at TestRunParameters) — xUnit v3 has
-        // no equivalent, so neither the property nor the file are scaffolded for it; see
-        // [profile-loses-its-first-source] on TestHost.InitializeAsync's null profile argument for
-        // what replaces it (INTEST_PROFILE).
-        var outputTypeElement = isXunit ? "\n    <OutputType>Exe</OutputType>" : string.Empty;
+        // mechanism (the profile MSTest's TestContext reads at TestRunParameters) — xUnit v3 and
+        // NUnit both have no equivalent, so neither the property nor the file are scaffolded for
+        // either of them; see [profile-loses-its-first-source] on TestHost.InitializeAsync's null
+        // profile argument for what replaces it (INTEST_PROFILE).
+        var outputTypeElement = framework switch
+        {
+            "xunit" => "\n    <OutputType>Exe</OutputType>",
+            "mstest" or "nunit" => string.Empty,
+            _ => throw UnreachableFramework(framework),
+        };
 
-        var runSettingsElement = isXunit
-            ? string.Empty
-            : $"\n    <RunSettingsFilePath>$(MSBuildProjectDirectory)/{projectName}.runsettings</RunSettingsFilePath>";
+        var runSettingsElement = framework switch
+        {
+            "mstest" =>
+                $"\n    <RunSettingsFilePath>$(MSBuildProjectDirectory)/{projectName}.runsettings</RunSettingsFilePath>",
+            "xunit" or "nunit" => string.Empty,
+            _ => throw UnreachableFramework(framework),
+        };
 
-        var packageReferencesBlock = isXunit
-            ? $"""
+        var packageReferencesBlock = framework switch
+        {
+            "xunit" => $"""
                    <PackageReference Include="xunit.v3" Version="4.0.0" />
                    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
@@ -518,8 +539,21 @@ public static class InitCommand
                         packages declare types in namespace InTest.Runtime, so nothing downstream (the
                         template, testBaseClass) needs to know two packages are involved. -->
                    <PackageReference Include="InTest.Runtime.xUnit" Version="{CliVersion.Current}" />
-              """
-            : $"""
+              """,
+            "nunit" => $"""
+                   <PackageReference Include="NUnit" Version="4.6.1" />
+                   <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                   <PackageReference Include="Shouldly" Version="4.3.0" />
+                   <!-- The NUnit adapter ProjectReferences the neutral InTest.Runtime package and
+                        brings it in transitively, so only this one reference is scaffolded — both
+                        packages declare types in namespace InTest.Runtime, so nothing downstream (the
+                        template, testBaseClass) needs to know two packages are involved. NUnit and
+                        NUnit3TestAdapter version independently (4.x and 6.x) — unlike the MSTest trio
+                        above, they are not expected to move in lockstep. -->
+                   <PackageReference Include="InTest.Runtime.NUnit" Version="{CliVersion.Current}" />
+              """,
+            "mstest" => $"""
                    <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
                    <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
                    <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
@@ -530,15 +564,19 @@ public static class InitCommand
                         packages declare types in namespace InTest.Runtime, so nothing downstream (the
                         template, testBaseClass) needs to know two packages are involved. -->
                    <PackageReference Include="InTest.Runtime.MSTest" Version="{CliVersion.Current}" />
-              """;
+              """,
+            _ => throw UnreachableFramework(framework),
+        };
 
         // The INTEST0001 guard target names MSTestParallelizeScope/MSTestParallelizeWorkers —
-        // properties that mean nothing to xUnit's runner — so it is scaffolded for MSTest only.
-        // xUnit's parallelism opt-out lives entirely in AssemblyInfo.cs's assembly attribute,
-        // with no MSBuild-property equivalent to guard against.
-        var parallelizationGuardBlock = isXunit
-            ? string.Empty
-            : """
+        // properties that mean nothing to xUnit's or NUnit's runner — so it is scaffolded for
+        // MSTest only. xUnit's parallelism opt-out lives entirely in AssemblyInfo.cs's assembly
+        // attribute, with no MSBuild-property equivalent to guard against; NUnit's
+        // LevelOfParallelism attribute (below) is the same shape — an assembly attribute with
+        // nothing on the MSBuild side that could conflict with it.
+        var parallelizationGuardBlock = framework switch
+        {
+            "mstest" => """
 
                 <!-- Parallelization intent lives in AssemblyInfo.cs. The MSBuild properties below
                      generate a second assembly attribute, which fails as CS0579 inside obj/. -->
@@ -547,7 +585,10 @@ public static class InitCommand
                   <Error Code="INTEST0001"
                          Text="Parallelization intent is declared in AssemblyInfo.cs. Remove MSTestParallelizeScope/MSTestParallelizeWorkers from the project file and edit [assembly: Parallelize] or [assembly: DoNotParallelize] instead." />
                 </Target>
-              """;
+              """,
+            "xunit" or "nunit" => string.Empty,
+            _ => throw UnreachableFramework(framework),
+        };
 
         Write(projectRoot, $"{projectName}.csproj", $"""
                                                      <Project Sdk="Microsoft.NET.Sdk">
@@ -588,22 +629,46 @@ public static class InitCommand
         // settings). ParallelizationAttribute lives in namespace Xunit.v3; ParallelMode lives in
         // Xunit.Sdk — neither is where a reader would guess, so both are named fully qualified
         // below rather than via a `using`, matching the exact shape confirmed to compile.
-        Write(projectRoot, "AssemblyInfo.cs", isXunit
-            ? """
-              // The single authoritative declaration of parallelization intent. xUnit v3
-              // parallelises by default; this attribute is the counterpart of the MSTest
-              // scaffold's [assembly: DoNotParallelize] — without it a scaffolded suite runs
-              // concurrently against a deployed API.
-              [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
-              """
-            : """
-              using Microsoft.VisualStudio.TestTools.UnitTesting;
+        //
+        // [nunit-is-sequential]: NUnit's case is the opposite of xUnit's, and the comment
+        // scaffolded below says so rather than implying the same hazard. Measured three ways: a
+        // default run of two 1.5s test classes took 5.64s with no overlap (sequential already);
+        // adding [assembly: Parallelizable(ParallelScope.Fixtures)] produced real overlap on
+        // distinct threads (2.68s); [assembly: LevelOfParallelism(1)] forced it back to 4.15s. So
+        // this attribute is scaffolded to *state* intent, not to *fix* a live problem the way the
+        // xUnit attribute above does — it is the explicit, provable analogue of the MSTest
+        // scaffold's [assembly: DoNotParallelize], and it is what keeps a scaffolded suite
+        // sequential against a *deployed* API even after someone adds [Parallelizable] to an
+        // individual class later.
+        Write(projectRoot, "AssemblyInfo.cs", framework switch
+        {
+            "xunit" => """
+                       // The single authoritative declaration of parallelization intent. xUnit v3
+                       // parallelises by default; this attribute is the counterpart of the MSTest
+                       // scaffold's [assembly: DoNotParallelize] — without it a scaffolded suite runs
+                       // concurrently against a deployed API.
+                       [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+                       """,
+            "nunit" => """
+                       // The single authoritative declaration of parallelization intent. Unlike the
+                       // xUnit scaffold's attribute, this one does not prevent a live hazard — NUnit's
+                       // default is already sequential ([nunit-is-sequential], measured). It states
+                       // intent rather than fixing one: the explicit, provable analogue of the MSTest
+                       // scaffold's [assembly: DoNotParallelize], and it is what keeps a scaffolded
+                       // suite sequential against a deployed API even after someone adds
+                       // [Parallelizable] to an individual class later.
+                       [assembly: NUnit.Framework.LevelOfParallelism(1)]
+                       """,
+            "mstest" => """
+                       using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-              // The single authoritative declaration of parallelization intent.
-              // Do NOT set MSTestParallelizeScope in the .csproj — it generates this attribute,
-              // and two of them is a build error.
-              [assembly: DoNotParallelize]
-              """);
+                       // The single authoritative declaration of parallelization intent.
+                       // Do NOT set MSTestParallelizeScope in the .csproj — it generates this attribute,
+                       // and two of them is a build error.
+                       [assembly: DoNotParallelize]
+                       """,
+            _ => throw UnreachableFramework(framework),
+        });
 
         Write(projectRoot, ".editorconfig", """
                                             root = true
@@ -619,12 +684,86 @@ public static class InitCommand
         Write(projectRoot, ".gitattributes", GitattributesContent);
 
         // [scaffold-per-framework]: the assembly-setup file is the fourth of the five files that
-        // differ by framework. Both branches carry an identical Register(IServiceCollection,
+        // differ by framework. All three branches carry an identical Register(IServiceCollection,
         // IConfiguration) method, comments included — it is the one scaffolded place an adopter
         // registers ITestTokenProvider and their own services regardless of framework, and an
-        // xUnit scaffold with nowhere to do that was rev 1 of this plan's own dropped requirement.
-        Write(projectRoot, "TestStartup.cs", isXunit
-            ? $$"""
+        // xUnit scaffold with nowhere to do that was rev 1 of this plan's own dropped requirement;
+        // the same reasoning is why the NUnit branch below carries it too rather than leaving it
+        // out as a shortcut.
+        Write(projectRoot, "TestStartup.cs", framework switch
+        {
+            "nunit" => $$"""
+                using InTest.Runtime;
+                using Microsoft.Extensions.Configuration;
+                using Microsoft.Extensions.DependencyInjection;
+                using NUnit.Framework;
+
+                namespace {{projectName}};
+
+                /// <summary>
+                /// Assembly-scope setup. NUnit's [SetUpFixture] is itself the lifecycle hook: NUnit
+                /// constructs one instance of the class it decorates and runs [OneTimeSetUp] before
+                /// any test in its scope runs, then [OneTimeTearDown] once every test in scope has
+                /// finished — the counterpart of MSTest's [AssemblyInitialize]/[AssemblyCleanup] and
+                /// xUnit's IAsyncLifetime-backed assembly fixture. A [SetUpFixture] declared with no
+                /// enclosing namespace (as here) scopes to the whole assembly, verified working
+                /// including teardown after a failing test and with an ignored test present.
+                /// </summary>
+                [SetUpFixture]
+                public class TestStartup
+                {
+                    [OneTimeSetUp]
+                    public async Task AssemblyInit()
+                    {
+                        TestHost.ConfigureServices = Register;
+                        await TestHost.InitializeAsync();
+                    }
+
+                    /// <summary>Drains any fixture teardown registered during AssemblyInit — runs even
+                    /// when AssemblyInit itself failed, and never fails the run: see
+                    /// TestHost.CleanupAsync for why a drain failure is written to the test log instead
+                    /// of thrown.</summary>
+                    [OneTimeTearDown]
+                    public async Task AssemblyCleanup()
+                    {
+                        await TestHost.CleanupAsync();
+                    }
+
+                    /// <summary>Team-owned registrations. Add configuration providers here. AuthHandler
+                    /// is already attached to InTestClients.Api; a secured API needs only an
+                    /// ITestTokenProvider registered below — do not also append a DelegatingHandler of
+                    /// your own, or two handlers will set Authorization and the last one registered
+                    /// silently wins. See "Auth" in Phase 3 of getting-started.md for a worked
+                    /// example.</summary>
+                    private static void Register(IServiceCollection services, IConfiguration configuration)
+                    {
+                        // StaticTokenProvider ships as the one-identity, one-token implementation; write
+                        // your own (like YourTokenProvider below) for more than one identity, which the
+                        // wrong-scope 403 cases need — and declare each identity's Scopes, or a read-only
+                        // identity's own read operations can never produce a provable 403. Catalog and
+                        // Inventory declare no `security` and register nothing at all — they cannot,
+                        // since StaticTokenProvider needs a real token neither has a source for — so this
+                        // stays commented for the same reason the IAssemblyFixture example below does: a
+                        // live registration here would reference a type that does not exist yet, breaking
+                        // every fresh scaffold's build before a team has written one. See "Auth" in Phase
+                        // 3 of getting-started.md for a worked example.
+                        // services.AddSingleton<ITestTokenProvider, YourTokenProvider>();
+
+                        // Per-request fixtures: path and query parameter values live in fixtures/, not
+                        // here — each operation that needs one has a fixture file with a "TODO:"
+                        // sentinel for every value it requires. Fill those in by hand, or run
+                        // `intest fixtures repair` after a spec change to add sentinels for anything
+                        // newly required.
+
+                        // A different kind of fixture: assembly fixtures seed data once before any test
+                        // runs, registered here rather than under fixtures/. Order is resolved
+                        // automatically from DependsOn; profile-restrict with AppliesTo. See "fixtures"
+                        // in Phase 5 of getting-started.md for a worked example.
+                        // services.AddSingleton<IAssemblyFixture, YourFixture>();
+                    }
+                }
+                """,
+            "xunit" => $$"""
                 using InTest.Runtime;
                 using Microsoft.Extensions.Configuration;
                 using Microsoft.Extensions.DependencyInjection;
@@ -689,8 +828,8 @@ public static class InitCommand
                         // services.AddSingleton<IAssemblyFixture, YourFixture>();
                     }
                 }
-                """
-            : $$"""
+                """,
+            "mstest" => $$"""
                 using InTest.Runtime;
                 using Microsoft.Extensions.Configuration;
                 using Microsoft.Extensions.DependencyInjection;
@@ -751,7 +890,9 @@ public static class InitCommand
                         // services.AddSingleton<IAssemblyFixture, YourFixture>();
                     }
                 }
-                """);
+                """,
+            _ => throw UnreachableFramework(framework),
+        });
 
         Write(projectRoot, $"{baseClassName}.cs", $$"""
                                                     using InTest.Runtime;
@@ -789,12 +930,12 @@ public static class InitCommand
                                                        """);
 
         // [scaffold-per-framework]: the fifth and last file that differs by framework — this one
-        // is simply not written for xUnit. *.runsettings is an MSTest/VSTest mechanism start to
-        // finish (TestRunParameters, the <MSTest> element) with no xUnit equivalent; scaffolding
-        // one anyway would name a profile mechanism that does nothing under xUnit, worse than
-        // omitting the file. See <RunSettingsFilePath>'s own comment above for the .csproj half of
-        // this same decision.
-        if (!isXunit)
+        // is simply not written for xUnit or NUnit. *.runsettings is an MSTest/VSTest mechanism
+        // start to finish (TestRunParameters, the <MSTest> element) with no xUnit or NUnit
+        // equivalent; scaffolding one anyway would name a profile mechanism that does nothing
+        // under either framework, worse than omitting the file. See <RunSettingsFilePath>'s own
+        // comment above for the .csproj half of this same decision.
+        if (framework == "mstest")
         {
         Write(projectRoot, $"{projectName}.runsettings", """
                                                          <?xml version="1.0" encoding="utf-8"?>
@@ -816,6 +957,19 @@ public static class InitCommand
         Console.WriteLine($"Initialised {projectName}. Next: `intest generate`.");
         return ExitCode.Ok;
     }
+
+    /// <summary>
+    /// The defensive default arm shared by every per-framework switch above. Unreachable in
+    /// production: the guard near the top of <see cref="Run"/> already refuses any
+    /// <paramref name="framework"/> other than <c>"mstest"</c>, <c>"xunit"</c> or <c>"nunit"</c>
+    /// before any of those switches run, so reaching this means that guard itself regressed, not
+    /// that an adopter passed a bad <c>--framework</c> value — the same defensive-default
+    /// discipline as <c>GenerateCommand.ResolveClientKind</c>, for the same reason.
+    /// </summary>
+    private static InvalidOperationException UnreachableFramework(string framework) =>
+        new($"--framework \"{framework}\" reached the scaffold unvalidated. The guard near the " +
+            "top of InitCommand.Run should have already refused any value other than " +
+            "\"mstest\", \"xunit\" or \"nunit\".");
 
     /// <summary>
     /// Internal rather than private: <c>UpgradeCommand</c> reuses this exact normalization
