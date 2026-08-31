@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, the full Phase 0-8 walkthrough, and the three-package-split acceptance run, and the framework-pack acceptance run
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, the full Phase 0-8 walkthrough, the three-package-split acceptance run, the framework-pack acceptance run, and the 0.1.0-preview.2 publish
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -17,6 +17,7 @@ forward" list at the end is always the current one.
 | Full Phase 0-8 walkthrough | 2026-08-25 | `b349e25` + this commit | The first full `getting-started.md` walkthrough — Phase 0 through Phase 8, in order — against the published packages with zero substitutions: `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1`, three fresh `intest init` scaffolds, `fixtures repair`, a hand-written `ITestTokenProvider` for Orders, `dotnet tool restore`, `generate --check`, and `dotnet build` all against a cold, isolated `NUGET_PACKAGES` with no local leftovers. Live results: Catalog **13 of 13**, Orders **20 passed, 0 failed, 4 skipped** (all four `RequireSecondaryIdentityLacks`), Inventory **9 of 9** — reproducing `getting-started.md`'s own stated banner numbers for the first time against the *published* tool rather than a local build. `generate --check`'s exit `4` and `intest upgrade` both exercised on a fresh scaffold and closed the loop (exit 0, suite passing again). **No new defect found** — every phase matched the document exactly. One re-run of `dotnet test InTest.sln` in the repo caught a transient `MSB3713` file-lock build failure in `InTest.Golden.Tests`, consistent with the other session's concurrent activity in this shared tree; reproduced clean in isolation, not a product defect |
 | Three-package split | 2026-08-26 | `d152412` + this commit | First adoption walk against the **runtime-framework split** (`InTest.Runtime.MSTest`, never published) — a *simulated* publish (three packages packed locally, never nuget.org) via `scripts/local-e2e-test.ps1`, run twice. All three packages pack at one identical version; a fresh scaffold's `InTest.Runtime.MSTest` `PackageReference` matches it and resolves `InTest.Runtime` transitively at the exact same version (confirmed via `dotnet list package --include-transitive`, not assumed). Extended beyond the script's own documented scope with a live run: Catalog **13 of 13** over real HTTP against the locally-packed three-package build. `release.yml`/`pack.yml` confirmed three-package-complete (the release job's own 6-asset positive control already covered this), with a stale two-package step name/comment fixed alongside the one real defect found: **F15**, `local-e2e-test.ps1`'s own "cache is clean" confirmation printing even on a run where its own tripwire had just warned that pre-existing `intest.cli`/`intest.runtime` entries (an unrelated earlier session's leftovers) were sitting in the global cache — fixed with a `$CacheClean` flag, negative-controlled by re-running against the same still-dirty cache
 | Framework packs | 2026-08-31 | `69f0918` | The first live run of a **generated suite that is not MSTest**. xUnit and NUnit each reproduce the MSTest numbers exactly against the same live APIs: Catalog **13 of 13**, Orders **20 passed, 0 failed, 4 skipped**. All 4 skips bottom out in `RequireSecondaryIdentityLacks` under all three adapters' different skip mechanisms (`Assert.Inconclusive` / `Assert.Skip` / `Assert.Ignore`), and the 3 write-scope 403s run and pass — so the skip decision is per-operation, not a blanket avoidance. `[error-is-the-sink]` confirmed end to end: NUnit's assembly-scope `Note`/`Warn` reach the `.trx`. **No InTest defect found.** Two findings, neither a product defect: **F16**, NUnit3TestAdapter's `.trx` `<Counters>` reports `notExecuted="0"` while four `NotExecuted` results are present in the same file; **F17**, the sample SQLite stores are never reset, so committed example fixture values no longer apply to a long-lived store |
+| 0.1.0-preview.2 publish | 2026-08-31 | `b7fab09` (tagged) | Second real tag push, and the first at **five packages**. All three `release.yml` jobs green (`Pack (verify against tag)`, `Publish to nuget.org`, `Create GitHub Release`); the GitHub Release carries exactly **10 assets** (five `.nupkg` + five `.snupkg`), a count `release.yml` asserts mechanically. `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` are **published for the first time**. `dotnet tool install -g InTest.Cli --version 0.1.0-preview.2` resolves and reports the exact tagged commit; all three adapters restore from nuget.org and resolve `InTest.Runtime 0.1.0-preview.2` transitively, holding §3's compatibility contract at the published version. One propagation-lag data point recorded, not a defect: install failed for ~4 minutes right after the push before the registration index caught up. **`ubuntu-latest` only, one run — no claim about a stable tag or a second OS's `publish` job** |
 
 ---
 
@@ -3068,3 +3069,98 @@ this machine hits a 404 and a 409 before any InTest behaviour is in question.
   and string/int route parameters, not a new adapter path, and MSTest already covers it 9 of 9.
 - **Not a fresh store.** See F17 — these numbers come from a long-lived database, not a
   clean one.
+
+---
+
+# 0.1.0-preview.2 publish acceptance run
+
+**Date:** 2026-08-31 · **Commit:** `b7fab09` (tagged `0.1.0-preview.2`, tag pushed by the
+repository owner — [tag-is-the-release] stays a human decision; nothing in this run or in
+`release.yml` cut the tag itself)
+**Task:** the second real tag push, and the first at the five-package shape the
+**0.1.0-preview.1 publish acceptance run** and the **Three-package split** and **Framework-pack**
+acceptance runs above all named as unproven: neither a locally-simulated pack (Three-package
+split) nor an in-process/`ProjectReference` run (Framework packs) can stand in for a real
+`release.yml` publish, because only nuget.org's own acceptance of an artifact — and a real restore
+against it — proves the artifact is actually installable. This run is that proof, for
+`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit`'s first publish.
+
+## What was exercised
+
+| Step | What | Result |
+|---|---|---|
+| 1 | `git tag 0.1.0-preview.2` on `b7fab09`, pushed | Triggered both `pack.yml` and `release.yml` |
+| 2 | `release.yml`'s three jobs: `Pack (verify against tag)`, `Publish to nuget.org`, `Create GitHub Release` | All green — **first run at five packages** (the previous tag published two) |
+| 3 | GitHub Release for `0.1.0-preview.2` | Marked prerelease, carries exactly **10 assets** (five `.nupkg` + five `.snupkg`) — `release.yml` asserts that count from a derived package-id list, not a literal |
+| 4 | `dotnet tool install -g InTest.Cli --version 0.1.0-preview.2` | Installs and runs, reporting `0.1.0-preview.2+b7fab09cc78c5ec65563cd21d3bed74635c53d2c` — the commit SHA matches the tagged commit exactly |
+| 5 | All three adapters (`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`, `InTest.Runtime.NUnit`) restored from nuget.org, `dotnet list package --include-transitive` | Each resolves **`InTest.Runtime 0.1.0-preview.2`** — the §3 compatibility contract holding at the published version |
+
+One propagation-lag data point, worth recording because it reads exactly like a broken release
+rather than what it is: packages were live on the flat-container API roughly **four minutes**
+before `dotnet tool install` could resolve them, failing with "not found in NuGet feeds" for the
+whole of that window. This is ordinary NuGet registration-index lag, not a failed publish — the
+same distinction CONTRIBUTING.md's "Ask the thing that decides" section asks for elsewhere: the
+symptom looks identical to a broken push, and the only way to tell them apart was to keep
+retrying against the real feed rather than concluding the publish had failed from the first
+attempt alone.
+
+## What this closes
+
+**The five-package, ten-artifact shape is now proven, not just designed.** The
+0.1.0-preview.1 publish acceptance run above closed the two-package case — `InTest.Cli` and
+`InTest.Runtime` restoring from a bare clone — and named the three-package extension as the next
+tag push's job. The Three-package split acceptance run went as far as a *simulated* local publish
+could take it, and the Framework-pack acceptance run proved the xUnit and NUnit adapters' generated
+code against real HTTP but with a `ProjectReference` standing in for the unpublished package. This
+run is the first time all three adapters were installed the way a real adopter installs them —
+restored from nuget.org itself, not packed locally and not substituted around — and the first time
+`dotnet list package --include-transitive` confirmed the §3 compatibility contract
+(`InTest.Runtime.MSTest`/`.xUnit`/`.NUnit` **N.x** accepting code generated by `InTest.Cli` **N.y**)
+against packages nuget.org actually served, rather than a local feed.
+
+**CONTRIBUTING.md's "Also unproven by this run" note, attached to the 0.1.0-preview.1 record, is
+now closed.** That note said the runtime-framework split and the later xUnit/NUnit additions "all
+landed after it, so no tag push has yet published the five-package, ten-artifact shape" — this tag
+push is that test, and it passed.
+
+## What this run does not claim
+
+Stated directly, in the same register as the two publish/framework runs above, because
+overstating it is exactly the failure mode this document exists to avoid:
+
+- **One tag, one push, one runner.** This is a second data point, not proof that every future tag
+  push behaves identically. `release.yml`'s `publish` job still runs `ubuntu-latest` only, by
+  design (unchanged from the 0.1.0-preview.1 run) — this run says nothing new about
+  `windows-latest` runners specifically publishing anything.
+- **Still prereleases only.** `0.1.0-preview.2` is a prerelease, same as `0.1.0-preview.1`; nothing
+  about a `0.1.0` stable tag's publish path has been exercised by either run.
+- **Not a fresh full-adoption walkthrough.** This run reproduces the installability and transitive-
+  resolution steps of Phase 8, not a complete Phase 0–Phase 8 pass against the newly-published
+  adapters — the Full Phase 0-8 walkthrough above did that for the two-package shape at
+  `0.1.0-preview.1`; it has not been repeated end to end against all three frameworks at
+  `0.1.0-preview.2`.
+- **Not a live-HTTP run.** This run is about the publish mechanism and package resolution, not
+  about running a generated suite against `samples/` — the Framework-pack acceptance run above
+  already covers Catalog and Orders under xUnit and NUnit live, against a `ProjectReference` build
+  from before this tag existed; that evidence is not re-established against the published packages
+  specifically by this run.
+- **`examples/` still pins the pre-publish shape.** Retargeting `examples/` to the newly-published
+  adapter packages is separate, ongoing work (tracked outside this run) and is deliberately not
+  claimed here — see this update's own report for the exact clauses left alone pending that work.
+- **The Publishing checklist's remaining human steps are unaffected**, in the same way the
+  0.1.0-preview.1 record already stated: a required-reviewer gate on the `nuget-release`
+  environment remains recommended and not confirmed configured. `PackageValidationBaselineVersion`
+  for `InTest.Runtime` was due starting with this release and, checked directly against
+  `src/InTest.Runtime/InTest.Runtime.csproj` while writing this record, is **not present** — see
+  CONTRIBUTING.md's Publishing checklist item 11 for the same finding stated where the rule lives.
+
+## 0.1.0-preview.2 publish actions
+
+| # | Action | Owner phase | Status |
+|---|---|---|---|
+| 1 | Prove the five-package, ten-artifact shape publishes for real, closing the gap the 0.1.0-preview.1 record left open | this run | **Closed** — see "What was exercised" above |
+| 2 | Confirm all three adapters resolve `InTest.Runtime` transitively at the exact published version, against nuget.org rather than a local feed | this run | **Closed** — Step 5 above |
+| 3 | Add `<PackageValidationBaselineVersion>` to `InTest.Runtime`'s project file, pointing at `0.1.0-preview.1` (due starting with this release, per CONTRIBUTING.md's Publishing checklist item 11) | this release | Open — checked directly, not present, found while writing this record |
+| 4 | Retarget `examples/` to reference whichever adapter package now matches each example's `project.framework`, now that all three exist on nuget.org | separate, ongoing work | Open — deliberately out of scope for this update |
+| 5 | Re-run the full Phase 0–Phase 8 adopter walkthrough against `0.1.0-preview.2` specifically, across all three frameworks, the way the 0.1.0-preview.1 record's item 6 did for the two-package shape | pre-v1 release readiness | Open |
+| 6 | Confirm a required-reviewer gate is configured on the `nuget-release` environment | repository owner, GitHub Settings | Open — recommended, not confirmed configured, same gap every earlier publish record in this document already names |

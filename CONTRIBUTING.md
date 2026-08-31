@@ -8,11 +8,13 @@ runs, `generate --check`/`upgrade` by v1-e Task 6 — see
 [`docs/v0-acceptance.md`](docs/v0-acceptance.md) for both. `survey`, `fixtures promote`,
 `assertions add` and `generate --emit-plan` don't exist yet — that doc's own preamble tracks the
 gap precisely, and is the source of truth if this file and it ever disagree.
-`InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org as a prerelease
-(see "Branching and how a release is cut" below); building from source is still how you try
-anything past that tag. A third, fourth and fifth package — `InTest.Runtime.MSTest`,
+All five packages — `InTest.Cli`, `InTest.Runtime`, `InTest.Runtime.MSTest`,
+`InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` — are published to nuget.org as a prerelease at
+`0.1.0-preview.2` (see "Branching and how a release is cut" below); building from source is still
+how you try anything past that tag. The third, fourth and fifth package — `InTest.Runtime.MSTest`,
 `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit`, the MSTest, xUnit and NUnit adapters split out
-of `InTest.Runtime`, described in "Releases" below — have not been published at all yet, so
+of `InTest.Runtime`, described in "Releases" below — were published for the first time in this
+release, each resolving `InTest.Runtime 0.1.0-preview.2` transitively. For now,
 `examples/` still pins the neutral `InTest.Runtime` package directly at `0.1.0-preview.1` rather
 than whichever adapter it would reference once one exists on nuget.org. The
 [design spec](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md) remains the
@@ -531,6 +533,23 @@ the later `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` additions, all lande
 tag push has yet published the five-package, ten-artifact shape described above — the next tag
 push is the first real test of that.
 
+**Closed by the `0.1.0-preview.2` tag push:** the next tag push named above has now happened
+(2026-08-31, commit `b7fab09`), and it is the first real test of the five-package, ten-artifact
+shape. All three `release.yml` jobs — `Pack (verify against tag)`, `Publish to nuget.org`,
+`Create GitHub Release` — went green, the **first run at five packages** (the previous tag
+published two). The GitHub Release carries exactly **10 assets** (five `.nupkg` plus five
+`.snupkg`), marked prerelease — `release.yml` asserts that count from a derived package-id list,
+not a literal. `dotnet tool install -g InTest.Cli --version 0.1.0-preview.2` installs and reports
+`0.1.0-preview.2+b7fab09cc78c5ec65563cd21d3bed74635c53d2c` — the exact tagged commit. All three
+adapters restore from nuget.org, and each resolves `InTest.Runtime 0.1.0-preview.2` transitively
+(`dotnet list package --include-transitive`), confirming §3's compatibility contract holds at the
+published version. One propagation-lag data point, worth recording because it reads exactly like
+a broken release: packages were live on the flat-container API roughly four minutes before
+`dotnet tool install` could resolve them, failing with "not found in NuGet feeds" in between —
+ordinary registration-index lag, not a failed publish. **Still unproven:** everything the
+`0.1.0-preview.1` paragraph above already listed as unproven by a single run remains unproven by
+two — a stable (non-preview) tag and a second OS for the `publish` job specifically.
+
 **Patching an old major.** There are zero shipped releases today, so nothing needs this yet.
 Once one exists, cut `release/N.x` **on demand**, from the relevant tag, rather than maintaining a
 permanent branch against a need that has not arrived — the same practice `dotnet/runtime` follows,
@@ -646,23 +665,33 @@ push itself remains a real, one-time or per-release, human step — see `docs/su
    `InTest.Runtime.xUnit`/`InTest.Runtime.NUnit` additions):
    nuget.org accepts a `.snupkg` whose PDBs sit under `tools/` (a tool package) rather than
    `lib/` — all four artifacts (two packages times `.nupkg`/`.snupkg`) were pushed and accepted;
-   see `docs/v0-acceptance.md`. The next tag push is the first to exercise the five-package,
-   ten-file shape.
+   see `docs/v0-acceptance.md`. **The five-package, ten-file shape is now confirmed too, by the
+   `0.1.0-preview.2` push**: all three `release.yml` jobs went green, the GitHub Release carries
+   exactly ten assets, and `dotnet tool install -g InTest.Cli --version 0.1.0-preview.2` resolves
+   and reports the exact tagged commit — see "Branching and how a release is cut" above for the
+   full account, including the roughly four-minute registration-index propagation lag observed
+   before install worked.
 10. Flip `README.md`'s status callout to name the just-published version. **Done for
-    `0.1.0-preview.1`** — the banner now reads "`0.1.0-preview.1` is published to nuget.org as a
-    prerelease" instead of "nothing is published yet"; a future release only needs the version
-    string bumped, not this rewritten from scratch.
+    `0.1.0-preview.1`**, and again for **`0.1.0-preview.2`** — each time the banner's version
+    string was bumped and, for `0.1.0-preview.2`, its "not published yet" language about the three
+    adapter packages was replaced with the fact of their first publish; neither release needed the
+    callout rewritten from scratch.
 11. Starting with the release *after* each package's first publish: add
     `<PackageValidationBaselineVersion>` to that package's project file, pointing at the version
-    just published — `InTest.Runtime` and, once each has shipped a first version,
-    `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` too. (`InTest.Cli`
-    never participates in package validation — the SDK hard-disables it for tool packages.)
+    just published — `InTest.Runtime`'s first publish was `0.1.0-preview.1`, so this release
+    (`0.1.0-preview.2`) is where its baseline version was due; checked directly against
+    `src/InTest.Runtime/InTest.Runtime.csproj` while writing this update, and it is **not there**
+    — this step has not actually been done yet for `InTest.Runtime`, unlike item 10 above.
+    `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` shipped their own
+    first version, `0.1.0-preview.2`, in this release, so their baseline versions are correctly not
+    due until the release after this one. (`InTest.Cli` never participates in package validation —
+    the SDK hard-disables it for tool packages.)
 
 ## Testing against a local build
 
-`InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org, but only for that
-exact tagged commit, and none of `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` or
-`InTest.Runtime.NUnit` is published at all yet. Trying the documented adoption path
+All five packages — `InTest.Cli`, `InTest.Runtime`, `InTest.Runtime.MSTest`,
+`InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` — are published to nuget.org, but only for their
+exact tagged commit (`0.1.0-preview.2`, `b7fab09`). Trying the documented adoption path
 (`docs/getting-started.md` Phase 8 — `dotnet tool restore`, `generate --check`, `upgrade`) against
 anything you changed locally — which, while contributing, is the common case — still means
 packing all five packages yourself and restoring a scaffolded project against them. **Use
