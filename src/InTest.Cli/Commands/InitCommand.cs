@@ -534,9 +534,10 @@ public static class InitCommand
                    <PackageReference Include="xunit.v3" Version="4.0.0" />
                    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
-                   <!-- The xUnit adapter ProjectReferences the neutral InTest.Runtime package and
-                        brings it in transitively, so only this one reference is scaffolded — both
-                        packages declare types in namespace InTest.Runtime, so nothing downstream (the
+                   <!-- The xUnit adapter depends on the neutral InTest.Runtime package (an ordinary
+                        NuGet package dependency, at the adapter's own version) and brings it in
+                        transitively, so only this one reference is scaffolded — both packages
+                        declare types in namespace InTest.Runtime, so nothing downstream (the
                         template, testBaseClass) needs to know two packages are involved. -->
                    <PackageReference Include="InTest.Runtime.xUnit" Version="{CliVersion.Current}" />
               """,
@@ -545,9 +546,10 @@ public static class InitCommand
                    <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
                    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
-                   <!-- The NUnit adapter ProjectReferences the neutral InTest.Runtime package and
-                        brings it in transitively, so only this one reference is scaffolded — both
-                        packages declare types in namespace InTest.Runtime, so nothing downstream (the
+                   <!-- The NUnit adapter depends on the neutral InTest.Runtime package (an ordinary
+                        NuGet package dependency, at the adapter's own version) and brings it in
+                        transitively, so only this one reference is scaffolded — both packages
+                        declare types in namespace InTest.Runtime, so nothing downstream (the
                         template, testBaseClass) needs to know two packages are involved. NUnit and
                         NUnit3TestAdapter version independently (4.x and 6.x) — unlike the MSTest trio
                         above, they are not expected to move in lockstep. -->
@@ -559,9 +561,10 @@ public static class InitCommand
                    <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
                    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
-                   <!-- The MSTest adapter ProjectReferences the neutral InTest.Runtime package and
-                        brings it in transitively, so only this one reference is scaffolded — both
-                        packages declare types in namespace InTest.Runtime, so nothing downstream (the
+                   <!-- The MSTest adapter depends on the neutral InTest.Runtime package (an ordinary
+                        NuGet package dependency, at the adapter's own version) and brings it in
+                        transitively, so only this one reference is scaffolded — both packages
+                        declare types in namespace InTest.Runtime, so nothing downstream (the
                         template, testBaseClass) needs to know two packages are involved. -->
                    <PackageReference Include="InTest.Runtime.MSTest" Version="{CliVersion.Current}" />
               """,
