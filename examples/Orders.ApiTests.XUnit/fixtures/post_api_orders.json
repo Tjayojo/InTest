@@ -1,0 +1,21 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "post_api_orders",
+    "generatedBy": "intest 0.1.0"
+  },
+  "body": {
+    "reference": "ORD-0099",
+    "customerId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    "currencyCode": "GBP",
+    "requestedDeliveryDate": "2026-05-01",
+    "notes": "Created by the generated integration suite",
+    "lines": [
+      {
+        "sku": "WGT-0001",
+        "quantity": 2,
+        "unitPrice": 19.99
+      }
+    ]
+  }
+}
