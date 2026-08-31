@@ -8,6 +8,13 @@
 
 **Tech Stack:** .NET 10 · xunit.v3 4.0.0 (`xunit.v3.extensibility.core` + `xunit.v3.assert` for the library; `xunit.v3` for generated projects) · MSTest 4.3.3 (unchanged) · Scriban 7.2.6 · Shouldly 4.3.0
 
+**Revision 2.** Nine agents built or probed every remaining task against the real repository, and a
+second adversarial pass tried to refute what they found. **26 defects were confirmed; 3 were
+refuted and are not acted on.** The plan as first written did not survive contact: Task 2's adapter
+did not compile, Task 4 broke an existing test, Task 6 produced generated code that would not build,
+and Task 9 left a release failing *after* an irreversible `nuget push`. Every fix below is what was
+measured, not what was reasoned.
+
 **Source spec:** `docs/superpowers/specs/2026-08-30-intest-xunit-framework-pack.md` (revision 4). Named decisions in `[slug]` form below are defined there. **Read §2's decisions before starting** — several prescribe a specific API whose obvious alternative does not compile.
 
 **Branch:** `xunit-framework-pack`, worktree `D:/TestGen-xunit`, cut from `main` at `038c06b`. Nothing from PR #8.
@@ -44,6 +51,7 @@ Measured: `src/InTest.Cli/Commands/InitCommand.cs` sets no `OutputType` and no `
 | `src/InTest.Runtime.xUnit/InTest.Runtime.xUnit.csproj` | The fourth shipped package |
 | `src/InTest.Runtime.xUnit/ApiTestBase.cs` | `IAsyncLifetime` lifecycle → `BeginTest`/`EndTest`; skip → `Assert.Skip` |
 | `src/InTest.Runtime.xUnit/TestHost.cs` | Facade over `InTestRun`, plus `XunitDiagnostics : IRunDiagnostics` |
+| `src/InTest.Runtime.xUnit/README.md` | Packed into the nupkg — the csproj mirrors `<PackageReadmeFile>`, so packing fails without it |
 | `src/InTest.Cli/Rendering/Templates/xunit-class.scriban` | The second template |
 | `tests/InTest.Runtime.XUnit.Tests/` | Fifth suite — the xUnit adapter's own tests, xUnit-based by necessity |
 | `tests/InTest.Golden.Tests/Expected/OrdersTests.xunit.g.cs.txt` | Second golden expectation file |
@@ -271,7 +279,7 @@ Twelve call sites pass one. Every existing case stays on mstest — no behaviour
 ### Task 2: The `InTest.Runtime.xUnit` adapter package
 
 **Files:**
-- Create: `src/InTest.Runtime.xUnit/InTest.Runtime.xUnit.csproj`, `TestHost.cs`, `ApiTestBase.cs`
+- Create: `src/InTest.Runtime.xUnit/InTest.Runtime.xUnit.csproj`, `TestHost.cs`, `ApiTestBase.cs`, `README.md`
 - Modify: `Directory.Packages.props`, `InTest.sln`
 
 - [ ] **Step 1: Add the package versions**
@@ -309,6 +317,11 @@ All three are Apache-2.0, listed, no deprecation notice, no vulnerability adviso
 </ItemGroup>
 ```
 
+**Also create `src/InTest.Runtime.xUnit/README.md`**, mirroring `src/InTest.Runtime.MSTest/README.md`
+with xUnit wording. The csproj carries `<PackageReadmeFile>README.md</PackageReadmeFile>` from the
+mirror; without the file, `dotnet pack` fails outright — and Task 9 is where that would otherwise
+surface, four tasks later.
+
 Add the project to `InTest.sln`.
 
 - [ ] **Step 3: Write the failing test**
@@ -323,9 +336,20 @@ Expected: **fails** — no source files yet.
 
 - [ ] **Step 4: Write `TestHost.cs`**
 
+**`using Xunit;` is required and its absence is not obvious.** `MSTest.TestFramework` ships
+`buildTransitive/net9.0/MSTest.TestFramework.targets` containing
+`<Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />`, which — combined with
+`ImplicitUsings` being on repo-wide — is why `InTest.Runtime.MSTest`'s files compile with no MSTest
+using directive at all. **The xunit.v3 library packages ship no props or targets whatsoever**, so
+nothing is injected. Measured: without it, `error CS0246: The type or namespace name
+'IAsyncLifetime' could not be found`, then three `CS0103: The name 'TestContext' does not exist`.
+Copying the MSTest adapter's file shape without this is the single reason rev 1 of this plan did not
+compile.
+
 ```csharp
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace InTest.Runtime;
 
@@ -377,7 +401,10 @@ public static class TestHost
     /// remain in <c>InTestRun.ResolveProfile</c>'s precedence chain.
     /// </summary>
     public static Task InitializeAsync(CancellationToken cancellationToken = default) =>
-        InTestRun.InitializeAsync(profile: null, new XunitDiagnostics(), cancellationToken);
+        // profileFromRunSettings, not profile — that is the neutral method's actual parameter name
+        // (InTestRun.cs:114). The named form is kept because it documents
+        // [profile-loses-its-first-source]; the wrong name is CS1739.
+        InTestRun.InitializeAsync(profileFromRunSettings: null, new XunitDiagnostics(), cancellationToken);
 
     public static Task CleanupAsync() => InTestRun.CleanupAsync(new XunitDiagnostics());
 
@@ -433,6 +460,8 @@ public static class TestHost
 - [ ] **Step 5: Write `ApiTestBase.cs`**
 
 ```csharp
+using Xunit;
+
 namespace InTest.Runtime;
 
 /// <summary>
@@ -604,10 +633,16 @@ Use whatever assertion library the project references — if Shouldly is not ref
 
 ```bash
 dotnet build tests/InTest.Runtime.XUnit.Tests
-./tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.exe
+dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll
 ```
 
-Expected after Task 2's code is in place: **passing**. Note the direct-exe invocation — `dotnet test` will not work here either, for the same reason it does not work for generated xUnit projects.
+Expected after Task 2's code is in place: **passing**. Note this is not `dotnet test` — that will not
+work here, for the same reason it does not work for generated xUnit projects.
+
+**`dotnet <dll>`, not the apphost.** Step 5 puts this in CI's `fast` job, which is matrixed
+`ubuntu-latest` / `windows-latest`, where no `.exe` is produced. This is the identical defect already
+fixed in Task 1's `GeneratedSuiteCommand` (commit `a2b96cd`) — use the same form here rather than
+rediscovering it on a red Linux leg.
 
 - [ ] **Step 4: Prove it discriminates**
 
@@ -641,6 +676,16 @@ with both frameworks present, so CLAUDE.md's all-four-suites command is correcte
 - Modify: `src/InTest.Cli/Configuration/ConfigLoader.cs`
 - Modify: `src/InTest.Cli/Commands/GenerateCommand.cs`
 - Test: `tests/InTest.Cli.Tests/ConfigLoaderTests.cs`, `tests/InTest.Cli.Tests/GenerateCommandTests.cs`
+
+- [ ] **Step 0: Repoint the existing test that uses `"xunit"` as its counter-example**
+
+`ConfigLoaderTests.ExplainsAnUnsupportedFrameworkAsNotYetSupportedRatherThanInvalid` currently uses
+`"xunit"` as its *unsupported-framework exemplar*. Accepting `"xunit"` makes that test fail, and
+rev 1 of this plan never mentioned it — so Step 5's "Expected: PASS" was wrong before a line was
+written.
+
+Repoint it to `"nunit"`, the remaining roadmapped-but-unshipped framework, and update its doc comment
+to say why the exemplar moved. Verified: with `"nunit"` the test passes unchanged in substance.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -685,11 +730,15 @@ public async Task RefusesWhenTheConfiguredFrameworkDisagreesWithTheAdapterRefere
     ScaffoldMsTestProject(_root);
     SetConfiguredFramework(_root, "xunit");
 
-    var exit = await GenerateCommand.RunAsync(_root);
+    // GenerateCommand.RunAsync takes a required CancellationToken — the file's own helper at
+    // GenerateCommandTests.cs:62 is the idiom.
+    var exit = await GenerateCommand.RunAsync(_root, CancellationToken.None);
 
     exit.ShouldBe(2);
-    // Generated/ must be untouched — a refusal writes nothing.
-    Directory.GetFiles(Path.Combine(_root, "Generated")).ShouldBeEmpty();
+    // Directory.Exists, not GetFiles: a refusal means Generated/ is never created at all, so
+    // GetFiles throws DirectoryNotFoundException on the very path it is asserting about. This is
+    // the idiom every other exit-2 refusal in this file already uses (GenerateCommandTests.cs:100).
+    Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
 }
 ```
 
@@ -718,7 +767,12 @@ if (!SupportedFrameworks.Contains(framework, StringComparer.Ordinal))
 }
 ```
 
-Update `FrameworkRule`'s text to name both values.
+**Update `FrameworkRule`'s text to name both values — and keep the word "yet".** A surviving test
+asserts on it, so dropping it turns a passing test red for a reason unrelated to this change. For
+example:
+
+> It must be the test framework generated tests target. Supported today: `"mstest"` and `"xunit"`.
+> InTest is designed to support three frameworks (§3); NUnit is not supported **yet**.
 
 - [ ] **Step 4: Add the frozen-axis detection**
 
@@ -869,6 +923,14 @@ public sealed class InTestAssemblyFixture : IAsyncLifetime
 }
 ```
 
+**The fixture must also carry the DI registration hook.** The MSTest scaffold's `TestStartup.cs`
+sets `TestHost.ConfigureServices = Register;` and defines a `Register` method — that is the
+scaffolded place an adopter registers `ITestTokenProvider` and their own services. Rev 1's xUnit
+fixture dropped both, leaving an xUnit-scaffolded project with nowhere to do it. Give the fixture
+the same two usings and the same `Register` method, comments included, and set
+`TestHost.ConfigureServices = Register;` as the **first statement** of `InitializeAsync`, before
+awaiting `TestHost.InitializeAsync()`.
+
 Keep the `InTestGuardParallelizeProperties` MSBuild target for MSTest only — it names MSTest properties.
 
 - [ ] **Step 5: Run to verify they pass, and that MSTest is unchanged**
@@ -911,7 +973,10 @@ attribute."
 [TestMethod]
 public void RendersTheXunitShapeWhenTheFrameworkIsXunit()
 {
-    var rendered = new TemplateRenderer(framework: "xunit").RenderClass(Plan());
+    // RenderClass takes namespace and base class too — the neighbouring Render(TestClassPlan)
+    // helper at TemplateRendererTests.cs:131 shows the shape.
+    var rendered = new TemplateRenderer(framework: "xunit")
+        .RenderClass(Plan(), "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
 
     rendered.ShouldContain("using Xunit;");
     rendered.ShouldContain("[Fact]");
@@ -939,6 +1004,23 @@ Copy `src/InTest.Cli/Rendering/Templates/mstest-class.scriban` to `xunit-class.s
 | `[TestMethod, TestCategory("{{ tc.category }}")]` | `[Fact]`<br>`[Trait("Category", "{{ tc.category }}")]` |
 | `[Description("{{ tc.display_name_literal }}")]` | **decide per `[display-name-is-not-metadata]`** — see below |
 | `TestContext.CancellationToken` (5 sites: lines 93, 96, 107, 113, 116) | `TestContext.Current.CancellationToken` |
+| `{{~ if tc.mutates ~}}` / `[DoNotParallelize]` / `{{~ end ~}}` (lines 19-21) | **the `[Fact]` line becomes `[Fact(DisableParallelization = true)]` when `tc.mutates`** — see below |
+
+**The `[DoNotParallelize]` row is the one rev 1 missed, and it produces code that does not compile.**
+The template emits it per-method, conditionally on `tc.mutates`. It is absent from
+`Expected/OrdersTests.g.cs.txt` because no Orders case sets `mutates` — so the golden file cannot
+catch it either. xUnit v3 has no per-method non-parallel attribute; the equivalent is a property on
+`[Fact]` itself:
+
+```
+{{~ if tc.mutates ~}}
+    [Fact(DisableParallelization = true)]
+{{~ else ~}}
+    [Fact]
+{{~ end ~}}
+```
+
+Task 7 must add a `mutates` case to the xUnit golden coverage, or this stays unverified.
 
 **On the `[Description]` row — this is the open decision the design flags, and it must be made here, not deferred.** In MSTest `[Description]` is orthogonal metadata; in xUnit `[Fact(DisplayName = "…")]` *is* the display name, and `ApiTestCore.BeginTest` feeds that string to `InTestId.ForTest`, which slugs it into a `TestId` that travels in an HTTP header. Using `DisplayName` therefore makes the same operation's correlation id differ between frameworks.
 
@@ -1025,7 +1107,18 @@ dotnet test tests/InTest.Cli.Tests --filter "FullyQualifiedName~TemplateEscaping
 
 Expected: **FAIL**, naming `expected_status`. Revert and confirm green. **If it passes with the mutation in place, the guard is not reading the new file** — stop and fix that before continuing.
 
-- [ ] **Step 3: Add the second golden expectation file**
+- [ ] **Step 3: Add the second golden expectation file — and a `mutates` case with it**
+
+**The Orders spec has no `mutates` case, so the golden file cannot catch the `[DoNotParallelize]`
+substitution Task 6 adds.** That attribute is emitted per-method and conditionally; with no case
+setting `mutates`, `Expected/OrdersTests.g.cs.txt` contains zero occurrences and neither will its
+xUnit counterpart. The substitution would be unverified by exactly the artifact meant to verify it.
+
+Add a `mutates` case to the xUnit golden coverage — either by extending the fixture spec used here or
+by adding a dedicated `CompileVerificationTests` shape in Task 8 — so that
+`[Fact(DisableParallelization = true)]` appears in checked-in output at least once.
+
+
 
 `GoldenFileTests` (3 tests: `OutputMatchesTheGoldenFile`, `GenerationIsDeterministic`, `EveryCaseIsCategorizedContract`) pins the template's byte-for-byte output. Extend it to cover the xUnit template against a new `Expected/OrdersTests.xunit.g.cs.txt`, generated through the same `INTEST_UPDATE_GOLDEN=1` path.
 
@@ -1066,6 +1159,20 @@ Per `[matrix-stays-representative]`, run under xUnit only the shapes whose rende
 **Files:**
 - Modify: `tests/InTest.Golden.Tests/CompileVerificationTests.cs`, `GeneratedSuiteExecutionTests.cs`, `ScaffoldCompileVerificationTests.cs`
 
+- [ ] **Step 0: Parameterise `CompileVerificationTests.CreateProject` on three things, not one**
+
+Rev 1 implied only the `.csproj` varies. Measured, an xUnit variant needs three:
+
+- the `.csproj` string (packages, `<OutputType>Exe</OutputType>`),
+- **the `AssemblyInfo.cs` string** — `[assembly: DoNotParallelize]` versus
+  `[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]`,
+- **`intest.json`'s `"framework"` value**, which requires Task 4's `ConfigLoader` change to already
+  be in place.
+
+So the signature becomes `CreateProject(string specFileName, string framework = "mstest")`, and the
+`AssemblyInfo.cs` one is the parameterisation rev 1 missed entirely — without it the xUnit project
+carries an MSTest assembly attribute and does not compile.
+
 - [ ] **Step 1: Add the xUnit cases**
 
 Five, each with a stated reason:
@@ -1076,7 +1183,25 @@ Five, each with a stated reason:
 | **A client-routed case** | a distinct body (`ApiClient<T>()`, two `catch … when` filters, `ShouldMatchCapturedContractAsync`) carrying 2 of the 5 token sites — the sites that are the entire justification for `[v3-only]` |
 | An auth case using the skip path | `Assert.Skip` versus `Assert.Inconclusive`, and the trx outcome |
 | **`ValidationReportWithAProblemSurfacesOnAPassingRun`** | the only test proving the `Warn` contract, which is exactly what `[warn-needs-a-real-sink]` shows the obvious mapping breaks |
-| **Hostile spec text** | under xUnit it becomes the trx `testName` attribute and the runner's console line — both parsed by the harness itself |
+| **Hostile spec text** | **the stated reason was wrong** — see below |
+
+**Two corrections to how an xUnit run is asserted on.**
+
+**(1) There is exactly ONE `test.Output.ShouldContain("Passed!")` assertion in the repository** (11
+`test.Output.Should*` assertions in total). Any larger number you may have been told is wrong. The
+xUnit runner prints no `Passed!` string at all — its summary is `=== TEST EXECUTION SUMMARY ===`
+followed by `Total: N, Errors: 0, Failed: 0, …`. **The per-framework equivalent is not a per-test
+string:** assert on `Failed: 0` plus the process exit code, which is 0 on success and 1 on failure
+for both runners.
+
+**(2) On the hostile-spec-text case.** Rev 1 justified it by saying the text reaches the trx `testName`
+attribute and the runner's console line. **That is false under this plan's own recommended Task 6
+mapping** — `[Trait("Description", …)]` keeps the description out of the display name entirely, so
+hostile text never reaches either. Keep the case, but on its real merit: it proves
+`CSharpLiteral.Escape`'s output is valid C# inside the *second* template's literal sites. That is a
+compile-only concern, so it belongs in `CompileVerificationTests` rather than in the
+run-against-a-stub set. **If Task 6 instead chooses `[Fact(DisplayName = …)]`, rev 1's justification
+becomes true and the case moves back** — the two decisions are coupled.
 
 - [ ] **Step 2: Add the xUnit scaffold-compile case**
 
@@ -1112,7 +1237,19 @@ harness parses), and the scaffold compile."
 - Modify: `scripts/ci/pack-and-verify.ps1`, `.github/workflows/release.yml`, `.github/workflows/pack.yml`
 - Modify: `tests/InTest.Architecture.Tests/NeutralityTests.cs`, `PackageVersionCouplingTests.cs`
 
-- [ ] **Step 1: Extend the packaging scripts**
+- [ ] **Step 1: Extend the packaging scripts — including the asset-count check that fails AFTER publishing**
+
+**`release.yml` hardcodes an exact release-asset count of 6, and that check runs *after*
+`dotnet nuget push`.** With a fourth package it becomes 8. Left unchanged, the push succeeds — putting
+artifacts on nuget.org permanently, since a version can never be re-pushed — and *then* the job fails
+on the count. This is the only irreversible failure mode in the whole plan, and rev 1 did not mention
+it.
+
+Change `-ne 6` to `-ne 8` (around line 378) and update the error string to name
+`InTest.Runtime.xUnit`. **Prefer deriving the count from a package-id list** so a fifth package cannot
+repeat this. `CONTRIBUTING.md` carries the same number in prose (Task 10) — the two must agree.
+
+
 
 `pack-and-verify.ps1` packs three projects by explicit path (`:136-138`) and hardcodes an `MSTest.TestFramework` positive control (`:386-391`). `release.yml:206` and `pack.yml` name the three packages explicitly.
 
@@ -1122,11 +1259,30 @@ Add the fourth to each. The positive control for the xUnit adapter is that its p
 
 `AdapterPackageDeclaresItsTestFramework` (`:229-260`) hardcodes the `InTest.Runtime.MSTest` csproj path. **It will pass vacuously for the new package** — it simply never looks at it. Parameterise it over both adapters.
 
-- [ ] **Step 3: Prove both guards fail when they should**
+- [ ] **Step 3: Prove both guards fail when they should — from a clean output directory**
+
+**`pack-and-verify.ps1` never cleans `$OutputDir`, so a stale `.nupkg` from an earlier run satisfies
+the check even with the pack step deleted.** The mutation would pass spuriously and certify a guard
+that does not guard. Use a **fresh, empty `-OutputDir`** for the mutation run, or add a
+`Remove-Item -Recurse $OutputDir/*.nupkg` at the top of the script. The failure text to report is
+`No .nupkg in <dir> has a nuspec <id> of 'InTest.Runtime.xUnit'`.
+
+
 
 Temporarily remove `InTest.Runtime.xUnit` from `pack-and-verify.ps1`'s project list and confirm its verification step fails. Temporarily remove the `xunit.v3.extensibility.core` reference from the adapter csproj and confirm `NeutralityTests` fails. Restore both, and report the failure text for each.
 
 - [ ] **Step 4: Extend `PackageVersionCouplingTests`**
+
+**This guard goes red at Task 5 and stays red until here — and Task 5's own verification would not
+catch it**, because Task 5 runs only `tests/InTest.Cli.Tests`. Either move the
+`RuntimeSelfVersionedPackage` change forward into Task 5, or add
+`dotnet test tests/InTest.Architecture.Tests` to Task 5 Step 5 with an explicit note that it is
+expected red until this task closes it. Say plainly which you chose.
+
+Note also that `RuntimeSelfVersionedPackage` is a **scalar const, not a set** — it must become a
+collection to name both adapters, which is a change of shape rather than a change of value.
+
+
 
 Third-party versions are duplicated by design across `Directory.Packages.props`, the scaffolded `.csproj` string in `InitCommand.cs`, and the hand-written project in `CompileVerificationTests.cs`. xUnit's packages join that three-way rule. The `InTest.Runtime.xUnit` reference itself is checked the *other* way, like the MSTest adapter — no `Directory.Packages.props` entry, so the guard confirms the scaffold interpolates `CliVersion.Current` rather than a literal.
 
@@ -1151,19 +1307,55 @@ would have passed vacuously for the new one."
 ### Task 10: Documentation and the release gate
 
 **Files:**
-- Modify: `docs/getting-started.md`, `docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md` (§5), `CONTRIBUTING.md`
+- Modify: `README.md`, `CLAUDE.md`, `docs/getting-started.md`,
+  `docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md` (§5), `CONTRIBUTING.md`
 
-- [ ] **Step 1: Document the adoption path**
+**`README.md` and `CLAUDE.md` were owned by no task in rev 1.** `README.md:81`'s Test framework row is
+the most visible statement that InTest is MSTest-only, and after this change it tells every visitor
+the opposite of the truth. `CLAUDE.md` carries both "Three shipped packages" and the "MSTest only"
+non-negotiable. Neither is under `docs/`, so rev 1's `git add docs CONTRIBUTING.md` could not even
+stage them.
+
+- [ ] **Step 1: Document the adoption path — nine sites, not two**
+
+Rev 1 named only the profile mechanism and the `TestTimeout` gap. `docs/getting-started.md` assumes
+MSTest in at least nine places, three of which become **actively wrong** rather than merely
+incomplete. Enumerate them by line so none is missed: `:49` prerequisites row, `:153-158` the Phase 2
+file table (three rows differ), `:200-206` profile precedence, `:443` the `TestHost` package name,
+`:651` Phase 6's run command (a direct `dotnet <dll>`, not `dotnet test`).
+
+
 
 `docs/getting-started.md` gains the xUnit path: `init --framework xunit`, what differs in the scaffold, and — explicitly — that **`INTEST_PROFILE` is the profile mechanism for xUnit projects**, because there is no runsettings equivalent. Be accurate about the size of that gap: the MSTest scaffold's `<Parameter name="profile">` line is **commented out by design**, so `INTEST_PROFILE` is already the primary mechanism there too. xUnit loses an opt-in, not a default.
 
 Also note that `<MSTest><TestTimeout>60000</TestTimeout></MSTest>` has no xUnit equivalent — `[Fact(Timeout = …)]` is per-test, not a global default.
 
-- [ ] **Step 2: Update §5's command table**
+- [ ] **Step 2: Update §5 — the table *and* the prose around it**
+
+The command-surface table gains `--framework` on `init`, and its **Writes** column must lose
+`*.runsettings` for xUnit projects.
+
+**But the frozen-axes prose 40 lines above it, inside the same §5, becomes factually false the moment
+`xunit` is accepted** (lines ~450 and ~464-467). It says the framework message is unreachable because
+one framework ships. `[frozen-axis-becomes-reachable]` changes that: say the message is now reachable
+and name `generate`'s refusal as its enforcement. §2's "Deferred to v2" line for a second framework
+also needs revisiting.
+
+
 
 The 2026-08-16 spec's §5 command-surface table is the semver contract for the CLI. Add `--framework` to `init`'s flags, and correct its **Writes** column — it lists `*.runsettings`, which an xUnit project does not get.
 
-- [ ] **Step 3: Add the release-checklist line**
+- [ ] **Step 3: Update every hardcoded package count in `CONTRIBUTING.md` — there are five**
+
+There is no single "package list" step to edit. Rev 1's wording would have left four sites still
+saying "three packages". Name all five and give the new numbers: step 9's "three packages, six files"
+becomes four packages / eight files; line ~513's "three-package, six-artifact shape" becomes
+four/eight; step 11 gains `InTest.Runtime.xUnit`; and the remaining two counts follow.
+
+**The eight-file number must match `release.yml`'s asset-count check from Task 9 Step 1.** They are
+the same fact in two places, and this is where they are reconciled.
+
+
 
 `CONTRIBUTING.md`'s publishing checklist gains `InTest.Runtime.xUnit` to the package list, and a note that the `InTest.` prefix is still unreserved on nuget.org, so the new id can be squatted before first push.
 
@@ -1183,7 +1375,7 @@ dotnet test tests/InTest.Golden.Tests
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs CONTRIBUTING.md
+git add README.md CLAUDE.md docs CONTRIBUTING.md
 git commit -m "docs: xUnit adoption path, command surface, release gate
 
 §5's command table is the CLI's semver contract, so --framework lands there in the same
