@@ -19,6 +19,10 @@ referencing its respective published adapter package (`InTest.Runtime.MSTest`,
 transitively at the identical version, which is the §3 compatibility contract holding against real
 published packages rather than a local build (verified with `dotnet list package
 --include-transitive`, not assumed).
+One thing that publish measured and is worth knowing before you conclude a release is broken:
+the packages were live on nuget.org's flat-container API roughly **four minutes** before
+`dotnet tool install` could resolve them, failing with "not found in NuGet feeds" in between.
+That is registration-index lag behind the content endpoint, not a failed push.
 
 **Canonical statement, referenced rather than repeated elsewhere in this file and in README.md /
 docs/getting-started.md:** `examples/` and `InTest.Golden.Tests` are not redundant with each other.
@@ -34,11 +38,6 @@ every example pins a published version — that stays Golden's job. See
 `docs/superpowers/plans/2026-08-31-intest-cross-framework-examples.md`'s "Why this is not
 redundant with the Golden suite" section for the full reasoning, and
 `scripts/ci/examples.ps1`'s own header for the CI job's mechanics.
-One thing that publish measured and is worth knowing before you conclude a release is broken:
-the packages were live on nuget.org's flat-container API roughly **four minutes** before
-`dotnet tool install` could resolve them, failing with "not found in NuGet feeds" in between.
-That is registration-index lag behind the content endpoint, not a failed push.
-
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
 snapshot (§9), which `generate --check` and `fixtures repair` then read instead of the network.
