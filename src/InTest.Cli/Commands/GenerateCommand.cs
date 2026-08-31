@@ -402,15 +402,17 @@ public static class GenerateCommand
 
         var mstestMatch = MsTestAdapterReferencePattern.IsMatch(csprojText);
         var xunitMatch = XunitAdapterReferencePattern.IsMatch(csprojText);
+        var nunitMatch = NunitAdapterReferencePattern.IsMatch(csprojText);
 
-        // Neither pattern matched (a reformatted or hand-edited .csproj this narrow pattern no
-        // longer recognises — see the doc comment above), or both matched (never produced by
-        // `init`, and guessing which one is "the" adapter reference is worse than silence): say
-        // nothing either way.
-        string? adapterFramework = (mstestMatch, xunitMatch) switch
+        // Exactly one pattern matched (a reformatted or hand-edited .csproj this narrow pattern no
+        // longer recognises — see the doc comment above), or more than one matched (never
+        // produced by `init`, and guessing which one is "the" adapter reference is worse than
+        // silence): say nothing either way.
+        string? adapterFramework = (mstestMatch, xunitMatch, nunitMatch) switch
         {
-            (true, false) => "mstest",
-            (false, true) => "xunit",
+            (true, false, false) => "mstest",
+            (false, true, false) => "xunit",
+            (false, false, true) => "nunit",
             _ => null,
         };
 
@@ -420,7 +422,20 @@ public static class GenerateCommand
         }
 
         var fileName = Path.GetFileName(csprojFiles[0]);
-        var adapterPackageId = adapterFramework == "mstest" ? "InTest.Runtime.MSTest" : "InTest.Runtime.xUnit";
+        var adapterPackageId = adapterFramework switch
+        {
+            "mstest" => "InTest.Runtime.MSTest",
+            "xunit" => "InTest.Runtime.xUnit",
+            "nunit" => "InTest.Runtime.NUnit",
+            // Unreachable: adapterFramework is one of exactly the three strings the switch above
+            // can produce, and the null case already returned above — same defensive-default
+            // discipline as ResolveClientKind, guarding against a regression in that switch above
+            // rather than describing a real adopter input.
+            _ => throw new InvalidOperationException(
+                $"adapterFramework \"{adapterFramework}\" reached DetectFrameworkMismatch's " +
+                "adapterPackageId switch unhandled — the switch above should only ever produce " +
+                "\"mstest\", \"xunit\" or \"nunit\"."),
+        };
         return
             $"{fileName} references {adapterPackageId}, but intest.json declares " +
             $"project.framework \"{configuredFramework}\". The test framework is a frozen axis " +
@@ -444,6 +459,10 @@ public static class GenerateCommand
     /// <summary>The xUnit adapter's counterpart to <see cref="MsTestAdapterReferencePattern"/>.</summary>
     private static readonly Regex XunitAdapterReferencePattern =
         new(@"<PackageReference\s+Include=""InTest\.Runtime\.xUnit""", RegexOptions.Compiled);
+
+    /// <summary>The NUnit adapter's counterpart to <see cref="MsTestAdapterReferencePattern"/>.</summary>
+    private static readonly Regex NunitAdapterReferencePattern =
+        new(@"<PackageReference\s+Include=""InTest\.Runtime\.NUnit""", RegexOptions.Compiled);
 
     /// <summary>
     /// Either the loaded spec, or the exit code a caller should return because this step already

@@ -431,9 +431,9 @@ public class ConfigLoaderTests
     // Task 9: `project.framework` was always written by `intest init` but never read — decorative
     // JSON. These pin the point where it stops being decorative: required (see
     // ConfigLoader.RequireSupportedFramework's own doc comment for why, unlike intestVersion, it
-    // does not get to be optional), and refused with a "not supported yet" message — naming the
-    // roadmap (§3), not just rejecting the value — for anything other than the one framework this
-    // build actually ships.
+    // does not get to be optional), and refused with a "not supported yet" message — naming what
+    // is actually supported (§3), not just rejecting the value — for anything other than the
+    // three frameworks this build ships: mstest, xunit and nunit.
 
     [TestMethod]
     public void ExplainsAMissingFramework()
@@ -482,17 +482,25 @@ public class ConfigLoaderTests
     }
 
     /// <summary>
-    /// The message a team hand-editing intest.json toward a real, roadmapped framework should
-    /// see: it names what they wrote, names what is actually supported, and reads as "not
-    /// supported yet" rather than "invalid" — §3 designs InTest for three frameworks and ships
-    /// two (mstest and xunit) so far, and this is the one place that fact has to reach the
-    /// adopter directly.
+    /// The message for an unsupported <c>project.framework</c> value: it names what the adopter
+    /// wrote, names what is actually supported, and reads as "not supported yet" rather than
+    /// "invalid" — <see cref="ConfigLoader.RequireSupportedFramework"/> emits that phrasing for
+    /// any value outside <see cref="ConfigLoader.SupportedFrameworks"/>, not only for a value §3
+    /// happens to have roadmapped, so this test's exemplar does not need to be a real framework
+    /// name for the assertion to hold.
     /// <para>
-    /// The exemplar is "nunit", not "xunit" — this test used "xunit" as its unsupported-framework
-    /// counter-example until intest actually started accepting it (Task 4 of the xUnit framework
-    /// pack plan), at which point "xunit" stopped being an unsupported value and this test would
-    /// have gone red for a reason that has nothing to do with what it is pinning. "nunit" is the
-    /// one remaining framework §3 designs for but does not yet ship, so it is the exemplar now.
+    /// <b>This is the exemplar's second move, and it is deliberately not a third real-framework
+    /// name.</b> It used "xunit" until the xUnit pack shipped that value (moved to "nunit" then),
+    /// and it used "nunit" until this pack shipped that one too — both times because the exemplar
+    /// itself stopped being unsupported the moment InTest actually implemented it, which is
+    /// collateral damage, not a real regression, and it would happen a third time if a third real
+    /// framework name were chosen here. §3 designs InTest for exactly three frameworks and all
+    /// three now ship (mstest, xunit, nunit), so there is no fourth one left to borrow. "junit" is
+    /// used instead — the same exemplar <c>InitCommandTests.RefusesAnUnknownFrameworkWithExitTwo</c>
+    /// already uses for the equivalent refusal in <c>InitCommand</c> — precisely because it will
+    /// never become a real value here: InTest targets .NET test frameworks over HTTP, and JUnit is
+    /// a Java framework, not a candidate on any InTest roadmap. Picking a name that can never ship
+    /// is what stops this test from moving a third time.
     /// </para>
     /// </summary>
     [TestMethod]
@@ -502,15 +510,16 @@ public class ConfigLoaderTests
                                { "schemaVersion": 1, "spec": { "source": "orders.json" },
                                  "project": { "rootNamespace": "Orders.ApiTests",
                                               "testBaseClass": "Orders.ApiTests.OrdersTestBase",
-                                              "framework": "nunit" } }
+                                              "framework": "junit" } }
                                """);
 
-        reason.ShouldContain("nunit", Case.Sensitive);
+        reason.ShouldContain("junit", Case.Sensitive);
         reason.ShouldContain("mstest", Case.Sensitive);
         reason.ShouldContain("not", Case.Sensitive);
         reason.ShouldContain("yet", Case.Sensitive,
-        customMessage: "nunit is a real, roadmapped framework (§3) — the message must read as " +
-                       "\"not supported yet\", not as a bare validation failure");
+        customMessage: "RequireSupportedFramework's refusal reads \"not supported yet\" for " +
+                       "every unsupported value, not only a roadmapped one — the message must " +
+                       "keep reading that way rather than as a bare validation failure");
     }
 
     /// <summary>
@@ -570,6 +579,24 @@ public class ConfigLoaderTests
                     """);
 
         ConfigLoader.Load(_root).Framework.ShouldBe("xunit");
+    }
+
+    /// <summary>
+    /// [config-opens-by-one-value]: nunit is the third and, per §3, last framework value
+    /// ConfigLoader accepts — mirroring the InTest.Runtime.NUnit adapter package another task in
+    /// this plan adds.
+    /// </summary>
+    [TestMethod]
+    public void AcceptsNunitAsAFrameworkValue()
+    {
+        WriteConfig("""
+                    { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                      "project": { "rootNamespace": "Orders.ApiTests",
+                                   "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                   "framework": "nunit" } }
+                    """);
+
+        ConfigLoader.Load(_root).Framework.ShouldBe("nunit");
     }
 
     /// <summary>
