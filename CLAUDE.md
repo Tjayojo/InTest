@@ -100,8 +100,9 @@ Running the sample APIs requires specific environment variables (ports, issuer/a
 500s or silent 404s rather than an obvious failure.
 
 Exercising Phase 8 of `docs/getting-started.md` (`dotnet tool restore`, `generate --check`,
-`upgrade`) against the **published** `0.1.0-preview.1` now works from a bare clone with no local
-feed at all. Testing an **unpublished** change still needs a local pack-and-restore — never
+`upgrade`) against the **published** `0.1.0-preview.2` now works from a bare clone with no local
+feed at all, and that version is the first where a generated xUnit or NUnit project can do it too
+(all three adapter packages ship there). Testing an **unpublished** change still needs a local pack-and-restore — never
 improvise this by hand, NuGet's global package cache never invalidates a locally-built version
 number (see CONTRIBUTING.md's "Testing against a local build"). Use:
 
