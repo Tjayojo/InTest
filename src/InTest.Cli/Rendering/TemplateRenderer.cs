@@ -13,10 +13,13 @@ public sealed class TemplateRenderer
     /// [v3-only]'s own cancellation-token accessor, per framework — <c>TestContext.CancellationToken</c>
     /// for MSTest, <c>TestContext.Current.CancellationToken</c> for xUnit v3 (there is no per-test
     /// constructor-injected <c>TestContext</c> under xUnit v3; <c>TestContext.Current</c> is its
-    /// ambient accessor instead). Both templates already spell their own raw-HTTP branch's token
-    /// sites literally, per framework, in the <c>.scriban</c> source itself — this field exists
-    /// only for <see cref="BuildClientCallExpression"/>, whose token argument is not template text
-    /// at all but a string this class computes once and splices into <c>TestCasePlan.ClientCallExpression</c>'s
+    /// ambient accessor instead), and <c>TestContext.CurrentContext.CancellationToken</c> for NUnit
+    /// (verified live via <c>[CancelAfter(200)]</c> cancelling an awaited 30s delay at 249ms — see
+    /// the NUnit framework pack plan's <c>[error-is-the-sink]</c> section neighbours). All three
+    /// templates already spell their own raw-HTTP branch's token sites literally, per framework, in
+    /// the <c>.scriban</c> source itself — this field exists only for
+    /// <see cref="BuildClientCallExpression"/>, whose token argument is not template text at all but
+    /// a string this class computes once and splices into <c>TestCasePlan.ClientCallExpression</c>'s
     /// placeholder-substituted result.
     /// <para>
     /// <b>Task 8's own finding, fixed in the same change:</b> before this field existed,
@@ -40,11 +43,12 @@ public sealed class TemplateRenderer
 
     /// <summary>
     /// [framework-selects-template]: one template per framework, chosen once at construction.
-    /// Two files rather than one file branching internally — the templates are ~121 lines and
-    /// mostly identical, and a third framework would otherwise add a third set of conditionals to
-    /// every block. <see cref="_cancellationTokenExpression"/> is selected alongside
-    /// <see cref="_classTemplate"/>, from the same switch and the same input, so the two can never
-    /// disagree about which framework this instance renders for.
+    /// Separate files rather than one file branching internally — the templates are ~121 lines
+    /// each and mostly identical, and a fourth framework branching every block internally would
+    /// only get harder to read as more frameworks joined MSTest, xUnit, and now NUnit.
+    /// <see cref="_cancellationTokenExpression"/> is selected alongside <see cref="_classTemplate"/>,
+    /// from the same switch and the same input, so the two can never disagree about which
+    /// framework this instance renders for.
     /// </summary>
     public TemplateRenderer(string framework)
     {
@@ -54,8 +58,9 @@ public sealed class TemplateRenderer
         {
             "mstest" => (Template.Parse(LoadEmbedded("mstest-class.scriban")), "TestContext.CancellationToken"),
             "xunit" => (Template.Parse(LoadEmbedded("xunit-class.scriban")), "TestContext.Current.CancellationToken"),
+            "nunit" => (Template.Parse(LoadEmbedded("nunit-class.scriban")), "TestContext.CurrentContext.CancellationToken"),
             _ => throw new ArgumentOutOfRangeException(
-                nameof(framework), framework, "expected \"mstest\" or \"xunit\"."),
+                nameof(framework), framework, "expected \"mstest\", \"xunit\", or \"nunit\"."),
         };
     }
 
