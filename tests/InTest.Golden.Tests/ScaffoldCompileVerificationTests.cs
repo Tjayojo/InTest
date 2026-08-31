@@ -156,4 +156,64 @@ public class ScaffoldCompileVerificationTests
         exitCode.ShouldBe(0,
         $"a fresh xUnit scaffold with no ITestTokenProvider registered must still build:{Environment.NewLine}{output}");
     }
+
+    /// <summary>
+    /// Task 6 of the NUnit framework pack plan's counterpart to
+    /// <see cref="ScaffoldStillBuildsWithNoTokenProviderRegistered"/> and
+    /// <see cref="ScaffoldStillBuildsWithNoTokenProviderRegisteredUnderXunit"/> — the only place in
+    /// the repository that compiles raw <c>InitCommand.Run</c> NUnit scaffold output.
+    /// <para>
+    /// Unlike the xUnit scaffold, this one needs no <c>&lt;OutputType&gt;Exe&lt;/OutputType&gt;</c>
+    /// ([one-package]: NUnit alone compiles an ordinary class library under classic VSTest), so
+    /// this test cannot catch a wrongly-added one the way the xUnit test's own doc comment reasons
+    /// about its parallelism attribute. It also cannot catch a missing
+    /// <c>[assembly: NUnit.Framework.LevelOfParallelism(1)]</c> — a missing attribute compiles just
+    /// as cleanly as a present one; <c>InitCommandTests</c>' own text assertion covers that gap
+    /// instead, the same "an assertion elsewhere, not this build" reasoning as both sibling tests'
+    /// doc comments already note. What this test does catch: the <c>[SetUpFixture]</c> assembly
+    /// setup file (a fifth of the scaffold's files differ by framework, per
+    /// <c>InitCommand.cs</c>'s own <c>[scaffold-per-framework]</c> comment), and the package set
+    /// (<c>NUnit</c> + <c>NUnit3TestAdapter</c> + <c>InTest.Runtime.NUnit</c> instead of the MSTest
+    /// trio or xunit.v3).
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ScaffoldStillBuildsWithNoTokenProviderRegisteredUnderNunit()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "nunit").ShouldBe(0);
+
+        var runtimeProject = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.NUnit", "InTest.Runtime.NUnit.csproj"));
+        var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
+        var csprojText = File.ReadAllText(csprojPath);
+
+        // Same discipline as the MSTest and xUnit scaffolds' own needles above, and the same
+        // reason: a hardcoded "0.1.0" would have matched by coincidence rather than by
+        // construction, and String.Replace with no match found is a silent no-op that resurfaces
+        // several steps downstream as a confusing NU1101 against nuget.org, where
+        // InTest.Runtime.NUnit is not published either.
+        var needle = $"""<PackageReference Include="InTest.Runtime.NUnit" Version="{CliVersion.Current}" />""";
+        csprojText.ShouldContain(needle, Case.Sensitive,
+        "InitCommand's NUnit scaffold no longer writes InTest.Runtime.NUnit's PackageReference in " +
+        "the expected shape (Include=\"InTest.Runtime.NUnit\" Version=\"{CliVersion.Current}\") — " +
+        "update this test's needle alongside whatever changed, or the ProjectReference swap below " +
+        "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
+
+        File.WriteAllText(csprojPath, csprojText.Replace(
+        needle,
+        $"""<ProjectReference Include="{runtimeProject}" />""",
+        StringComparison.Ordinal));
+
+        // Same reason as the MSTest and xUnit scaffolds above: this test never runs `generate`, so
+        // the two files the csproj copies to the output directory must exist for the build to have
+        // anything to copy from.
+        Directory.CreateDirectory(Path.Combine(_root, "Generated"));
+        File.WriteAllText(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}");
+        File.WriteAllText(Path.Combine(_root, "Generated", "spec-paths.json"), "{}");
+
+        var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+
+        exitCode.ShouldBe(0,
+        $"a fresh NUnit scaffold with no ITestTokenProvider registered must still build:{Environment.NewLine}{output}");
+    }
 }
