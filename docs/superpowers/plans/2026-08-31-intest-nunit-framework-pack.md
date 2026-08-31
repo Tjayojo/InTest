@@ -336,28 +336,48 @@ namespace InTest.Runtime.NUnit.Tests;
 [TestFixture]
 public class NUnitDiagnosticsTests
 {
-    [Test]
-    public void WarnWritesToTheErrorSinkWhichSurvivesAPassingRun()
-    {
-        var original = TestContext.Error;
-        var captured = new StringWriter();
-        try
-        {
-            Console.SetError(captured);
-            IRunDiagnostics diagnostics = new TestHost.NUnitDiagnostics();
-            diagnostics.Warn("WARN_MARKER");
-        }
-        finally
-        {
-            Console.SetError(original);
-        }
+    private const string Marker = "WARN_MARKER";
 
-        Assert.That(captured.ToString(), Does.Contain("WARN_MARKER"));
+    // The leaf. Only calls Warn, always passes. It exists solely as a filterable subprocess
+    // target whose passing-run console output is what the real test asserts on.
+    [Test]
+    public void EmitsWarnMarker()
+    {
+        new TestHost.NUnitDiagnostics().Warn(Marker);
+        Assert.Pass();
+    }
+
+    [Test]
+    public async Task WarnWritesToTheErrorSinkWhichSurvivesAPassingRun()
+    {
+        var (exitCode, output) = await RunFilteredSubprocessAsync(nameof(EmitsWarnMarker));
+
+        Assert.That(exitCode, Is.EqualTo(0), $"subprocess run should have passed; output was:
+{output}");
+        Assert.That(output, Does.Contain(Marker));
     }
 }
 ```
 
-**If `TestContext.Error` cannot be redirected this way, the assertion shape is wrong, not the sink.** Establish how to capture it — the probe captured it from the *process* output of a real run, which is the fallback: run the suite as a subprocess and grep its stdout/stderr. Report which you used.
+**Do not write the in-process `Console.SetError` capture rev 1 prescribed here — it does not work, measured.**
+`TestContext.Error` is NUnit's own per-test capture buffer, **not** a wrapper over `Console.Error`, so
+`Console.SetError` around the call sees an empty string while the marker still reaches the real console.
+An implementer who trusts rev 1 will conclude the *sink* is wrong and "fix" `TestHost` — breaking the one
+thing `[error-is-the-sink]` established. The subprocess shape above is the only one that works, and it is
+how the design probe established the finding in the first place.
+
+Two details that are not optional:
+
+- The **leaf test must be separate and always-passing**, and the subprocess `--filter` must select it by
+  name (`FullyQualifiedName~EmitsWarnMarker`). The outer test's name does not contain the leaf's, so the
+  subprocess cannot re-enter itself. One combined test would recurse.
+- `RunFilteredSubprocessAsync` **must set `startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1"`** before
+  `Process.Start`, and must start both `ReadToEndAsync` calls *before* awaiting `WaitForExitAsync`. Redirecting
+  both pipes around `dotnet test` without that env var is the exact shape that cost this repo a measured 40m51s
+  test run — orphaned MSBuild worker nodes inherit the redirected handles and EOF never arrives.
+  `tests/InTest.Golden.Tests/ProcessRunner.cs` carries the canonical explanation; point at it rather than
+  restating it. Do not call `ProcessRunner` itself — different assembly, and its own doc comment argues
+  against sharing it for a single call site.
 
 - [ ] **Step 3: Run it, then prove it discriminates**
 
