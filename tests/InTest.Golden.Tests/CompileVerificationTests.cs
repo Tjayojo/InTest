@@ -28,8 +28,33 @@ public class CompileVerificationTests
     /// — <see cref="_root"/> exists only for <see cref="RemoveProject"/>. A test that never calls
     /// <see cref="CreateProject"/> at all skips past this guard entirely, which is exactly how
     /// this regression happened once already.
+    /// <para>
+    /// Task 8 Step 0: <paramref name="framework"/> parameterizes three things, not one — measured
+    /// against a real xUnit compile attempt, not assumed from the mstest shape. The <c>.csproj</c>
+    /// string (xunit.v3 + <c>&lt;OutputType&gt;Exe&lt;/OutputType&gt;</c> instead of the MSTest
+    /// package trio), <c>AssemblyInfo.cs</c>'s content (<c>[assembly:
+    /// Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]</c> instead of <c>[assembly:
+    /// DoNotParallelize]</c> — the one rev 1 of the plan missed entirely: without it, a scaffolded
+    /// xUnit project still carries an MSTest-only assembly attribute and CS0246s on
+    /// <c>Microsoft.VisualStudio.TestTools.UnitTesting</c>, which this project's <c>.csproj</c>
+    /// never references for that branch), and <c>intest.json</c>'s own <c>"framework"</c> value,
+    /// which <c>ConfigLoader.RequireSupportedFramework</c> reads and <c>TemplateRenderer</c>
+    /// selects a template on. Defaults to <c>"mstest"</c>, last of the parameter list, so every
+    /// pre-existing call site above keeps compiling and keeps building an MSTest project exactly
+    /// as before.
+    /// </para>
+    /// <para>
+    /// Unlike the scaffold InitCommand writes (which references the adapter package by name, at
+    /// <c>CliVersion.Current</c>), both branches here <c>ProjectReference</c> the adapter project
+    /// directly by path — this test built against local source before Task 8 and continues to
+    /// after it; only the <em>shape</em> of the reference differs by framework (an xUnit project
+    /// also needs <c>xunit.v3</c> itself and <c>&lt;OutputType&gt;Exe&lt;/OutputType&gt;</c>,
+    /// neither of which the MSTest branch carries — see <c>InTest.Runtime.xUnit.csproj</c>'s own
+    /// comment for the measured "xUnit.net v3 test projects must be executable" error a library-
+    /// shaped project gets without it).
+    /// </para>
     /// </summary>
-    private string CreateProject(string specFileName)
+    private string CreateProject(string specFileName, string framework = "mstest")
     {
         _root = Path.Combine(Path.GetTempPath(), "intest-compile-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_root);
@@ -39,34 +64,65 @@ public class CompileVerificationTests
         File.WriteAllText(Path.Combine(_root, "intest.json"), $$"""
                                                                 { "schemaVersion": 1, "spec": { "source": "{{specFileName}}" },
                                                                   "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
-                                                                               "framework": "mstest" } }
+                                                                               "framework": "{{framework}}" } }
                                                                 """);
 
-        var runtimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-        "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
+        var isXunit = framework == "xunit";
 
-        File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
-                                                                          <Project Sdk="Microsoft.NET.Sdk">
-                                                                            <PropertyGroup>
-                                                                              <TargetFramework>net10.0</TargetFramework>
-                                                                              <Nullable>enable</Nullable>
-                                                                              <ImplicitUsings>enable</ImplicitUsings>
-                                                                              <IsPackable>false</IsPackable>
-                                                                            </PropertyGroup>
-                                                                            <ItemGroup>
-                                                                              <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
-                                                                              <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
-                                                                              <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-                                                                              <ProjectReference Include="{runtimeProject}" />
-                                                                            </ItemGroup>
-                                                                          </Project>
-                                                                          """);
+        if (isXunit)
+        {
+            var xunitRuntimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "InTest.Runtime.xUnit", "InTest.Runtime.xUnit.csproj"));
 
-        File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
-                                                                  using Microsoft.VisualStudio.TestTools.UnitTesting;
+            File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
+                                                                              <Project Sdk="Microsoft.NET.Sdk">
+                                                                                <PropertyGroup>
+                                                                                  <TargetFramework>net10.0</TargetFramework>
+                                                                                  <Nullable>enable</Nullable>
+                                                                                  <ImplicitUsings>enable</ImplicitUsings>
+                                                                                  <IsPackable>false</IsPackable>
+                                                                                  <OutputType>Exe</OutputType>
+                                                                                </PropertyGroup>
+                                                                                <ItemGroup>
+                                                                                  <PackageReference Include="xunit.v3" Version="4.0.0" />
+                                                                                  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                                                                                  <ProjectReference Include="{xunitRuntimeProject}" />
+                                                                                </ItemGroup>
+                                                                              </Project>
+                                                                              """);
 
-                                                                  [assembly: DoNotParallelize]
-                                                                  """);
+            File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
+                                                                      [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+                                                                      """);
+        }
+        else
+        {
+            var runtimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
+
+            File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
+                                                                              <Project Sdk="Microsoft.NET.Sdk">
+                                                                                <PropertyGroup>
+                                                                                  <TargetFramework>net10.0</TargetFramework>
+                                                                                  <Nullable>enable</Nullable>
+                                                                                  <ImplicitUsings>enable</ImplicitUsings>
+                                                                                  <IsPackable>false</IsPackable>
+                                                                                </PropertyGroup>
+                                                                                <ItemGroup>
+                                                                                  <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
+                                                                                  <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
+                                                                                  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                                                                                  <ProjectReference Include="{runtimeProject}" />
+                                                                                </ItemGroup>
+                                                                              </Project>
+                                                                              """);
+
+            File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
+                                                                      using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+                                                                      [assembly: DoNotParallelize]
+                                                                      """);
+        }
 
         return _root;
     }
@@ -191,6 +247,58 @@ public class CompileVerificationTests
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
 
         exitCode.ShouldBe(0, $"Generated project failed to compile:{Environment.NewLine}{output}");
+    }
+
+    /// <summary>
+    /// Task 8 Step 1's fifth xUnit case, and the one whose own justification rev 1 of the plan got
+    /// wrong — worth stating plainly rather than silently fixing. Rev 1 argued this case matters
+    /// under xUnit because the hostile text reaches the trx <c>testName</c> attribute and the
+    /// runner's console line. <b>That is false under this plan's own chosen Task 6 mapping</b>:
+    /// <c>xunit-class.scriban</c> emits the display name via <c>[Trait("Description", …)]</c>
+    /// (see that template, and <c>ApiTestBase.BeginTest</c>'s <c>TestContext.Current.Test?.TestDisplayName</c>),
+    /// which keeps a case's description out of both the trx <c>testName</c> and the console
+    /// output entirely — hostile spec text on this path never reaches either. Kept anyway, on its
+    /// real merit: it is the only proof that <c>CSharpLiteral.Escape</c>'s output is valid C#
+    /// inside the <i>second</i> template's own literal sites (<c>RequireFixture("…")</c>,
+    /// <c>InTestUrl.Build("…")</c>, <c>FixtureQueryParameters("…", "…")</c>) — a compile-only
+    /// concern, identical in kind to <see cref="GeneratedProjectWithHostileSpecTextCompiles"/>
+    /// above, just proved against xunit-class.scriban's copy of those same call sites rather than
+    /// mstest-class.scriban's. That is also why this lives here, in
+    /// <c>CompileVerificationTests</c>, rather than beside a run-against-a-stub case in
+    /// <c>GeneratedSuiteExecutionTests</c> — nothing about it needs a live request to go anywhere;
+    /// the compiler is the only oracle this test needs. (If a future change moves the display-name
+    /// mapping to <c>[Fact(DisplayName = …)]</c> instead, rev 1's original justification becomes
+    /// true again and this case should move to a run-against-a-stub test that asserts on the trx
+    /// <c>testName</c>/console line directly — the two decisions are coupled, per the plan.)
+    /// </summary>
+    [TestMethod]
+    public async Task GeneratedProjectWithHostileSpecTextCompilesUnderXunit()
+    {
+        var root = CreateProject("hostile-text.json", framework: "xunit");
+
+        (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
+
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "WidgetsTests.g.cs"));
+
+        // Identical needles to GeneratedProjectWithHostileSpecTextCompiles above: TestCasePlan
+        // computes every *_literal field once, before TemplateRenderer picks a template — Task 7
+        // already proved TemplateEscapingGuardTests holds both templates to the same *_literal
+        // naming rule, so the escaped text itself must be byte-identical between the two
+        // frameworks. What differs, and what only a real compile can prove, is whether
+        // xunit-class.scriban's own copy of these call sites still compiles once this exact text
+        // is spliced in.
+        generated.ShouldContain("""RequireFixture("list\"Widgets\\Escaped");""",
+        customMessage: "the quote+backslash operationId case did not reach the renderer escaped");
+        generated.ShouldContain("""InTestUrl.Build("/widgets/say\"hi\\there")""",
+        customMessage: "the hostile path template case did not reach the renderer escaped");
+        generated.ShouldContain("""FixtureQueryParameters("searchWidgets", "so\"rt\\key")""",
+        customMessage: "the hostile query parameter name case did not reach the renderer escaped");
+        generated.ShouldContain("""RequireFixture("list\nThings\rMore");""",
+        customMessage: "the embedded LF/CR operationId case did not reach the renderer escaped");
+
+        var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{root}\" --nologo -v q");
+
+        exitCode.ShouldBe(0, $"Generated xUnit project failed to compile:{Environment.NewLine}{output}");
     }
 
     /// <summary>
