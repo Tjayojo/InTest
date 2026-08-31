@@ -29,11 +29,14 @@ so is §9's build-time copy of the spec to the output directory (`init` scaffold
 dotnet build InTest.sln
 # `dotnet test InTest.sln` now fails outright, not just incompletely: with both an MSTest and an
 # xunit.v3 project in the solution, the xUnit project errors on the VSTest target while MSTest
-# still runs and prints `Passed!`, and the command exits 1 (measured). Run each suite
-# individually instead — `.github/workflows/build-and-test.yml`'s `fast` job lists all five,
+# and NUnit both still run and print `Passed!`, and the command exits 1 (measured). Run each suite
+# individually instead — `.github/workflows/build-and-test.yml`'s `fast` job lists all six,
 # including `InTest.Runtime.XUnit.Tests`, which is not `dotnet test`-able at all and instead runs
 # as `dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll`
 # after a plain `dotnet build` of that project (the platform apphost does not exist on Linux).
+# `InTest.Runtime.NUnit.Tests` has no such exception — NUnit runs under classic VSTest like
+# MSTest, so it is an ordinary `dotnet test <csproj>` step ([nunit-is-vstest], the NUnit framework
+# pack's plan).
 dotnet test tests/InTest.Cli.Tests                       # one suite
 dotnet test tests/InTest.Cli.Tests --filter "FullyQualifiedName~CSharpLiteralTests"
 
