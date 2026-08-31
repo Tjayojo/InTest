@@ -83,7 +83,7 @@ input, not a distribution detail, and it is what the following rules follow from
 |---|---|
 | Input | OpenAPI 3.x, JSON or YAML, file or URL |
 | Producers | Swashbuckle, built-in `Microsoft.AspNetCore.OpenApi`, NSwag |
-| Test framework | MSTest |
+| Test framework | MSTest, xUnit v3 |
 | HTTP pack | **HttpClient via `IHttpClientFactory` — one pack only** |
 | Assertions | **Shouldly (primary) and MSTest `Assert` — both ship in v1** |
 | Schema validation | NJsonSchema |
@@ -103,7 +103,7 @@ demands of an adopter is part of the design rather than an implementation detail
 | Requirement | Why | Consequence for an adopter |
 |---|---|---|
 | The **test project** targets `net10.0` | .NET 8 and 9 both reach end of support 10 November 2026; MSTest v4's floor is .NET 8 | Independent of the API's own TFM (§4) — an API on `net8.0` is fine. Only the test project needs a `net10.0`-capable SDK on developer machines and agents |
-| **MSTest** | v1 ships one framework; the lifecycle, parameterization and parallelism models are not interchangeable (§5) | A team standardised on xUnit or NUnit cannot adopt v1. This is the single largest adoption barrier and the most likely v2 request |
+| **MSTest or xUnit v3** | v1 ships two frameworks, chosen per project with `init --framework`; the lifecycle, parameterization and parallelism models are not interchangeable (§5), so the choice is frozen once a project is scaffolded | A team standardised on NUnit cannot adopt v1 yet. MSTest and xUnit together cover the two largest slices of test-framework downloads (§18); NUnit is the remaining, most likely next request — see `docs/superpowers/specs/2026-08-30-intest-xunit-framework-pack.md`§8 for what this design owes it |
 | **OpenAPI 3.x** | The parser accepts 2.0, 3.0, 3.1 and 3.2, but generation targets 3.x semantics | Swagger 2.0 documents should be converted first |
 | A **deployed, reachable** API | Tests exercise real HTTP (§1) | Not a substitute for unit tests, and not usable against an unbuilt service |
 
@@ -112,10 +112,12 @@ minutes rather than after a day of scaffolding.
 
 ### Deferred to v2
 
-- **xUnit and NUnit template sets.** The single largest constraint on reach: MSTest is roughly
-  21.7% of test-framework downloads (§18). v1 does not ship them, but §3 requires the
-  architecture to keep them additive rather than a rewrite — the neutral layers must not name
-  an MSTest type. Highest-priority v2 item.
+- **NUnit template set.** MSTest and xUnit v3 now both ship in v1 (§5's frozen-axes table;
+  `docs/superpowers/specs/2026-08-30-intest-xunit-framework-pack.md` is the record of the xUnit
+  addition, done within v1 rather than deferred). §3 still requires the architecture to keep a
+  third framework additive rather than a rewrite — the neutral layers must not name a
+  test-framework type. NUnit is the remaining highest-priority item; see that document's §8 for
+  what it is owed.
 - **A second HTTP pack (Flurl).** See §3 — `ApiTestBase.Client` cannot be typed for two packs
   from one package, and v2 must pick a resolution before adding one.
 - **Version selection.** v1 generates every operation in the document (§12).
@@ -433,7 +435,7 @@ inline:
 | Field | Note |
 |---|---|
 | `spec.producer` | `auto` \| `swashbuckle` \| `aspnetcore` \| `nswag` |
-| `project.framework` | **Frozen** — see "Frozen vs. additive axes" below. Required, not optional, and validated: `ConfigLoader.RequireSupportedFramework` refuses any value other than the exact lowercase `"mstest"`, naming the roadmap (§3) in the refusal rather than silently defaulting |
+| `project.framework` | **Frozen** — see "Frozen vs. additive axes" below. Required, not optional, and validated: `ConfigLoader.RequireSupportedFramework` refuses any value other than the exact lowercase `"mstest"` or `"xunit"`, naming the roadmap (§3) in the refusal rather than silently defaulting for the remaining framework (NUnit). Set from `init --framework` (default `mstest`), never hand-typed on a fresh project |
 | `project.assertions` | `shouldly` \| `mstest` — additive, never a swap |
 | `naming.identifiers` | **Frozen** — see "Frozen vs. additive axes" below |
 | `naming.display` | Changeable any time — cosmetic, no compile impact |
@@ -447,7 +449,7 @@ The rule: **an axis is frozen if changing it invalidates hand-written code.**
 
 | Axis | Status | Why |
 |---|---|---|
-| Test framework | **Frozen per project** | Lifecycle, parameterization and parallelism models differ, and every hand-written partial targets them — a suite cannot be migrated in place. This does **not** mean the tool emits one framework: §3 requires the architecture to support MSTest, xUnit and NUnit, with v1 shipping MSTest |
+| Test framework | **Frozen per project** | Lifecycle, parameterization and parallelism models differ, and every hand-written partial targets them — a suite cannot be migrated in place. This does **not** mean the tool emits one framework: §3 requires the architecture to support MSTest, xUnit and NUnit, with v1 shipping MSTest and xUnit |
 | Identifier naming | **Frozen** | Renaming generated classes orphans every hand-written partial |
 | HTTP pack | n/a in v1 | One pack ships, so there is no axis. When v2 adds a second, it is **frozen** — `ApiTestBase.Client` is typed per pack, so any hand-written test touching `Client` stops compiling on a swap |
 | Assertion set | **Additive** | Hand-written assertions are never migrated — adding a set adds a library, so `assertions` is an array. Command is `intest assertions add`, never "switch" |
@@ -461,10 +463,16 @@ Frozen at init on 2026-03-14 by intest v1.0.0.
 7 files contain hand-written partials targeting the current class names.
 ```
 
-The example uses identifier naming deliberately, because it is the only frozen axis a v1 user
-can actually attempt to change — v1 ships one test framework and one HTTP pack, so those
-messages are unreachable. The framework message exists for completeness and needs no
-migration document until a second framework ships.
+The example uses identifier naming deliberately, because until now it was the only frozen axis a
+v1 user could actually attempt to change — v1 shipped one test framework and one HTTP pack, so
+those messages were unreachable. **The framework message is reachable now that v1 ships a second
+framework** (`docs/superpowers/specs/2026-08-30-intest-xunit-framework-pack.md`'s
+`[frozen-axis-becomes-reachable]`): nothing stopped an adopter from hand-editing
+`project.framework` in an already-scaffolded project's `intest.json` to a value that no longer
+matches the `.csproj`'s adapter reference, so `generate` now detects that disagreement — reusing
+the same comparison `UpgradeCommand.DetectRuntimeReferenceMismatch` already makes for version
+drift — and refuses (exit `2`) rather than silently rewriting `Generated/` against a project that
+can no longer build it. The HTTP pack message remains unreachable — one pack still ships.
 
 The honest migration for any frozen axis is: generate fresh alongside, port hand-written tests
 manually, delete the old project. Ship it as a procedure, not a `--force` flag that produces
@@ -518,8 +526,8 @@ files over this column.
 
 | Command | Writes | Never writes | Exit | Ships today |
 |---|---|---|---|---|
-| `intest init` | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs`, `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings`, `.config/dotnet-tools.json`, `.gitattributes` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused, or the scaffold failed · 3 already initialised | Yes |
-| `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a URL `spec.source` that could not be fetched (never a fall back to the committed snapshot — §9) | Yes |
+| `intest init --framework <mstest\|xunit>` (default `mstest`) | `intest.json`, `.csproj`, `.editorconfig`, `AssemblyInfo.cs`, `TestStartup.cs` (`mstest`) or an `IAsyncLifetime` assembly-fixture class (`xunit`), `<Name>TestBase.cs`, `appsettings*.json`, `*.runsettings` (`mstest` only — xUnit v3/Microsoft.Testing.Platform has no run-settings equivalent), `.config/dotnet-tools.json`, `.gitattributes` | Anything already present — refuses rather than overwrites | 0 ok · 2 an argument was refused (including an unsupported `--framework` value), or the scaffold failed · 3 already initialised | Yes |
+| `intest generate` | `Generated/`, `coverage-report.json`, and `spec.json` when `spec.source` is a URL (§9) | `fixtures/`, team-owned files | 0 ok · 1 fixture drift or validation failure · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, a URL `spec.source` that could not be fetched (never a fall back to the committed snapshot — §9), or a configured `project.framework` that no longer matches the project's adapter package reference (frozen axis, `[frozen-axis-becomes-reachable]`) | Yes |
 | `intest generate --check` | Nothing | Everything | 0 identical · 1 `Generated/` or `coverage-report.json` differs, or a fixture has drifted (same code as plain `generate`'s exit 1, §5's exit-1 row already lists both as one code) · 2 tool error · 4 tool-version mismatch, checked before any output comparison and only when `intestVersion` is declared (absent means no claim made, not a mismatch) | Yes |
 | `intest generate --emit-plan` | `TestPlan` JSON to stdout | Everything | 0 ok | Not yet |
 | `intest fixtures repair` | `fixtures/` — **creates missing fixtures** by tier precedence, adds `TODO:` sentinels for newly-required properties, flags removed ones. Never overwrites an existing value | `Generated/`, team-owned files | 0 ok, including nothing to repair · 2 an argument was refused, no `intest.json`, malformed `intest.json`, spec unparseable, or a committed fixture that cannot be read | Yes |
