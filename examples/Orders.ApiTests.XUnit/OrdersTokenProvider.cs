@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using InTest.Runtime;
 
-namespace Orders.ApiTests;
+namespace Orders.ApiTests.XUnit;
 
 /// <summary>
 /// Real client-credentials tokens from <c>samples/Identity.Server</c>. Two identities —

@@ -1,7 +1,6 @@
 using InTest.Runtime;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Orders.ApiTests;
 using Xunit;
 
 [assembly: AssemblyFixture(typeof(Orders.ApiTests.XUnit.InTestAssemblyFixture))]
