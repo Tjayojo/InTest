@@ -1,0 +1,11 @@
+{
+  "$meta": {
+    "tier": 3,
+    "operationId": "get_api_products",
+    "generatedBy": "intest 0.1.0"
+  },
+  "$parameters": {
+    "page": "1",
+    "pageSize": "20"
+  }
+}

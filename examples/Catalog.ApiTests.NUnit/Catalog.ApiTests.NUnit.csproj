@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <InTestSpecSource>../../samples/Catalog.Api/Catalog.Api.json</InTestSpecSource>
+  </PropertyGroup>
+  <ItemGroup>
+     <PackageReference Include="NUnit" Version="4.6.1" />
+     <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
+     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+     <PackageReference Include="Shouldly" Version="4.3.0" />
+     <!-- The NUnit adapter ProjectReferences the neutral InTest.Runtime package and
+          brings it in transitively, so only this one reference is scaffolded — both
+          packages declare types in namespace InTest.Runtime, so nothing downstream (the
+          template, testBaseClass) needs to know two packages are involved. NUnit and
+          NUnit3TestAdapter version independently (4.x and 6.x) — unlike the MSTest trio
+          above, they are not expected to move in lockstep. -->
+     <PackageReference Include="InTest.Runtime.NUnit" Version="0.1.0-preview.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Generated/spec-schemas.json" Link="spec-schemas.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Generated/spec-paths.json" Link="spec-paths.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- TestHost resolves configuration from AppContext.BaseDirectory, so these must
+         travel to the output directory. Without them every generated project fails at
+         AssemblyInitialize with a FileNotFoundException for appsettings.json. -->
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- FixtureStore also loads from AppContext.BaseDirectory. Without this every
+         fixture is invisible at runtime — every operation that needs one 400s or sends
+         literal "TODO:..." sentinels, and nothing at compile time catches it. -->
+    <Content Include="fixtures/**/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
