@@ -10,10 +10,16 @@ API over real HTTP, from its OpenAPI document. Five shipped packages (`InTest.Cl
 sample APIs used as fixtures, six test suites — the fifth and sixth, `InTest.Runtime.XUnit.Tests`
 and `InTest.Runtime.NUnit.Tests`, exist because all three adapters declare the same types in the
 same namespace and cannot share a compilation with `InTest.Runtime.Tests` or with each other.
-`InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org (prerelease, via
-`release.yml`'s trusted-publishing push) — build from source for anything past that tag. None of
-`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit` exists on nuget.org at
-that tag; `examples/` still pins `InTest.Runtime` there for that reason.
+All five are published to nuget.org as prereleases at `0.1.0-preview.2`, via `release.yml`'s
+trusted-publishing push — the first tag to publish all five, and the first to publish the three
+adapters at all. Build from source for anything past that tag. `examples/` now references
+`InTest.Runtime.MSTest` at that version and gets `InTest.Runtime` transitively at the identical
+version, which is the §3 compatibility contract holding against real published packages rather
+than a local build (verified with `dotnet list package --include-transitive`, not assumed).
+One thing that publish measured and is worth knowing before you conclude a release is broken:
+the packages were live on nuget.org's flat-container API roughly **four minutes** before
+`dotnet tool install` could resolve them, failing with "not found in NuGet feeds" in between.
+That is registration-index lag behind the content endpoint, not a failed push.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
@@ -94,8 +100,9 @@ Running the sample APIs requires specific environment variables (ports, issuer/a
 500s or silent 404s rather than an obvious failure.
 
 Exercising Phase 8 of `docs/getting-started.md` (`dotnet tool restore`, `generate --check`,
-`upgrade`) against the **published** `0.1.0-preview.1` now works from a bare clone with no local
-feed at all. Testing an **unpublished** change still needs a local pack-and-restore — never
+`upgrade`) against the **published** `0.1.0-preview.2` now works from a bare clone with no local
+feed at all, and that version is the first where a generated xUnit or NUnit project can do it too
+(all three adapter packages ship there). Testing an **unpublished** change still needs a local pack-and-restore — never
 improvise this by hand, NuGet's global package cache never invalidates a locally-built version
 number (see CONTRIBUTING.md's "Testing against a local build"). Use:
 

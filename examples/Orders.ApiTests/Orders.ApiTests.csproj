@@ -13,11 +13,15 @@
     <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
-    <!-- InTest.Runtime's first NuGet publish went out as 0.1.0-preview.1, not the plain
-         0.1.0 intest init normally scaffolds (Directory.Build.props' Version) — pinned here
-         to the real published version so this committed example actually restores from
-         nuget.org. Bump back to 0.1.0 once a stable release replaces the preview. -->
-    <PackageReference Include="InTest.Runtime" Version="0.1.0-preview.1" />
+    <!-- A generated project references the adapter package matching project.framework, not the
+         neutral InTest.Runtime directly — InTest.Runtime.MSTest pulls InTest.Runtime transitively
+         at the identical version. This example pinned the bare InTest.Runtime id only because no
+         adapter package existed on nuget.org yet at 0.1.0-preview.1; now that
+         InTest.Runtime.MSTest is published too, this follows `intest upgrade`'s own migration
+         note (`intest upgrade` reports the drift but does not rewrite this file — see
+         UpgradeCommand.DetectLegacyRuntimeReferenceMigration). Bump back to a plain 0.x once a
+         stable release replaces the preview. -->
+    <PackageReference Include="InTest.Runtime.MSTest" Version="0.1.0-preview.2" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Generated/spec-schemas.json" Link="spec-schemas.json" CopyToOutputDirectory="PreserveNewest" />
