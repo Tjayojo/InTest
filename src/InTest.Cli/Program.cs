@@ -57,7 +57,7 @@ var clientLockfileOption = new Option<string>("--client-lockfile")
 // before.
 var frameworkOption = new Option<string>("--framework")
 {
-    Description = "Test framework for the scaffolded project: mstest (default) or xunit. Frozen per project — a suite cannot be migrated in place.",
+    Description = "Test framework for the scaffolded project: mstest (default), xunit or nunit. Frozen per project — a suite cannot be migrated in place.",
     DefaultValueFactory = _ => "mstest",
 };
 

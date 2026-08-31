@@ -516,6 +516,50 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// Task 6 of the NUnit framework pack plan — the first of five representative NUnit cases,
+    /// and the base shape every other NUnit Golden test in this file builds on:
+    /// <c>nunit-class.scriban</c>'s raw-HTTP body, <c>[TestFixture]</c>/<c>[Test]</c>/
+    /// <c>[Category]</c> attributes, <c>[SetUpFixture]</c>'s async <c>[OneTimeSetUp]</c>/
+    /// <c>[OneTimeTearDown]</c> standing in for <c>[AssemblyInitialize]</c>/<c>[AssemblyCleanup]</c>,
+    /// and <c>TestContext.CurrentContext</c> (NUnit's ambient accessor) all reached over a live
+    /// request for the first time under this plan.
+    /// <para>
+    /// <c>[nunit-is-vstest]</c>: NUnit runs through the exact same <c>dotnet test</c> invocation
+    /// MSTest does (<see cref="GeneratedSuiteCommand.For"/> routes both onto the same arm), so —
+    /// unlike the xUnit sibling above, which needed its own "Failed: 0" assertion — the "Passed!"
+    /// console assertion below is unchanged from <see cref="GeneratedSuiteBuildsAndPassesAgainstALiveService"/>,
+    /// not a different summary shape.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task NunitGeneratedSuiteBuildsAndPassesAgainstALiveService()
+    {
+        InitCommand.Run(_root, ProjectName, "spec.json", framework: "nunit").ShouldBe(0);
+        UseNunitProjectReferenceInsteadOfPackage();
+        PointAtStub();
+
+        // Mirrors GeneratedSuiteBuildsAndPassesAgainstALiveService's own comment: Spec's only
+        // operation is a bare GET with no body and no parameters, so this composes no fixture at
+        // all (decision 1) and the call below is a no-op today — kept anyway so this test stays
+        // realistic if Spec ever grows an operation that does need one.
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated NUnit project failed to build:{Environment.NewLine}{build.Output}");
+
+        var nunit = GeneratedSuiteCommand.For("nunit", _root, ProjectName);
+        var test = await ProcessRunner.RunAsync(nunit.FileName, nunit.Arguments);
+
+        // The assertion that matters: the suite ran and passed. A FileNotFoundException for
+        // appsettings.json, an unresolvable schema bundle, or a broken base URL all fail here
+        // and none of them fail a compile check.
+        test.Output.ShouldContain("Passed!", customMessage: test.Output);
+        test.ExitCode.ShouldBe(0, test.Output);
+    }
+
+    /// <summary>
     /// <c>[capture-not-deserialize]</c>'s decisive proof — stage 1 of
     /// <c>docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md</c>, and per that
     /// plan's own words "the feature's whole viability". <see cref="GoldenApiStub"/> answers
@@ -964,6 +1008,77 @@ public class GeneratedSuiteExecutionTests
 
         // Same third [warn-on-swallowed-exception] scenario as the MSTest sibling: a clean run
         // must warn nothing, on either sink XunitDiagnostics.Warn writes to.
+        test.Output.ShouldNotContain("captured response is being used as the test's verdict",
+        customMessage: $"a clean run warned about a swallowed exception that never happened:{Environment.NewLine}{test.Output}");
+    }
+
+    /// <summary>
+    /// Task 6's client-routed case — the one that matters most. <c>nunit-class.scriban</c>'s
+    /// client-routed body carries 2 of the template's 5 <c>TestContext.CurrentContext.CancellationToken</c>
+    /// sites (the <c>cancellationToken:</c> argument inside <c>tc.client_call_expression</c> itself,
+    /// and the one passed to <c>ShouldMatchCapturedContractAsync</c> below it). This exact shape's
+    /// xUnit counterpart is what found <c>TemplateRenderer.BuildClientCallExpression</c> hardcoding
+    /// MSTest's static <c>TestContext.CancellationToken</c> regardless of framework — CS0120 on
+    /// every generated xUnit client-routed case, missed by four design revisions and three
+    /// reviewer-built adapters because everyone counted token sites in the template, and this one
+    /// lives in C#. Task 4 threaded <c>_cancellationTokenExpression</c> through the same switch as
+    /// the template itself, so NUnit should be correct here too — this test is what actually proves
+    /// it, rather than merely asserting the rendered string. <b>If this fails to compile, that is
+    /// the finding, not a nuisance.</b>
+    /// </summary>
+    [TestMethod]
+    public async Task NunitGeneratedClientRoutedSuccessCaseReceivesAConformingBody()
+    {
+        InitCommand.Run(_root, ProjectName, "spec.json", framework: "nunit").ShouldBe(0);
+        UseNunitProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        AddClientConfig("Stub.ApiTests.FakeOrdersApiClient");
+        RegisterFakeOrdersApiClient();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        _stub.OverrideStatusResponse(200, """{"state":"ok"}""");
+
+        // Guard against the generated case silently missing the client-routed shape entirely —
+        // same discipline every other live-wire test in this file uses.
+        var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
+        var generatedText = await File.ReadAllTextAsync(generatedFile);
+        generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
+        customMessage: "the client-routed case this test exists to prove must actually be generated");
+        generatedText.ShouldContain("TestContext.CurrentContext.CancellationToken",
+        customMessage: "the two cancellation-token sites this test exists to exercise — the same " +
+                       "shape that broke every generated xUnit client-routed case with CS0120 — " +
+                       "must actually reach the generated source using NUnit's own expression");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated NUnit project failed to compile:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var nunit = GeneratedSuiteCommand.For(
+            "nunit", _root, ProjectName, trxPath: "results.trx", filter: "FullyQualifiedName~GetStatus_Contract", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(nunit.FileName, nunit.Arguments);
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var result = trx.Descendants()
+            .Where(e => e.Name.LocalName == "UnitTestResult")
+            .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
+
+        result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        $"GetStatus_Contract should pass against a schema-conforming body:{Environment.NewLine}{test.Output}");
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        _stub.ReceivedPaths.ShouldContain("/api/status",
+        $"the generated client-routed request never reached the stub over the wire. Paths served: {string.Join(", ", _stub.ReceivedPaths)}");
+
+        // Same third [warn-on-swallowed-exception] scenario as the MSTest and xUnit siblings: a
+        // clean run must warn nothing, on the sink NUnitDiagnostics.Warn writes to.
         test.Output.ShouldNotContain("captured response is being used as the test's verdict",
         customMessage: $"a clean run warned about a swallowed exception that never happened:{Environment.NewLine}{test.Output}");
     }
@@ -1789,6 +1904,64 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// Task 6's Warn-contract case — the plan's own framing calls this out as the one that
+    /// differs most: <c>[error-is-the-sink]</c> found <c>Console.WriteLine</c> (xUnit's answer)
+    /// silent at NUnit's assembly scope at every verbosity, throwing nothing, so
+    /// <c>TestHost.NUnitDiagnostics</c> uses <c>TestContext.Error.WriteLine</c> for both
+    /// <c>Note</c> and <c>Warn</c> instead. A regression back to a "more idiomatic" NUnit sink
+    /// (<c>TestContext.Out</c>/<c>TestContext.WriteLine</c>, or <c>TestContext.Progress</c> without
+    /// raised verbosity) would still build and still print a clean summary — nothing about it is a
+    /// compile error or an ordinary test failure — so only a test that actually reads process
+    /// output, the way this one does, would ever catch it.
+    /// <para>
+    /// Otherwise mirrors <see cref="ValidationReportWithAProblemSurfacesOnAPassingRun"/> and
+    /// <see cref="XunitValidationReportWithAProblemSurfacesOnAPassingRun"/> exactly: the same
+    /// <c>SpecWithPathParameter</c>, the same unresolved <c>fixtures/getStatusById.json</c>
+    /// sentinel, and the same <c>FullyQualifiedName~GetStatus_Contract</c> filter to run only the
+    /// fixture-free operation while <c>getStatusById</c>'s own sentinel stays standing.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task NunitValidationReportWithAProblemSurfacesOnAPassingRun()
+    {
+        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+
+        InitCommand.Run(_root, ProjectName, "spec.json", framework: "nunit").ShouldBe(0);
+        UseNunitProjectReferenceInsteadOfPackage();
+        PointAtStub();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
+        File.ReadAllText(fixturePath).ShouldContain("\"TODO:id\"",
+        customMessage: "left unresolved on purpose — this test needs a genuine, standing validation problem");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated NUnit project failed to build:{Environment.NewLine}{build.Output}");
+
+        // Same reasoning as the MSTest and xUnit siblings' own comments: "GetStatus_Contract" (no
+        // "By") does not match "GetStatusById_Contract" as a substring, so this filter runs only
+        // the fixture-free operation and never touches the one with the still-unresolved sentinel.
+        var nunit = GeneratedSuiteCommand.For(
+            "nunit", _root, ProjectName, filter: "FullyQualifiedName~GetStatus_Contract");
+        var test = await ProcessRunner.RunAsync(nunit.FileName, nunit.Arguments);
+
+        test.ExitCode.ShouldBe(0,
+        $"the filtered run should pass — nothing calls RequireFixture for the one operation with a " +
+        $"problem:{Environment.NewLine}{test.Output}");
+
+        // The decisive assertions: FixtureValidation.Report's aggregated text, written through
+        // NUnitDiagnostics.Warn's TestContext.Error.WriteLine call, must reach process output on
+        // this otherwise-clean, otherwise-passing run — exactly the gap a TestContext.Out- or
+        // Console.WriteLine-based sink would fail silently under NUnit ([error-is-the-sink]).
+        test.Output.ShouldContain("getStatusById:",
+        customMessage: $"the aggregated report never reached process output on this passing run:{Environment.NewLine}{test.Output}");
+        test.Output.ShouldContain("is still unfilled (TODO:id)",
+        customMessage: $"the report reached output but not with the expected problem detail:{Environment.NewLine}{test.Output}");
+    }
+
+    /// <summary>
     /// Plan Task 4, Step 2(b)'s live proof. Unlike <see cref="FixtureParameterReachesALiveRequestEndToEnd"/>,
     /// this deliberately never fills in <c>fixtures/getWidgetById.json</c>'s sentinel — decision
     /// 6's whole point is that a declared-error case must not care whether that sibling fixture is
@@ -2359,6 +2532,126 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// Task 6's auth-skip case — <see cref="AForbiddenCaseTheSecondaryIdentityIsAuthorizedForSkipsRatherThanFails"/>'s
+    /// and <see cref="XunitForbiddenCaseTheSecondaryIdentityIsAuthorizedForSkipsRatherThanFails"/>'s
+    /// NUnit counterpart. <c>ApiTestBase.RequireMultipleIdentities</c>/<c>RequireSecondaryIdentityLacks</c>
+    /// turn the neutral <c>string?</c> skip reason into <c>Assert.Ignore(reason)</c> under this
+    /// adapter — MSTest's turns it into <c>Assert.Inconclusive</c>, xUnit's into <c>Assert.Skip</c>.
+    /// <para>
+    /// Confirmed by the probes behind this plan's own design section, not assumed from either
+    /// sibling's shape: <c>Assert.Ignore</c> also produces trx <c>outcome="NotExecuted"</c> — the
+    /// same spelling both other frameworks agree on — but NUnit puts the reason in <b>both</b>
+    /// <c>&lt;StdOut&gt;</c> <b>and</b> <c>&lt;ErrorInfo&gt;&lt;Message&gt;</c>, a superset of
+    /// xUnit's <c>&lt;StdOut&gt;</c>-only placement. The assertion below searches the whole
+    /// <c>UnitTestResult</c> element's raw XML rather than one specific child, exactly the way the
+    /// xUnit sibling does, so it does not have to hardcode which element NUnit chooses as a second,
+    /// separate assumption.
+    /// </para>
+    /// <para>
+    /// Reuses <see cref="SpecWithScopedSecuredOperation"/> and <see cref="RegisterTokenProvider"/>
+    /// exactly as both siblings do — two operations sharing the <c>ScopedSecure</c> tag, one whose
+    /// wrong-scope 403 case must be skipped (the secondary identity genuinely holds the one scope it
+    /// requires) and one whose must still run and receive a real 403 (the secondary identity lacks
+    /// one of its two required scopes) — proving the guard skips only the case it exists for, not
+    /// the whole class, under this framework too.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task NunitForbiddenCaseTheSecondaryIdentityIsAuthorizedForSkipsRatherThanFails()
+    {
+        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation);
+
+        InitCommand.Run(_root, ProjectName, "spec.json", framework: "nunit").ShouldBe(0);
+        UseNunitProjectReferenceInsteadOfPackage();
+        PointAtStub();
+        RegisterTokenProvider();
+
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var generatedFile = Directory.GetFiles(_root, "ScopedSecureTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one ScopedSecureTests.g.cs");
+        var generated = File.ReadAllText(generatedFile);
+        generated.ShouldContain("GetScopedSecureResource_Forbidden",
+        customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
+        generated.ShouldContain("RequireSecondaryIdentityLacks(\"orders.write\");",
+        customMessage: "the scoped 403 case must carry both guards, not just RequireMultipleIdentities");
+        generated.ShouldContain("GetScopedSecureResourceRequiringDelete_Forbidden",
+        customMessage: "the wrong-scope 403 case that must actually run — the guard's other half — must be generated");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated NUnit project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var nunit = GeneratedSuiteCommand.For(
+            "nunit", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(nunit.FileName, nunit.Arguments);
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var results = trx.Descendants().Where(e => e.Name.LocalName == "UnitTestResult").ToList();
+
+        results.Count.ShouldBe(6,
+        $"expected exactly 6 tests (Contract, Unauthorized, Forbidden for each of the two scoped " +
+        $"operations) but the trx recorded {results.Count}:{Environment.NewLine}{test.Output}");
+
+        var failed = results.Where(e => e.Attribute("outcome")?.Value == "Failed").ToList();
+        failed.ShouldBeEmpty(
+        $"expected no failures in the run, but {failed.Count} test(s) failed:{Environment.NewLine}{test.Output}");
+
+        var skippedResult = results.SingleOrDefault(e =>
+            (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResource_Forbidden", StringComparison.Ordinal));
+        skippedResult.ShouldNotBeNull(
+        $"GetScopedSecureResource_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        skippedResult!.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
+        $"GetScopedSecureResource_Forbidden should have been skipped by Assert.Ignore via " +
+        $"RequireSecondaryIdentityLacks — the secondary identity holds the scope this operation " +
+        $"requires, so it cannot produce a real 403:{Environment.NewLine}{test.Output}");
+
+        // Where NUnit differs from both siblings: the reason lands in both <StdOut> and
+        // <ErrorInfo><Message>, a superset of xUnit's <StdOut>-only placement. Searched across the
+        // whole element's raw XML rather than one named child, same discipline as the xUnit
+        // sibling, so this does not have to hardcode which element NUnit chooses.
+        skippedResult.ToString().ShouldContain("cannot produce a 403",
+        customMessage: $"the skip reason text (ApiTestCore.SecondaryIdentityScopeSkipReason's own " +
+                       $"message) never reached the trx result at all, under any element:{Environment.NewLine}{skippedResult}");
+
+        foreach (var name in new[] { "GetScopedSecureResource_Contract", "GetScopedSecureResource_Unauthorized" })
+        {
+            var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
+            result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
+        }
+
+        var runningForbiddenResult = results.SingleOrDefault(e =>
+            (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResourceRequiringDelete_Forbidden", StringComparison.Ordinal));
+        runningForbiddenResult.ShouldNotBeNull(
+        $"GetScopedSecureResourceRequiringDelete_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+        runningForbiddenResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        $"GetScopedSecureResourceRequiringDelete_Forbidden should have run — the secondary identity " +
+        $"does not hold \"orders.delete\", so the guard must not skip it, and it must receive a real " +
+        $"403:{Environment.NewLine}{test.Output}");
+
+        foreach (var name in new[] { "GetScopedSecureResourceRequiringDelete_Contract", "GetScopedSecureResourceRequiringDelete_Unauthorized" })
+        {
+            var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
+            result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
+        }
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        _stub.ReceivedPaths.Count(p => p == "/api/secure-scoped").ShouldBe(2,
+        "Contract and Unauthorized reach the stub; the skipped Forbidden case must never build a request.");
+        _stub.ReceivedPaths.Count(p => p == "/api/secure-scoped-delete").ShouldBe(3,
+        "Contract, Unauthorized, and the running Forbidden case must all reach the stub over the wire.");
+    }
+
+    /// <summary>
     /// Task 8's own guard: Task 8 is a transcript (the v1-b acceptance run against
     /// <c>samples/Catalog.Api</c>, recorded in <c>docs/v0-acceptance.md</c>) proving F7 closed by
     /// running a generated suite twice against the same store, by hand. A manual result regresses
@@ -2601,6 +2894,36 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// Task 6 of the NUnit framework pack plan's counterpart to
+    /// <see cref="UseProjectReferenceInsteadOfPackage"/> and
+    /// <see cref="UseXunitProjectReferenceInsteadOfPackage"/> — same reason (the scaffold
+    /// references <c>InTest.Runtime.NUnit</c> from NuGet, which is not published; every Golden
+    /// test builds against local source instead) and the same needle discipline (tracks
+    /// <see cref="CliVersion.Current"/>, asserted rather than merely interpolated).
+    /// </summary>
+    private void UseNunitProjectReferenceInsteadOfPackage()
+    {
+        var nunitRuntimeProject = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.NUnit", "InTest.Runtime.NUnit.csproj"));
+
+        var path = Path.Combine(_root, "Stub.ApiTests.csproj");
+        var csprojText = File.ReadAllText(path);
+
+        var needle = $"""<PackageReference Include="InTest.Runtime.NUnit" Version="{CliVersion.Current}" />""";
+        csprojText.ShouldContain(needle, Case.Sensitive,
+        "InitCommand's NUnit scaffold no longer writes InTest.Runtime.NUnit's PackageReference in " +
+        "the expected shape (Include=\"InTest.Runtime.NUnit\" Version=\"{CliVersion.Current}\") -- " +
+        "update this needle alongside whatever changed.");
+
+        var csproj = csprojText.Replace(
+        needle,
+        $"""<ProjectReference Include="{nunitRuntimeProject}" />""",
+        StringComparison.Ordinal);
+
+        File.WriteAllText(path, csproj);
+    }
+
+    /// <summary>
     /// Wires a fixture class already written into <c>_root</c> into <c>TestStartup.cs</c>'s
     /// <c>Register</c> hook, the way an adopter would — replacing the scaffold's own
     /// placeholder comment, which must still be present or this is silently a no-op.
@@ -2830,6 +3153,26 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
+    /// Task 6 of the NUnit framework pack plan: <c>[nunit-is-vstest]</c> found NUnit runs under
+    /// classic VSTest exactly like MSTest — `dotnet test &lt;csproj&gt;` exits 0, `--logger
+    /// "trx;LogFileName=…"` produces a trx — so <see cref="GeneratedSuiteCommand.For"/> routes it
+    /// onto the same arm rather than a duplicated branch. This is the mechanical proof of that:
+    /// the two frameworks must produce the identical <see cref="GeneratedSuiteCommand"/> shape for
+    /// the same inputs, changing only which literal was passed in.
+    /// </summary>
+    [TestMethod]
+    public void NunitCommandUsesTheSameShapeAsMsTest()
+    {
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", "/tmp/proj", "P", trxPath: "r.trx", filter: "F~Foo", resultsDirectory: "/tmp/results");
+        var nunit = GeneratedSuiteCommand.For(
+            "nunit", "/tmp/proj", "P", trxPath: "r.trx", filter: "F~Foo", resultsDirectory: "/tmp/results");
+
+        nunit.FileName.ShouldBe(mstest.FileName);
+        nunit.Arguments.ShouldBe(mstest.Arguments);
+    }
+
+    /// <summary>
     /// The both-flags case: <c>-result-trx</c> and <c>-filterVSTest</c> together are the one place a
     /// separator has to be inserted conditionally (see <see cref="GeneratedSuiteCommand"/>'s
     /// <c>XunitArguments</c>), and it is untested by any test that checks the two flags in isolation.
@@ -2873,13 +3216,19 @@ public class GeneratedSuiteExecutionTests
     }
 
     /// <summary>
-    /// Anything other than the two supported literals is a programming error at the call site (a
-    /// typo, or a third framework nobody wired up yet), not a runtime condition callers should have
+    /// Anything other than the three supported literals is a programming error at the call site (a
+    /// typo, or a fourth framework nobody wired up yet), not a runtime condition callers should have
     /// to handle — hence the hard throw rather than a null/empty result.
+    /// <para>
+    /// <c>"nunit"</c> was this test's own exemplar before Task 6 of the NUnit framework pack plan —
+    /// it is now a supported literal (see <see cref="NunitCommandUsesTheSameShapeAsMsTest"/>), so a
+    /// deliberately-nonsense value stands in here instead, the same repointing
+    /// <c>ConfigLoaderTests</c>' unsupported-framework exemplar needed for the same reason.
+    /// </para>
     /// </summary>
     [TestMethod]
     public void ForThrowsForAnUnknownFramework()
     {
-        Should.Throw<ArgumentOutOfRangeException>(() => GeneratedSuiteCommand.For("nunit", "/tmp/proj", "P"));
+        Should.Throw<ArgumentOutOfRangeException>(() => GeneratedSuiteCommand.For("junit", "/tmp/proj", "P"));
     }
 }

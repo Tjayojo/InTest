@@ -96,6 +96,17 @@ public class GenerateCommandTests
                                                                         </Project>
                                                                         """);
 
+    /// <summary>The NUnit counterpart to <see cref="ScaffoldMsTestProject"/>, in the one shape
+    /// <c>GenerateCommand</c>'s frozen-axis detection recognises.</summary>
+    private static void ScaffoldNunitProject(string root) =>
+        File.WriteAllText(Path.Combine(root, "Orders.ApiTests.csproj"), """
+                                                                        <Project Sdk="Microsoft.NET.Sdk">
+                                                                          <ItemGroup>
+                                                                            <PackageReference Include="InTest.Runtime.NUnit" Version="0.1.0-preview.1" />
+                                                                          </ItemGroup>
+                                                                        </Project>
+                                                                        """);
+
     /// <summary>Rewrites intest.json with project.framework set to <paramref name="framework"/>, everything else unchanged.</summary>
     private static void SetConfiguredFramework(string root, string framework) =>
         File.WriteAllText(Path.Combine(root, "intest.json"), $$"""
@@ -242,6 +253,24 @@ public class GenerateCommandTests
         // Directory.Exists, not GetFiles: a refusal means Generated/ is never created at all, so
         // GetFiles throws DirectoryNotFoundException on the very path it is asserting about. This is
         // the idiom every other exit-2 refusal in this file already uses.
+        Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The third arm of [frozen-axis-becomes-reachable]'s detection, added alongside NUnit —
+    /// same reasoning and same idiom as <see cref="RefusesWhenTheConfiguredFrameworkDisagreesWithTheAdapterReference"/>,
+    /// checked separately because <c>DetectFrameworkMismatch</c>'s adapter-to-framework mapping
+    /// is a three-armed switch now, not two, and each arm is worth its own regression case.
+    /// </summary>
+    [TestMethod]
+    public async Task RefusesWhenTheConfiguredFrameworkDisagreesWithTheNunitAdapterReference()
+    {
+        ScaffoldNunitProject(_root);
+        SetConfiguredFramework(_root, "mstest");
+
+        var exit = await RunAsync();
+
+        exit.ShouldBe(2);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
     }
 

@@ -154,6 +154,29 @@ public class TemplateRendererTests
         rendered.ShouldNotContain("Microsoft.VisualStudio.TestTools.UnitTesting");
     }
 
+    /// <summary>
+    /// [framework-selects-template]: the NUnit template must diverge from the MSTest one in every
+    /// place a framework-specific attribute or API differs — see nunit-class.scriban's own doc
+    /// comment for the substitution table. This is the smoke test that the right template was
+    /// actually selected, not just that it parses.
+    /// </summary>
+    [TestMethod]
+    public void RendersTheNunitShapeWhenTheFrameworkIsNunit()
+    {
+        var rendered = new TemplateRenderer(framework: "nunit")
+            .RenderClass(Plan(), "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+
+        rendered.ShouldContain("using NUnit.Framework;");
+        rendered.ShouldContain("[TestFixture]");
+        rendered.ShouldContain("[Test]");
+        rendered.ShouldContain("[Category(\"Contract\")]");
+        rendered.ShouldContain("TestContext.CurrentContext.CancellationToken");
+
+        rendered.ShouldNotContain("[TestClass]");
+        rendered.ShouldNotContain("[Fact]");
+        rendered.ShouldNotContain("Microsoft.VisualStudio.TestTools.UnitTesting");
+    }
+
     [TestMethod]
     public void EmitsAPartialClassDerivingFromTheConfiguredBase()
     {

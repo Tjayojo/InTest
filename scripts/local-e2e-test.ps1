@@ -2,7 +2,8 @@
 .SYNOPSIS
     Exercises InTest's local adoption path (init, generate, fixtures repair, generate --check,
     upgrade) against a from-source build of InTest.Cli/InTest.Runtime/InTest.Runtime.MSTest/
-    InTest.Runtime.xUnit, without ever letting a restore reach the machine-wide NuGet cache.
+    InTest.Runtime.xUnit/InTest.Runtime.NUnit, without ever letting a restore reach the
+    machine-wide NuGet cache.
 
 .DESCRIPTION
     Nothing is published to NuGet yet (see CLAUDE.md / docs/getting-started.md). Trying the
@@ -88,18 +89,19 @@
 .PARAMETER Framework
     Which InTest.Cli `init --framework` value to scaffold. 'mstest' (the default, matching
     `init`'s own default -- docs/superpowers/specs/2026-08-30-intest-xunit-framework-pack.md §2:
-    "init gains --framework <mstest|xunit>, defaulting to mstest") or 'xunit'.
-    <b>Not yet exercised end to end</b>: `init --framework` itself is implemented by a sibling task
-    (docs/superpowers/plans/2026-08-30-intest-xunit-framework-pack.md, Task 5) developed in a
-    separate worktree from this script's own task (Task 9), so the InTest.Cli this script packs
-    from *this* checkout may not understand `--framework` at all yet. For that reason this script
-    only ever passes `--framework <value>` through to `intest init` when -Framework is explicitly
-    'xunit' -- the non-default case is the only one that needs the flag to exist at all. Leaving
-    -Framework at its default 'mstest' therefore keeps this script runnable against a checkout that
-    predates Task 5's merge (init's own default behavior needs no flag), while still giving a
-    checkout that has Task 5 a real way to exercise the xUnit scaffold path through this script.
-    This task's own report says plainly that -Framework xunit was written to the design's
-    description but could not be run end to end against this worktree.
+    "init gains --framework <mstest|xunit>, defaulting to mstest", extended by
+    docs/superpowers/plans/2026-08-31-intest-nunit-framework-pack.md to add 'nunit' as a third
+    value), 'xunit' or 'nunit'.
+    This script only ever passes `--framework <value>` through to `intest init` when -Framework is
+    explicitly non-default -- the default case needs no flag at all, since `init`'s own default is
+    already 'mstest'. Leaving -Framework at its default therefore keeps this script's bootstrap
+    step identical regardless of which framework values the packed InTest.Cli understands.
+    <b>Not run end to end against 'nunit' by this task</b>: `init --framework nunit` and the NUnit
+    template were implemented by sibling tasks of this same plan (Tasks 1/3/4), developed in
+    separate worktrees from this script's own task (Task 7), so while this script now packs
+    InTest.Runtime.NUnit and passes `--framework nunit` through when asked, this task did not
+    itself execute a full -Framework nunit run of this script end to end -- see this task's own
+    report for what verification was and was not performed.
 
 .PARAMETER KeepScratch
     Skip deleting the scratch directory at the end. For debugging this script itself; never use
@@ -145,7 +147,7 @@
 [CmdletBinding()]
 param(
     [string]$Spec,
-    [ValidateSet('mstest', 'xunit')]
+    [ValidateSet('mstest', 'xunit', 'nunit')]
     [string]$Framework = 'mstest',
     [switch]$KeepScratch
 )
@@ -265,11 +267,16 @@ Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime.MSTest') -To (J
 # way InTest.Runtime.MSTest.csproj does -- same sibling-of-InTest.Runtime placement requirement,
 # same reason.
 Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime.xUnit') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.xUnit')
+# InTest.Runtime.NUnit.csproj ProjectReferences "../InTest.Runtime/InTest.Runtime.csproj" the same
+# way the other two adapters do -- same sibling-of-InTest.Runtime placement requirement, same
+# reason.
+Copy-SourceTree -From (Join-Path $RepoRoot 'src' 'InTest.Runtime.NUnit') -To (Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.NUnit')
 
 $CliProject = Join-Path $SrcCopyRoot 'src' 'InTest.Cli'
 $RuntimeProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime' 'InTest.Runtime.csproj'
 $MSTestProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.MSTest' 'InTest.Runtime.MSTest.csproj'
 $XUnitProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.xUnit' 'InTest.Runtime.xUnit.csproj'
+$NUnitProject = Join-Path $SrcCopyRoot 'src' 'InTest.Runtime.NUnit' 'InTest.Runtime.NUnit.csproj'
 
 function Write-Step {
     param([string]$Text)
@@ -321,8 +328,9 @@ try {
     Write-Host "NUGET_PACKAGES: $NuGetPackagesScratch"
     Write-Host "Spec:           $Spec"
 
-    # ---- Pack InTest.Cli, InTest.Runtime, InTest.Runtime.MSTest and InTest.Runtime.xUnit at the
-    # local-only version into the scratch feed. -p:MinVerVersionOverride tells MinVer to skip its
+    # ---- Pack InTest.Cli, InTest.Runtime, InTest.Runtime.MSTest, InTest.Runtime.xUnit and
+    # InTest.Runtime.NUnit at the local-only version into the scratch feed.
+    # -p:MinVerVersionOverride tells MinVer to skip its
     # own git-based computation and use this value verbatim -- a plain `-p:Version=` no longer
     # works for this (see the header comment's defence 2 for the measured reason: MinVer
     # overwrites it unconditionally). Confirmed below by asserting each packed .nupkg is actually
@@ -349,9 +357,14 @@ try {
         "-p:MinVerVersionOverride=$LocalVersion",
         '-o', $LocalFeed
     )
+    Invoke-Dotnet -StepName 'pack InTest.Runtime.NUnit' -Arguments @(
+        'pack', $NUnitProject, '-c', 'Release',
+        "-p:MinVerVersionOverride=$LocalVersion",
+        '-o', $LocalFeed
+    )
 
     # Filename casing here must match each project's <PackageId> exactly ("InTest.Cli",
-    # "InTest.Runtime", "InTest.Runtime.MSTest", "InTest.Runtime.xUnit") -- `dotnet pack` names the
+    # "InTest.Runtime", "InTest.Runtime.MSTest", "InTest.Runtime.xUnit", "InTest.Runtime.NUnit") -- `dotnet pack` names the
     # .nupkg after PackageId verbatim, not lowercased. A lowercase "intest.cli.*" check passed here
     # for a long time only because NTFS path lookups are case-insensitive; on a case-sensitive
     # filesystem (ext4, the Linux container this was verified against) Test-Path against the wrong
@@ -362,6 +375,7 @@ try {
     $runtimePackage = Join-Path $LocalFeed "InTest.Runtime.$LocalVersion.nupkg"
     $mstestPackage = Join-Path $LocalFeed "InTest.Runtime.MSTest.$LocalVersion.nupkg"
     $xunitPackage = Join-Path $LocalFeed "InTest.Runtime.xUnit.$LocalVersion.nupkg"
+    $nunitPackage = Join-Path $LocalFeed "InTest.Runtime.NUnit.$LocalVersion.nupkg"
     if (-not (Test-Path $cliPackage)) {
         throw "Expected package not found: $cliPackage -- the -p:MinVerVersionOverride override did not take effect as expected."
     }
@@ -374,20 +388,20 @@ try {
     if (-not (Test-Path $xunitPackage)) {
         throw "Expected package not found: $xunitPackage -- the -p:MinVerVersionOverride override did not take effect as expected."
     }
-    Write-Host "Confirmed all four packages carry the local-only version: $LocalVersion" -ForegroundColor Green
+    if (-not (Test-Path $nunitPackage)) {
+        throw "Expected package not found: $nunitPackage -- the -p:MinVerVersionOverride override did not take effect as expected."
+    }
+    Write-Host "Confirmed all five packages carry the local-only version: $LocalVersion" -ForegroundColor Green
 
     # ---- Bootstrap: `intest init` via `dotnet run`, the same way a project has no `intest` on
     # PATH to run it with yet (docs/getting-started.md Phase 2's note; F13 in v0-acceptance.md).
     # Stamped with the same -p:MinVerVersionOverride, so intest.json's intestVersion and
     # .config/dotnet-tools.json's tool pin both come out as $LocalVersion, matching what was just
     # packed above -- no separate patch step needed for either of those two files.
-    # --framework is only appended for the non-default 'xunit' request -- see -Framework's own
-    # parameter doc comment above for why: `init --framework` (Task 5 of
-    # docs/superpowers/plans/2026-08-30-intest-xunit-framework-pack.md) is developed in a separate
-    # worktree from this script's own task, so the InTest.Cli just packed above from *this*
-    # checkout may not understand the flag yet at all. Leaving it off for the default 'mstest'
-    # keeps this script working against such a checkout, since `init`'s own default is 'mstest'
-    # regardless of whether the flag exists.
+    # --framework is only appended for a non-default request -- see -Framework's own parameter doc
+    # comment above. Leaving it off for the default 'mstest' keeps this script's bootstrap step
+    # unchanged regardless of which framework values the packed InTest.Cli understands, since
+    # `init`'s own default is 'mstest' whether or not the flag exists at all.
     $initArgs = @('run', '--project', $CliProject, '-c', 'Release',
         "-p:MinVerVersionOverride=$LocalVersion",
         '--', 'init', '--name', $ProjectName, '--spec', $Spec)
@@ -412,10 +426,15 @@ try {
     # the runtime-framework split, InitCommand.cs's scaffold references an adapter package (which in
     # turn depends on the neutral InTest.Runtime package), not the neutral package directly.
     # InTest.Runtime.MSTest for the default 'mstest' framework, InTest.Runtime.xUnit for 'xunit'
-    # (Task 5 of docs/superpowers/plans/2026-08-30-intest-xunit-framework-pack.md) -- see
-    # -Framework's own parameter doc comment for why the 'xunit' path is written but not yet
-    # exercised against this worktree.
-    $expectedAdapterPackage = if ($Framework -eq 'xunit') { 'InTest.Runtime.xUnit' } else { 'InTest.Runtime.MSTest' }
+    # (Task 5 of docs/superpowers/plans/2026-08-30-intest-xunit-framework-pack.md), InTest.Runtime.NUnit
+    # for 'nunit' (Task 3 of docs/superpowers/plans/2026-08-31-intest-nunit-framework-pack.md) -- see
+    # -Framework's own parameter doc comment for what has and has not been run end to end against
+    # this worktree.
+    $expectedAdapterPackage = switch ($Framework) {
+        'xunit' { 'InTest.Runtime.xUnit' }
+        'nunit' { 'InTest.Runtime.NUnit' }
+        default { 'InTest.Runtime.MSTest' }
+    }
     $csprojPath = Join-Path $ScaffoldDir "$ProjectName.csproj"
     $csprojText = Get-Content -Raw -LiteralPath $csprojPath
     $needle = "Include=`"$expectedAdapterPackage`" Version=`"$LocalVersion`""
@@ -557,7 +576,7 @@ finally {
     # found -- a false confirmation of the one guarantee this script exists to make.
     $globalPackages = Join-Path $HOME '.nuget' 'packages'
     $CacheClean = $true
-    foreach ($pkg in 'intest.cli', 'intest.runtime', 'intest.runtime.mstest', 'intest.runtime.xunit') {
+    foreach ($pkg in 'intest.cli', 'intest.runtime', 'intest.runtime.mstest', 'intest.runtime.xunit', 'intest.runtime.nunit') {
         $found = Join-Path $globalPackages $pkg
         if (Test-Path $found) {
             $CacheClean = $false
@@ -567,6 +586,6 @@ finally {
 
     if (-not $Failed -and $CacheClean) {
         Write-Host ''
-        Write-Host "Confirmed: $globalPackages has no intest.cli, intest.runtime, intest.runtime.mstest or intest.runtime.xunit entries." -ForegroundColor Green
+        Write-Host "Confirmed: $globalPackages has no intest.cli, intest.runtime, intest.runtime.mstest, intest.runtime.xunit or intest.runtime.nunit entries." -ForegroundColor Green
     }
 }

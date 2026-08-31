@@ -4,15 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-InTest generates a committed, owned MSTest or xUnit project that exercises a **deployed** API over
-real HTTP, from its OpenAPI document. Four shipped packages (`InTest.Cli`, `InTest.Runtime`,
-`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`), four sample APIs used as fixtures, five test
-suites — the fifth, `InTest.Runtime.XUnit.Tests`, exists because the two adapters declare the same
-types in the same namespace and cannot share a compilation with `InTest.Runtime.Tests`.
+InTest generates a committed, owned MSTest, xUnit or NUnit project that exercises a **deployed**
+API over real HTTP, from its OpenAPI document. Five shipped packages (`InTest.Cli`,
+`InTest.Runtime`, `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`, `InTest.Runtime.NUnit`), four
+sample APIs used as fixtures, six test suites — the fifth and sixth, `InTest.Runtime.XUnit.Tests`
+and `InTest.Runtime.NUnit.Tests`, exist because all three adapters declare the same types in the
+same namespace and cannot share a compilation with `InTest.Runtime.Tests` or with each other.
 `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org (prerelease, via
-`release.yml`'s trusted-publishing push) — build from source for anything past that tag. Neither
-`InTest.Runtime.MSTest` nor `InTest.Runtime.xUnit` exists on nuget.org at that tag; `examples/`
-still pins `InTest.Runtime` there for that reason.
+`release.yml`'s trusted-publishing push) — build from source for anything past that tag. None of
+`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit` exists on nuget.org at
+that tag; `examples/` still pins `InTest.Runtime` there for that reason.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
@@ -29,11 +30,14 @@ so is §9's build-time copy of the spec to the output directory (`init` scaffold
 dotnet build InTest.sln
 # `dotnet test InTest.sln` now fails outright, not just incompletely: with both an MSTest and an
 # xunit.v3 project in the solution, the xUnit project errors on the VSTest target while MSTest
-# still runs and prints `Passed!`, and the command exits 1 (measured). Run each suite
-# individually instead — `.github/workflows/build-and-test.yml`'s `fast` job lists all five,
+# and NUnit both still run and print `Passed!`, and the command exits 1 (measured). Run each suite
+# individually instead — `.github/workflows/build-and-test.yml`'s `fast` job lists all six,
 # including `InTest.Runtime.XUnit.Tests`, which is not `dotnet test`-able at all and instead runs
 # as `dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll`
 # after a plain `dotnet build` of that project (the platform apphost does not exist on Linux).
+# `InTest.Runtime.NUnit.Tests` has no such exception — NUnit runs under classic VSTest like
+# MSTest, so it is an ordinary `dotnet test <csproj>` step ([nunit-is-vstest], the NUnit framework
+# pack's plan).
 dotnet test tests/InTest.Cli.Tests                       # one suite
 dotnet test tests/InTest.Cli.Tests --filter "FullyQualifiedName~CSharpLiteralTests"
 
@@ -52,8 +56,9 @@ INTEST_UPDATE_GOLDEN=1 dotnet test tests/InTest.Golden.Tests --filter "FullyQual
 `InTest.Golden.Tests` shells out to `dotnet build` and `dotnet test` on scaffolded temp projects
 and runs generated suites against an in-process HTTP stub. It is slow and it is the only suite
 that proves generated code both compiles *and* runs — do not skip it when changing the template,
-the renderer, or the scaffold. **Measured locally, 2026-08-31: ~4m13s
-warm — but ~9m43s from a *fresh worktree*, and both numbers are real.** The gap is the whole reason
+the renderer, or the scaffold. **Measured locally, 2026-08-31: ~7m37s
+warm at 71 cases — but it ran past 10m on the first run after the NUnit packages appeared, and both
+numbers are real.** The gap is the whole reason
 this figure needs a qualifier rather than a value: the temp projects these tests scaffold each run a
 real `dotnet build`, so a cold NuGet cache and cold obj/bin pay full restore-and-compile cost on
 every one of them, while a warm repeat reuses all of it. Quote which one you measured, or the next
@@ -63,15 +68,26 @@ case shells out to a real `dotnet build` (some also `dotnet test`) on a freshly 
 project, so the suite's wall-clock time grows roughly linearly with the number of generated-code
 shapes under test — it has no fixed ceiling the way an in-process suite would. It has grown before:
 this doc quoted ~90–107s at one point, then ~3m9s–3m17s after that was corrected, then ~3m49s–3m50s, and now
-**~4m13s** after the xUnit framework pack added six Golden cases and a second golden expectation
-file per spec, each step tracking real cases added (this branch alone added three new
-`CompileVerificationTests` cases and substantially grew `GeneratedSuiteExecutionTests`). Expect the
+~4m13s after the xUnit framework pack, and now **~7m37s** after the NUnit pack added
+eight more cases (six shell-out cases plus a third golden expectation file per spec), each step
+tracking real cases added. Expect the
 next reader's own measurement to be higher still if more shapes have been added since — treat
 whatever figure is quoted here as a floor to size a timeout against, not a number to assert against.
 A tool's default command timeout (commonly ~2 minutes) cuts this off mid-flight, which reads as a
 hang rather than a slow-but-healthy run; pass an explicit timeout well past the figure above (see
 the `golden` CI figure below for how much further it can run under load) rather than shortening the
-command or assuming it stalled.
+command or assuming it stalled. **This suite has now outgrown the ~10-minute ceiling some tools
+impose as a maximum rather than a default** — a cold run hit exactly 10m00s and was killed, which
+looks identical to a hang and is not one. When the available timeout cannot be raised past the
+figure above, run it in the background and collect the result, rather than concluding it stalled.
+
+Two things distort this measurement badly enough to be worth naming, because both have produced
+"the docs are wrong" reports that were really measurement errors. **Concurrent load:** the same
+71-case suite measured 12m14s while three other agents were building in sibling worktrees, against
+7m37s alone — a ~60% inflation, because nearly all of this suite's wall-clock time is real
+`dotnet build` shell-outs competing for the same cores. **Cold NuGet cache:** the first run after a
+new package id enters the scaffolded projects pays a full restore on *every* temp project. Never
+compare a figure measured under either condition against one measured without.
 
 Running the sample APIs requires specific environment variables (ports, issuer/authority pairing,
 `ASPNETCORE_ENVIRONMENT=Development`). See `samples/README.md`; getting them wrong produces
@@ -164,11 +180,12 @@ failure vocabularies.
   `HasRequestBody` from `FixtureComposer`; `RequiredScopes` from the spec's `security`) rather
   than letting downstream code re-derive them. Re-deriving is the recurring defect in this
   codebase — don't.
-- **`Rendering/`** — one Scriban template per framework, `Templates/mstest-class.scriban` and
-  `Templates/xunit-class.scriban`. Each is the only place its framework's code shape is decided;
-  `TemplateRenderer`'s constructor selects between them on `project.framework` and everything else
-  — `path_argument_list`, `query_expression`, the `has_body` block, the client branch's pinned
-  `try`/filters/stopwatch, and all `*_literal` quoting — stays byte-identical between the two.
+- **`Rendering/`** — one Scriban template per framework, `Templates/mstest-class.scriban`,
+  `Templates/xunit-class.scriban` and `Templates/nunit-class.scriban`. Each is the only place its
+  framework's code shape is decided; `TemplateRenderer`'s constructor selects among them on
+  `project.framework` and everything else — `path_argument_list`, `query_expression`, the
+  `has_body` block, the client branch's pinned `try`/filters/stopwatch, and all `*_literal`
+  quoting — stays byte-identical across all three.
 - **`Coverage/CoverageReport`** emits `coverage-report.json` next to the project. It is
   committed (explicitly un-ignored in `.gitignore`) and its JSON shape is covered by semver.
 
@@ -245,9 +262,10 @@ returns a reason `string?`, null meaning "run"; the MSTest adapter turns a non-n
 `Assert.Inconclusive` — xUnit's `Assert.Skip` and NUnit's `Assert.Ignore` drop straight in).
 
 `project.framework` in `intest.json` is read and validated (`ConfigLoader.RequireSupportedFramework`)
-— required, and only the exact lowercase `"mstest"` or `"xunit"` is accepted; anything else is
-refused as "not supported yet", naming §3's roadmap. `TemplateRenderer`'s constructor now branches
-on that value, selecting `mstest-class.scriban` or `xunit-class.scriban` once at construction time.
+— required, and only the exact lowercase `"mstest"`, `"xunit"` or `"nunit"` is accepted; anything
+else is refused as "not supported yet". With `nunit` added there is no fourth framework left on
+§3's roadmap to name. `TemplateRenderer`'s constructor now branches on that value, selecting
+`mstest-class.scriban`, `xunit-class.scriban` or `nunit-class.scriban` once at construction time.
 
 ## Working conventions
 
@@ -274,6 +292,6 @@ on that value, selecting `mstest-class.scriban` or `xunit-class.scriban` once at
 
 ## Constraints that are not negotiable in v1
 
-MSTest or xUnit v3, chosen with `init --framework` and frozen per project — NUnit is not
-supported yet. Test project TFM is `net10.0` (independent of the API's). Real HTTP against a
+MSTest, xUnit v3 or NUnit, chosen with `init --framework` and frozen per project — a suite cannot
+be migrated in place. Test project TFM is `net10.0` (independent of the API's). Real HTTP against a
 deployed target — no mocking, no in-memory host, no stateful CRUD flow ordering.

@@ -401,6 +401,49 @@ public class InitCommandTests
     }
 
     [TestMethod]
+    public void ScaffoldsAnNunitProjectWhenAskedFor()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "nunit").ShouldBe(0);
+
+        var csproj = File.ReadAllText(Path.Combine(_root, "Orders.ApiTests.csproj"));
+        csproj.ShouldContain("NUnit");
+        csproj.ShouldContain("InTest.Runtime.NUnit");
+        csproj.ShouldNotContain("MSTest.TestFramework");
+        csproj.ShouldNotContain("xunit.v3");
+        csproj.ShouldNotContain("<OutputType>Exe</OutputType>");
+
+        File.ReadAllText(Path.Combine(_root, "intest.json")).ShouldContain("\"framework\": \"nunit\"");
+    }
+
+    /// <summary>
+    /// [nunit-is-sequential]: NUnit's default is already sequential — measured, unlike xUnit v3
+    /// which parallelises by default. The attribute is emitted anyway so the scaffold states its
+    /// intent and survives someone later adding [Parallelizable] to a class.
+    /// </summary>
+    [TestMethod]
+    public void ScaffoldsTheNunitParallelismOptOut()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "nunit");
+
+        File.ReadAllText(Path.Combine(_root, "AssemblyInfo.cs"))
+            .ShouldContain("[assembly: NUnit.Framework.LevelOfParallelism(1)]");
+    }
+
+    /// <summary>
+    /// NUnit joins xUnit in having no *.runsettings equivalent — see the .csproj half of this
+    /// same decision in InitCommand's [scaffold-per-framework] comment above
+    /// <c>&lt;RunSettingsFilePath&gt;</c>.
+    /// </summary>
+    [TestMethod]
+    public void DoesNotScaffoldRunSettingsForNunit()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "nunit");
+
+        File.Exists(Path.Combine(_root, "Orders.ApiTests.runsettings")).ShouldBeFalse();
+        File.ReadAllText(Path.Combine(_root, "Orders.ApiTests.csproj")).ShouldNotContain("RunSettingsFilePath");
+    }
+
+    [TestMethod]
     public void RefusesAnUnknownFrameworkWithExitTwo()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "junit").ShouldBe(2);

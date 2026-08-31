@@ -67,61 +67,101 @@ public class CompileVerificationTests
                                                                                "framework": "{{framework}}" } }
                                                                 """);
 
-        var isXunit = framework == "xunit";
-
-        if (isXunit)
+        // Task 6 of the NUnit framework pack plan extended this to a three-way switch — see that
+        // plan's own [nunit-is-vstest] and [one-package]: NUnit joins MSTest's "ordinary class
+        // library, no OutputType" shape rather than xUnit's executable one, but needs its own
+        // adapter package pair (NUnit + NUnit3TestAdapter) and its own AssemblyInfo.cs attribute
+        // ([assembly: NUnit.Framework.LevelOfParallelism(1)] — [nunit-is-sequential] — rather than
+        // fixing a live parallelism hazard the way the other two frameworks' attributes do).
+        switch (framework)
         {
-            var xunitRuntimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src", "InTest.Runtime.xUnit", "InTest.Runtime.xUnit.csproj"));
+            case "xunit":
+            {
+                var xunitRuntimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..", "src", "InTest.Runtime.xUnit", "InTest.Runtime.xUnit.csproj"));
 
-            File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
-                                                                              <Project Sdk="Microsoft.NET.Sdk">
-                                                                                <PropertyGroup>
-                                                                                  <TargetFramework>net10.0</TargetFramework>
-                                                                                  <Nullable>enable</Nullable>
-                                                                                  <ImplicitUsings>enable</ImplicitUsings>
-                                                                                  <IsPackable>false</IsPackable>
-                                                                                  <OutputType>Exe</OutputType>
-                                                                                </PropertyGroup>
-                                                                                <ItemGroup>
-                                                                                  <PackageReference Include="xunit.v3" Version="4.0.0" />
-                                                                                  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-                                                                                  <ProjectReference Include="{xunitRuntimeProject}" />
-                                                                                </ItemGroup>
-                                                                              </Project>
-                                                                              """);
+                File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
+                                                                                  <Project Sdk="Microsoft.NET.Sdk">
+                                                                                    <PropertyGroup>
+                                                                                      <TargetFramework>net10.0</TargetFramework>
+                                                                                      <Nullable>enable</Nullable>
+                                                                                      <ImplicitUsings>enable</ImplicitUsings>
+                                                                                      <IsPackable>false</IsPackable>
+                                                                                      <OutputType>Exe</OutputType>
+                                                                                    </PropertyGroup>
+                                                                                    <ItemGroup>
+                                                                                      <PackageReference Include="xunit.v3" Version="4.0.0" />
+                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                                                                                      <ProjectReference Include="{xunitRuntimeProject}" />
+                                                                                    </ItemGroup>
+                                                                                  </Project>
+                                                                                  """);
 
-            File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
-                                                                      [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
-                                                                      """);
-        }
-        else
-        {
-            var runtimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
+                File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
+                                                                          [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+                                                                          """);
+                break;
+            }
 
-            File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
-                                                                              <Project Sdk="Microsoft.NET.Sdk">
-                                                                                <PropertyGroup>
-                                                                                  <TargetFramework>net10.0</TargetFramework>
-                                                                                  <Nullable>enable</Nullable>
-                                                                                  <ImplicitUsings>enable</ImplicitUsings>
-                                                                                  <IsPackable>false</IsPackable>
-                                                                                </PropertyGroup>
-                                                                                <ItemGroup>
-                                                                                  <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
-                                                                                  <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
-                                                                                  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-                                                                                  <ProjectReference Include="{runtimeProject}" />
-                                                                                </ItemGroup>
-                                                                              </Project>
-                                                                              """);
+            case "nunit":
+            {
+                var nunitRuntimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..", "src", "InTest.Runtime.NUnit", "InTest.Runtime.NUnit.csproj"));
 
-            File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
-                                                                      using Microsoft.VisualStudio.TestTools.UnitTesting;
+                // No <OutputType>Exe</OutputType> — that was xunit.v3's requirement ([one-package]:
+                // NUnit alone compiles an ordinary class library under classic VSTest).
+                File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
+                                                                                  <Project Sdk="Microsoft.NET.Sdk">
+                                                                                    <PropertyGroup>
+                                                                                      <TargetFramework>net10.0</TargetFramework>
+                                                                                      <Nullable>enable</Nullable>
+                                                                                      <ImplicitUsings>enable</ImplicitUsings>
+                                                                                      <IsPackable>false</IsPackable>
+                                                                                    </PropertyGroup>
+                                                                                    <ItemGroup>
+                                                                                      <PackageReference Include="NUnit" Version="4.6.1" />
+                                                                                      <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
+                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                                                                                      <ProjectReference Include="{nunitRuntimeProject}" />
+                                                                                    </ItemGroup>
+                                                                                  </Project>
+                                                                                  """);
 
-                                                                      [assembly: DoNotParallelize]
-                                                                      """);
+                File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
+                                                                          [assembly: NUnit.Framework.LevelOfParallelism(1)]
+                                                                          """);
+                break;
+            }
+
+            default:
+            {
+                var runtimeProject = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
+
+                File.WriteAllText(Path.Combine(_root, "Orders.ApiTests.csproj"), $"""
+                                                                                  <Project Sdk="Microsoft.NET.Sdk">
+                                                                                    <PropertyGroup>
+                                                                                      <TargetFramework>net10.0</TargetFramework>
+                                                                                      <Nullable>enable</Nullable>
+                                                                                      <ImplicitUsings>enable</ImplicitUsings>
+                                                                                      <IsPackable>false</IsPackable>
+                                                                                    </PropertyGroup>
+                                                                                    <ItemGroup>
+                                                                                      <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
+                                                                                      <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
+                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                                                                                      <ProjectReference Include="{runtimeProject}" />
+                                                                                    </ItemGroup>
+                                                                                  </Project>
+                                                                                  """);
+
+                File.WriteAllText(Path.Combine(_root, "AssemblyInfo.cs"), """
+                                                                          using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+                                                                          [assembly: DoNotParallelize]
+                                                                          """);
+                break;
+            }
         }
 
         return _root;

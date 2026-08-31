@@ -65,13 +65,17 @@ public static class ConfigLoader
         "\"Orders.ApiTests.OrdersTestBase\".";
 
     /// <summary>
-    /// <c>mstest</c> and <c>xunit</c> are the values accepted today. §3 designs InTest for three
-    /// frameworks — this list grows the day a framework ships, not before; naming a future
-    /// framework here would document a capability the tool does not have.
+    /// <c>mstest</c>, <c>xunit</c> and <c>nunit</c> are the values accepted — all three
+    /// frameworks §3 designs InTest for now ship. Until this pack, this list "grew the day a
+    /// framework shipped, not before," and the accompanying adopter-facing sentence named
+    /// whichever framework was still missing as "not supported yet." That framing no longer
+    /// applies: with nunit added there is no fourth framework on §3's roadmap left to name as
+    /// forthcoming, so the sentence below states the closed set plainly rather than leaving a
+    /// dangling "yet" that would promise a framework that does not exist.
     /// </summary>
     private const string FrameworkRule =
-        "It must be the test framework generated tests target. Supported today: \"mstest\" and " +
-        "\"xunit\". InTest is designed to support three frameworks (§3); NUnit is not supported yet.";
+        "It must be the test framework generated tests target: \"mstest\", \"xunit\" or " +
+        "\"nunit\" — the three frameworks InTest is designed to support (§3).";
 
     // The optional "client" section (docs/superpowers/plans/2026-08-25-intest-typed-client-invocation.md,
     // `[convention-plus-override]`). Unlike every rule above, this section is allowed to be
@@ -256,13 +260,14 @@ public static class ConfigLoader
     }
 
     /// <summary>
-    /// The values <c>project.framework</c> accepts today. §3 designs InTest for three frameworks
-    /// and this grows the day a framework ships, not before — accepting "nunit" here would
-    /// document a capability the tool does not have. See <see cref="FrameworkRule"/> for the
-    /// adopter-facing text this same list backs; the two are kept in step by both reading from
-    /// one array rather than by two independent lists agreeing by discipline.
+    /// The values <c>project.framework</c> accepts. §3 designs InTest for exactly three
+    /// frameworks and all three now ship — mstest, xunit and nunit — so, unlike when this array
+    /// last grew, there is no fourth roadmapped framework waiting to be added on the same "grows
+    /// the day it ships" premise. See <see cref="FrameworkRule"/> for the adopter-facing text
+    /// this same list backs; the two are kept in step by both reading from one array rather than
+    /// by two independent lists agreeing by discipline.
     /// </summary>
-    private static readonly string[] SupportedFrameworks = ["mstest", "xunit"];
+    private static readonly string[] SupportedFrameworks = ["mstest", "xunit", "nunit"];
 
     /// <summary>
     /// Unlike <see cref="ReadOptionalIntestVersion"/>, <c>project.framework</c> is required — read
@@ -296,9 +301,10 @@ public static class ConfigLoader
     /// already declare it. Making the key required breaks no config this repository ships.</item>
     /// </list>
     /// <para>
-    /// The value itself accepts exactly <c>"mstest"</c> or <c>"xunit"</c> — lowercase, matching
-    /// what <c>InitCommand</c> writes — and nothing else, including differently-cased spellings
-    /// like <c>"MSTest"</c> or <c>"xUnit"</c>. §5's config is adopter-facing JSON, not a C#
+    /// The value itself accepts exactly <c>"mstest"</c>, <c>"xunit"</c> or <c>"nunit"</c> —
+    /// lowercase, matching what <c>InitCommand</c> writes — and nothing else, including
+    /// differently-cased spellings like <c>"MSTest"</c> or <c>"xUnit"</c>. §5's config is
+    /// adopter-facing JSON, not a C#
     /// identifier with case-insensitive lookup rules; treating <c>"MSTest"</c> as equivalent would
     /// mean this loader accepts spellings <c>init</c> never writes and no other setting on this
     /// surface tolerates (<c>rootNamespace</c> and <c>testBaseClass</c> are both compared exactly

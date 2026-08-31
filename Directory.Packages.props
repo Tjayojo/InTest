@@ -16,6 +16,12 @@
     <PackageVersion Include="xunit.v3" Version="4.0.0" />
     <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.0" />
     <PackageVersion Include="xunit.v3.assert" Version="4.0.0" />
+    <!-- NUnit and NUnit3TestAdapter version independently: framework on 4.x, adapter on 6.x,
+         unlike the MSTest trio, which moves in lockstep. See [one-package] in the NUnit framework
+         pack plan: PackageVersionCouplingTests must check each against its own pin, not against
+         each other. -->
+    <PackageVersion Include="NUnit" Version="4.6.1" />
+    <PackageVersion Include="NUnit3TestAdapter" Version="6.3.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
   </ItemGroup>

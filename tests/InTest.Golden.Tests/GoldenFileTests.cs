@@ -63,8 +63,10 @@ public class GoldenFileTests
     [TestMethod]
     [DataRow("orders.json", "mstest", "OrdersTests", "OrdersTests.g.cs.txt", DisplayName = "Orders / mstest")]
     [DataRow("orders.json", "xunit", "OrdersTests", "OrdersTests.xunit.g.cs.txt", DisplayName = "Orders / xunit")]
+    [DataRow("orders.json", "nunit", "OrdersTests", "OrdersTests.nunit.g.cs.txt", DisplayName = "Orders / nunit")]
     [DataRow("mutating-operation.json", "mstest", "WidgetsTests", "MutatingOperationTests.g.cs.txt", DisplayName = "mutates / mstest")]
     [DataRow("mutating-operation.json", "xunit", "WidgetsTests", "MutatingOperationTests.xunit.g.cs.txt", DisplayName = "mutates / xunit")]
+    [DataRow("mutating-operation.json", "nunit", "WidgetsTests", "MutatingOperationTests.nunit.g.cs.txt", DisplayName = "mutates / nunit")]
     public async Task OutputMatchesTheGoldenFile(string specFileName, string framework, string className, string expectedFileName)
     {
         var actual = await RenderAsync(specFileName, framework, className);
