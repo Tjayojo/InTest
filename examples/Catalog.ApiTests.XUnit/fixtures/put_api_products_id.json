@@ -1,0 +1,17 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "put_api_products_id",
+    "generatedBy": "intest 0.1.0"
+  },
+  "$parameters": {
+    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+  },
+  "body": {
+    "name": "Sparse (updated)",
+    "description": "Updated by the generated integration suite",
+    "price": 6.50,
+    "stockQuantity": 3,
+    "isActive": true
+  }
+}
