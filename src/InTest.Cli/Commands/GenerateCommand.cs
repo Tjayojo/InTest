@@ -99,7 +99,7 @@ public static class GenerateCommand
     {
         var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        var renderer = new TemplateRenderer();
+        var renderer = new TemplateRenderer(config.Framework);
         foreach (var testClass in plan.Classes)
         {
             outputs[$"Generated/{testClass.ClassName}.g.cs"] =

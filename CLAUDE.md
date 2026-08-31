@@ -157,8 +157,11 @@ failure vocabularies.
   `HasRequestBody` from `FixtureComposer`; `RequiredScopes` from the spec's `security`) rather
   than letting downstream code re-derive them. Re-deriving is the recurring defect in this
   codebase — don't.
-- **`Rendering/`** — one Scriban template, `Templates/mstest-class.scriban`. This is the only
-  place MSTest code shape is decided.
+- **`Rendering/`** — one Scriban template per framework, `Templates/mstest-class.scriban` and
+  `Templates/xunit-class.scriban`. Each is the only place its framework's code shape is decided;
+  `TemplateRenderer`'s constructor selects between them on `project.framework` and everything else
+  — `path_argument_list`, `query_expression`, the `has_body` block, the client branch's pinned
+  `try`/filters/stopwatch, and all `*_literal` quoting — stays byte-identical between the two.
 - **`Coverage/CoverageReport`** emits `coverage-report.json` next to the project. It is
   committed (explicitly un-ignored in `.gitignore`) and its JSON shape is covered by semver.
 
@@ -235,10 +238,9 @@ returns a reason `string?`, null meaning "run"; the MSTest adapter turns a non-n
 `Assert.Inconclusive` — xUnit's `Assert.Skip` and NUnit's `Assert.Ignore` drop straight in).
 
 `project.framework` in `intest.json` is read and validated (`ConfigLoader.RequireSupportedFramework`)
-— required, and only the exact lowercase `"mstest"` is accepted; anything else is refused as "not
-supported yet", naming §3's roadmap. `TemplateRenderer` still hardcodes `mstest-class.scriban`
-regardless of the value — the config now carries `project.framework` correctly, but nothing yet
-*branches* on it to select a template.
+— required, and only the exact lowercase `"mstest"` or `"xunit"` is accepted; anything else is
+refused as "not supported yet", naming §3's roadmap. `TemplateRenderer`'s constructor now branches
+on that value, selecting `mstest-class.scriban` or `xunit-class.scriban` once at construction time.
 
 ## Working conventions
 

@@ -25,7 +25,7 @@ public class GoldenFileTests
         var spec = await SpecLoader.LoadFromFileAsync(SpecPath);
         var plan = TestPlanBuilder.Build(spec.Document);
         var ordersClass = plan.Classes.Single(c => c.ClassName == "OrdersTests");
-        return new TemplateRenderer().RenderClass(ordersClass, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+        return new TemplateRenderer("mstest").RenderClass(ordersClass, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
     }
 
     [TestMethod]
