@@ -111,6 +111,24 @@ jobs:
       - name: Test InTest.Runtime.Tests
         run: dotnet test tests/InTest.Runtime.Tests/InTest.Runtime.Tests.csproj --logger "trx;LogFileName=InTest.Runtime.Tests.trx" --results-directory ${{ github.workspace }}/TestResults
 
+      # InTest.Runtime.XUnit.Tests cannot join the three `dotnet test` steps above. Both InTest.Runtime.MSTest
+      # and InTest.Runtime.xUnit declare ApiTestBase/TestHost in the same namespace (deliberately -- see
+      # CLAUDE.md's Runtime section), so the two adapters cannot coexist in one compilation, and this
+      # suite exists precisely because it tests the xUnit adapter's own internals in isolation
+      # (tests/InTest.Runtime.XUnit.Tests/XunitDiagnosticsTests.cs). It also cannot run via `dotnet test`
+      # at all: xunit.v3's VSTest integration is what fails there, the same reason a solution-level
+      # `dotnet test InTest.sln` now exits 1 even though the MSTest suites inside it still print
+      # "Passed!" (measured). The project builds as an executable (OutputType=Exe, required by
+      # xunit.v3), so it is built once and then invoked as `dotnet <dll>` -- never the platform apphost,
+      # which does not exist on this job's ubuntu-latest leg (no .exe is produced there). This is the
+      # same defect already found and fixed in the Golden harness's GeneratedSuiteCommand (commit
+      # a2b96cd) for the identical reason.
+      - name: Build InTest.Runtime.XUnit.Tests
+        run: dotnet build tests/InTest.Runtime.XUnit.Tests/InTest.Runtime.XUnit.Tests.csproj
+
+      - name: Test InTest.Runtime.XUnit.Tests
+        run: dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll
+
       - name: Assert the suites actually ran
         # Step 3 of the plan's Task 2: a green `dotnet test` step does not prove anything ran --
         # see the script's own header for the two source comments and the reasoning this points
