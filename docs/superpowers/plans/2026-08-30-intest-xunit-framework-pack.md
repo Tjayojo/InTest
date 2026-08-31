@@ -8,6 +8,12 @@
 
 **Tech Stack:** .NET 10 · xunit.v3 4.0.0 (`xunit.v3.extensibility.core` + `xunit.v3.assert` for the library; `xunit.v3` for generated projects) · MSTest 4.3.3 (unchanged) · Scriban 7.2.6 · Shouldly 4.3.0
 
+**Revision 3.** Wave 1 (Tasks 2, 4, 10) implemented in parallel and merged clean; all four suites
+green. Four further defects surfaced *during* implementation and are fixed below: Task 2's build
+checkpoint expected a failure that does not happen, Task 4's Step 1 referenced three test helpers
+that do not exist, and two pieces of work were **owned by no task at all** —
+`scripts/local-e2e-test.ps1` (now Task 9) and `CLAUDE.md`'s Architecture section (now Task 6).
+
 **Revision 2.** Nine agents built or probed every remaining task against the real repository, and a
 second adversarial pass tried to refute what they found. **26 defects were confirmed; 3 were
 refuted and are not acted on.** The plan as first written did not survive contact: Task 2's adapter
@@ -332,7 +338,9 @@ The fifth test project does not exist yet (Task 3). For now, prove the package c
 dotnet build src/InTest.Runtime.xUnit
 ```
 
-Expected: **fails** — no source files yet.
+Expected: **succeeds** — a C# class library with no source files is a valid empty assembly. Rev 1
+said this should fail; it does not, and an implementer who trusts that will waste time doubting their
+setup. This step is a smoke test that the csproj and its package references resolve, nothing more.
 
 - [ ] **Step 4: Write `TestHost.cs`**
 
@@ -688,6 +696,12 @@ Repoint it to `"nunit"`, the remaining roadmapped-but-unshipped framework, and u
 to say why the exemplar moved. Verified: with `"nunit"` the test passes unchanged in substance.
 
 - [ ] **Step 1: Write the failing tests**
+
+**The code below is illustrative, not literal.** `LoadConfigWith`, `ScaffoldMsTestProject` and
+`SetConfiguredFramework` **do not exist** — rev 1 invented them. Use the files' real idioms:
+`ConfigLoaderTests` has `WriteConfig(json)` + `ConfigLoader.Load(_root)`, and `ReasonFor(json)` for
+the throwing case; `GenerateCommandTests` has its own scaffolding helpers. Write the two scaffolding
+helpers you need if they are genuinely absent, following the surrounding conventions.
 
 ```csharp
 [TestMethod]
@@ -1070,10 +1084,24 @@ dotnet test tests/InTest.Cli.Tests
 
 Expected: **PASS**.
 
+- [ ] **Step 5b: Update `CLAUDE.md`'s Architecture section — orphaned in rev 1, owned here**
+
+Two statements there become false the moment this task lands, and **no task claimed them**:
+
+- the `Rendering/` bullet's "one Scriban template, `Templates/mstest-class.scriban`. This is the only
+  place MSTest code shape is decided" — now two templates, and the sentence's point (one place per
+  framework) needs restating rather than deleting;
+- the paragraph stating `TemplateRenderer` "still hardcodes `mstest-class.scriban` regardless of the
+  value" and that "nothing yet *branches* on it" — this task is what makes that untrue.
+
+**Touch only the Architecture section.** Task 3 owns `CLAUDE.md`'s Commands section (the
+"all four suites" line) and Task 10 already changed the package count and the "MSTest only"
+constraint. Staying in your own section is what keeps these merges clean.
+
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/InTest.Cli tests/InTest.Cli.Tests
+git add src/InTest.Cli tests/InTest.Cli.Tests CLAUDE.md
 git commit -m "feat: add the xUnit template and select by project.framework
 
 [framework-selects-template]. Two templates rather than one branching internally.
@@ -1234,7 +1262,8 @@ harness parses), and the scaffold compile."
 ### Task 9: Ship the fourth package
 
 **Files:**
-- Modify: `scripts/ci/pack-and-verify.ps1`, `.github/workflows/release.yml`, `.github/workflows/pack.yml`
+- Modify: `scripts/ci/pack-and-verify.ps1`, `scripts/local-e2e-test.ps1`,
+  `.github/workflows/release.yml`, `.github/workflows/pack.yml`
 - Modify: `tests/InTest.Architecture.Tests/NeutralityTests.cs`, `PackageVersionCouplingTests.cs`
 
 - [ ] **Step 1: Extend the packaging scripts — including the asset-count check that fails AFTER publishing**
@@ -1254,6 +1283,17 @@ repeat this. `CONTRIBUTING.md` carries the same number in prose (Task 10) — th
 `pack-and-verify.ps1` packs three projects by explicit path (`:136-138`) and hardcodes an `MSTest.TestFramework` positive control (`:386-391`). `release.yml:206` and `pack.yml` name the three packages explicitly.
 
 Add the fourth to each. The positive control for the xUnit adapter is that its packed nuspec declares `xunit.v3.extensibility.core` — the same shape as the MSTest one.
+
+- [ ] **Step 1b: `scripts/local-e2e-test.ps1` — orphaned in rev 1, owned here**
+
+The design says this script "still needs changes for the fourth package and `--framework`", and **no
+task claimed it**. It packs the CLI and runtime locally and drives a scaffold end to end, so it must
+learn the fourth package and be able to scaffold an xUnit project.
+
+**It does not carry the VSTest assumption** — its own header states three times that `dotnet test` is
+*"deliberately out of scope"* (`:61`, `:76`, `:81`) and it only runs `dotnet build` on the scaffold
+(`:431`). So this is a packaging and `--framework` change, not a runner port. Do not "fix" a `dotnet
+test` problem it does not have.
 
 - [ ] **Step 2: Extend `NeutralityTests`**
 
