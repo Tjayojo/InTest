@@ -1,0 +1,12 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "post_api_customers",
+    "generatedBy": "intest 0.1.0"
+  },
+  "body": {
+    "name": "New Customer Ltd",
+    "email": "new-customer@example.invalid",
+    "phoneNumber": "+44 20 7946 0100"
+  }
+}
