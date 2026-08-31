@@ -4,15 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-InTest generates a committed, owned MSTest or xUnit project that exercises a **deployed** API over
-real HTTP, from its OpenAPI document. Four shipped packages (`InTest.Cli`, `InTest.Runtime`,
-`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`), four sample APIs used as fixtures, five test
-suites — the fifth, `InTest.Runtime.XUnit.Tests`, exists because the two adapters declare the same
-types in the same namespace and cannot share a compilation with `InTest.Runtime.Tests`.
+InTest generates a committed, owned MSTest, xUnit or NUnit project that exercises a **deployed**
+API over real HTTP, from its OpenAPI document. Five shipped packages (`InTest.Cli`,
+`InTest.Runtime`, `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`, `InTest.Runtime.NUnit`), four
+sample APIs used as fixtures, six test suites — the fifth and sixth, `InTest.Runtime.XUnit.Tests`
+and `InTest.Runtime.NUnit.Tests`, exist because all three adapters declare the same types in the
+same namespace and cannot share a compilation with `InTest.Runtime.Tests` or with each other.
 `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org (prerelease, via
-`release.yml`'s trusted-publishing push) — build from source for anything past that tag. Neither
-`InTest.Runtime.MSTest` nor `InTest.Runtime.xUnit` exists on nuget.org at that tag; `examples/`
-still pins `InTest.Runtime` there for that reason.
+`release.yml`'s trusted-publishing push) — build from source for anything past that tag. None of
+`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit` exists on nuget.org at
+that tag; `examples/` still pins `InTest.Runtime` there for that reason.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
@@ -167,11 +168,12 @@ failure vocabularies.
   `HasRequestBody` from `FixtureComposer`; `RequiredScopes` from the spec's `security`) rather
   than letting downstream code re-derive them. Re-deriving is the recurring defect in this
   codebase — don't.
-- **`Rendering/`** — one Scriban template per framework, `Templates/mstest-class.scriban` and
-  `Templates/xunit-class.scriban`. Each is the only place its framework's code shape is decided;
-  `TemplateRenderer`'s constructor selects between them on `project.framework` and everything else
-  — `path_argument_list`, `query_expression`, the `has_body` block, the client branch's pinned
-  `try`/filters/stopwatch, and all `*_literal` quoting — stays byte-identical between the two.
+- **`Rendering/`** — one Scriban template per framework, `Templates/mstest-class.scriban`,
+  `Templates/xunit-class.scriban` and `Templates/nunit-class.scriban`. Each is the only place its
+  framework's code shape is decided; `TemplateRenderer`'s constructor selects among them on
+  `project.framework` and everything else — `path_argument_list`, `query_expression`, the
+  `has_body` block, the client branch's pinned `try`/filters/stopwatch, and all `*_literal`
+  quoting — stays byte-identical across all three.
 - **`Coverage/CoverageReport`** emits `coverage-report.json` next to the project. It is
   committed (explicitly un-ignored in `.gitignore`) and its JSON shape is covered by semver.
 
@@ -248,9 +250,10 @@ returns a reason `string?`, null meaning "run"; the MSTest adapter turns a non-n
 `Assert.Inconclusive` — xUnit's `Assert.Skip` and NUnit's `Assert.Ignore` drop straight in).
 
 `project.framework` in `intest.json` is read and validated (`ConfigLoader.RequireSupportedFramework`)
-— required, and only the exact lowercase `"mstest"` or `"xunit"` is accepted; anything else is
-refused as "not supported yet", naming §3's roadmap. `TemplateRenderer`'s constructor now branches
-on that value, selecting `mstest-class.scriban` or `xunit-class.scriban` once at construction time.
+— required, and only the exact lowercase `"mstest"`, `"xunit"` or `"nunit"` is accepted; anything
+else is refused as "not supported yet". With `nunit` added there is no fourth framework left on
+§3's roadmap to name. `TemplateRenderer`'s constructor now branches on that value, selecting
+`mstest-class.scriban`, `xunit-class.scriban` or `nunit-class.scriban` once at construction time.
 
 ## Working conventions
 
@@ -277,6 +280,6 @@ on that value, selecting `mstest-class.scriban` or `xunit-class.scriban` once at
 
 ## Constraints that are not negotiable in v1
 
-MSTest or xUnit v3, chosen with `init --framework` and frozen per project — NUnit is not
-supported yet. Test project TFM is `net10.0` (independent of the API's). Real HTTP against a
+MSTest, xUnit v3 or NUnit, chosen with `init --framework` and frozen per project — a suite cannot
+be migrated in place. Test project TFM is `net10.0` (independent of the API's). Real HTTP against a
 deployed target — no mocking, no in-memory host, no stateful CRUD flow ordering.

@@ -28,12 +28,12 @@ namespace InTest.Architecture.Tests;
 /// without inheriting MSTest, silently regains an MSTest dependency again. Only a test that reads
 /// the .csproj can see that; the compiler has no opinion on unused references.
 /// <see cref="AdapterPackageDeclaresItsTestFramework"/> is that guard's mirror image: without it,
-/// emptying or deleting src/InTest.Runtime.MSTest/ (or, since the xUnit framework pack task,
-/// src/InTest.Runtime.xUnit/) would make the neutral-package guard pass trivially (a test-framework
-/// reference genuinely nowhere in the repo) while the product itself is broken, because nothing
-/// ships that adapter for InTest.Runtime any more. It is parameterised over both adapters via
-/// <c>[DataRow]</c> precisely so it cannot go blind to one of them the way a single hardcoded
-/// csproj path once did.
+/// emptying or deleting src/InTest.Runtime.MSTest/ (or, since the xUnit and NUnit framework pack
+/// tasks, src/InTest.Runtime.xUnit/ or src/InTest.Runtime.NUnit/) would make the neutral-package
+/// guard pass trivially (a test-framework reference genuinely nowhere in the repo) while the
+/// product itself is broken, because nothing ships that adapter for InTest.Runtime any more. It is
+/// parameterised over every adapter via <c>[DataRow]</c> precisely so it cannot go blind to one of
+/// them the way a single hardcoded csproj path once did.
 /// <see cref="NeutralSourcesDoNotReferenceMSTest"/>, kept below, is a fast, legible secondary of
 /// its own within this same layer: it fails with one sentence naming §3 instead of forty
 /// CS0246s, and — unlike the compiler — it still catches a commented-out <c>using</c> or a stale
@@ -223,14 +223,15 @@ public class NeutralityTests
     /// alone cannot see, because it only ever looks at one file.
     /// <para>
     /// Parameterised over every adapter that ships alongside the neutral InTest.Runtime package —
-    /// InTest.Runtime.MSTest and InTest.Runtime.xUnit — via <c>[DataRow]</c>, rather than one
-    /// hardcoded csproj path. Before the xUnit framework pack task, this method named only
-    /// src/InTest.Runtime.MSTest/InTest.Runtime.MSTest.csproj directly; that hardcoding would have
-    /// passed vacuously for InTest.Runtime.xUnit by simply never looking at it — deleting or
-    /// breaking that adapter alone would have left this guard, and the whole suite, green. A
-    /// per-adapter <c>[DataRow]</c> makes adding a future third adapter (an NUnit one, say) fail
-    /// the same way today's guard already fails for a broken MSTest or xUnit adapter: by omission
-    /// from this list, not by silent vacuity.
+    /// InTest.Runtime.MSTest, InTest.Runtime.xUnit and InTest.Runtime.NUnit — via <c>[DataRow]</c>,
+    /// rather than one hardcoded csproj path. Before the xUnit framework pack task, this method
+    /// named only src/InTest.Runtime.MSTest/InTest.Runtime.MSTest.csproj directly; that hardcoding
+    /// would have passed vacuously for InTest.Runtime.xUnit by simply never looking at it —
+    /// deleting or breaking that adapter alone would have left this guard, and the whole suite,
+    /// green. A per-adapter <c>[DataRow]</c> is what let the NUnit framework pack task add its own
+    /// row (rather than a fourth near-identical test method) and made a broken or missing
+    /// InTest.Runtime.NUnit fail the same way today's guard already fails for a broken MSTest or
+    /// xUnit adapter: by omission from this list, not by silent vacuity.
     /// </para>
     /// <para>
     /// Checks both halves of what makes each project an adapter rather than a copy: it must
@@ -244,6 +245,7 @@ public class NeutralityTests
     [TestMethod]
     [DataRow("InTest.Runtime.MSTest", "MSTest.TestFramework", DisplayName = "InTest.Runtime.MSTest / MSTest.TestFramework")]
     [DataRow("InTest.Runtime.xUnit", "xunit.v3.extensibility.core", DisplayName = "InTest.Runtime.xUnit / xunit.v3.extensibility.core")]
+    [DataRow("InTest.Runtime.NUnit", "NUnit", DisplayName = "InTest.Runtime.NUnit / NUnit")]
     public void AdapterPackageDeclaresItsTestFramework(string adapterProjectName, string testFrameworkPackageId)
     {
         var relativePath = $"src/{adapterProjectName}/{adapterProjectName}.csproj";

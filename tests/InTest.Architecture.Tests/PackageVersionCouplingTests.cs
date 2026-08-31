@@ -104,11 +104,25 @@ public class PackageVersionCouplingTests
     /// (<c>src/InTest.Runtime.MSTest/</c>) moved the scaffold's own reference from the neutral
     /// <c>InTest.Runtime</c> package to the adapter, which ProjectReferences the neutral package
     /// transitively. <c>InTest.Runtime.xUnit</c> joins it here for the same reason, added by the
-    /// xUnit framework pack task (<c>src/InTest.Runtime.xUnit/</c>) — it is checked the same way
-    /// as the MSTest adapter, not as a third-party dependency, because it too is InTest's own
-    /// packed version rather than a Directory.Packages.props entry. All adapters still declare
-    /// their types in <c>namespace InTest.Runtime</c>, so nothing else in the scaffold (e.g.
-    /// <c>testBaseClass</c>) needs to change alongside this.
+    /// xUnit framework pack task (<c>src/InTest.Runtime.xUnit/</c>), and <c>InTest.Runtime.NUnit</c>
+    /// joins it too, added by the NUnit framework pack task (<c>src/InTest.Runtime.NUnit/</c>) —
+    /// both are checked the same way as the MSTest adapter, not as a third-party dependency,
+    /// because each is InTest's own packed version rather than a Directory.Packages.props entry.
+    /// All adapters still declare their types in <c>namespace InTest.Runtime</c>, so nothing else
+    /// in the scaffold (e.g. <c>testBaseClass</c>) needs to change alongside this.
+    /// </para>
+    /// <para>
+    /// <b>Not a fourth member of this coupling:</b> unlike <c>InTest.Runtime.MSTest</c> and
+    /// <c>InTest.Runtime.xUnit</c>, InTest.Runtime.NUnit's own scaffolded <c>PackageReference</c>s
+    /// include two genuinely third-party packages that DO have their own
+    /// <c>Directory.Packages.props</c> entries and DO get checked against them by the ordinary
+    /// (non-self-versioned) path in <see cref="AssertScaffoldMatchesCentral"/> below: <c>NUnit</c>
+    /// and <c>NUnit3TestAdapter</c>. These two version independently of each other (4.x and 6.x)
+    /// — unlike the MSTest trio this guard was originally written around, which moves in lockstep
+    /// — but that needs no special-casing here: <see cref="AssertScaffoldMatchesCentral"/> already
+    /// looks up and compares each matched package id against the center independently, one at a
+    /// time, so two packages that happen to share a scaffold site but not a version are already
+    /// checked correctly with no change to that method at all.
     /// </para>
     /// <para>
     /// A <see cref="HashSet{T}"/> rather than a single <c>const string</c>: naming exactly one
@@ -119,7 +133,7 @@ public class PackageVersionCouplingTests
     /// </para>
     /// </summary>
     private static readonly HashSet<string> RuntimeSelfVersionedPackages =
-        new(StringComparer.Ordinal) { "InTest.Runtime.MSTest", "InTest.Runtime.xUnit" };
+        new(StringComparer.Ordinal) { "InTest.Runtime.MSTest", "InTest.Runtime.xUnit", "InTest.Runtime.NUnit" };
 
     /// <summary>
     /// The exact text InitCommand.cs's scaffold is expected to carry as the MSTest adapter's
@@ -349,9 +363,9 @@ public class PackageVersionCouplingTests
             }
 
             runtimeMatch.ShouldNotBeNull(
-            "the scaffolded .csproj has no adapter PackageReference (InTest.Runtime.MSTest or " +
-            "InTest.Runtime.xUnit) at all — InitCommand.cs's scaffold shape has changed; update " +
-            "this test alongside it.");
+            "the scaffolded .csproj has no adapter PackageReference (InTest.Runtime.MSTest, " +
+            "InTest.Runtime.xUnit or InTest.Runtime.NUnit) at all — InitCommand.cs's scaffold " +
+            "shape has changed; update this test alongside it.");
 
             runtimeMatch!.Groups[2].Value.ShouldBe(CliVersion.Current,
             $"the scaffolded {runtimeMatch.Groups[1].Value} PackageReference must carry the " +
