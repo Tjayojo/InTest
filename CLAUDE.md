@@ -12,10 +12,28 @@ and `InTest.Runtime.NUnit.Tests`, exist because all three adapters declare the s
 same namespace and cannot share a compilation with `InTest.Runtime.Tests` or with each other.
 All five are published to nuget.org as prereleases at `0.1.0-preview.2`, via `release.yml`'s
 trusted-publishing push — the first tag to publish all five, and the first to publish the three
-adapters at all. Build from source for anything past that tag. `examples/` now references
-`InTest.Runtime.MSTest` at that version and gets `InTest.Runtime` transitively at the identical
-version, which is the §3 compatibility contract holding against real published packages rather
-than a local build (verified with `dotnet list package --include-transitive`, not assumed).
+adapters at all. Build from source for anything past that tag. `examples/` now holds **six**
+committed projects — Catalog and Orders, each under MSTest, xUnit and NUnit — every one
+referencing its respective published adapter package (`InTest.Runtime.MSTest`,
+`InTest.Runtime.xUnit` or `InTest.Runtime.NUnit`) at that version and getting `InTest.Runtime`
+transitively at the identical version, which is the §3 compatibility contract holding against real
+published packages rather than a local build (verified with `dotnet list package
+--include-transitive`, not assumed).
+
+**Canonical statement, referenced rather than repeated elsewhere in this file and in README.md /
+docs/getting-started.md:** `examples/` and `InTest.Golden.Tests` are not redundant with each other.
+`InTest.Golden.Tests` proves the *templates* render correctly, byte-for-byte, but every Golden
+project substitutes a `ProjectReference` for the adapter's `PackageReference`, so it never touches
+a published package. `examples/` is the other half — six real projects, each resolving its adapter
+from nuget.org — and `.github/workflows/build-and-test.yml`'s `examples` job runs
+`dotnet tool restore` / `dotnet intest generate --check` / `dotnet build` against every directory
+under `examples/` that carries its own `intest.json` (discovered, not listed — same anti-vacuity
+reasoning as `ExampleProjectVersionMarkerTests`), proving the *adopter* path against what nuget.org
+actually serves today. It deliberately cannot catch drift from an unreleased CLI change, because
+every example pins a published version — that stays Golden's job. See
+`docs/superpowers/plans/2026-08-31-intest-cross-framework-examples.md`'s "Why this is not
+redundant with the Golden suite" section for the full reasoning, and
+`scripts/ci/examples.ps1`'s own header for the CI job's mechanics.
 One thing that publish measured and is worth knowing before you conclude a release is broken:
 the packages were live on nuget.org's flat-container API roughly **four minutes** before
 `dotnet tool install` could resolve them, failing with "not found in NuGet feeds" in between.
@@ -111,7 +129,7 @@ pwsh scripts/local-e2e-test.ps1
 ```
 
 CI (`.github/workflows/build-and-test.yml`, push to `main` and every pull request, matrixed
-`ubuntu-latest`/`windows-latest`) runs the commands above split across three jobs: `fast`
+`ubuntu-latest`/`windows-latest`) runs the commands above split across four jobs: `fast`
 (Architecture + Cli + Runtime; a prior measurement recorded ~33.5–35.5s cold-cache, but CI itself
 has since measured **~1m26s–1m46s** — trust the CI figure over the cold-cache one, since it is what
 actually gates a PR), `golden` (Golden alone, kept in its own parallel job so it cannot delay
@@ -119,12 +137,20 @@ actually gates a PR), `golden` (Golden alone, kept in its own parallel job so it
 windows-latest**, from before this branch's own `CompileVerificationTests`/`GeneratedSuiteExecutionTests`
 growth landed, so treat those as stale in the same direction and by roughly the same proportion as
 the local figure above grew — expect CI to have climbed too, not just the local number; re-measure
-from an actual CI run rather than assuming), and `dogfood`
+from an actual CI run rather than assuming), `dogfood`
 (`scripts/ci/dogfood.ps1`: `init` → `generate` → `fixtures repair` → `generate` →
-`generate --check` against the three sample specs under `samples/`, no live API — static only).
+`generate --check` against the three sample specs under `samples/`, no live API — static only),
+and `examples` (`scripts/ci/examples.ps1`: `dotnet tool restore` → `dotnet intest generate --check`
+→ `dotnet build` against every directory under `examples/` that carries its own `intest.json`,
+discovered rather than listed. See this file's "What this is" section above for why `examples` and
+`golden` are not redundant — in short, `golden` proves the templates render correctly against a
+`ProjectReference`; `examples` proves the published adapter packages on nuget.org still reproduce
+that same committed output, and cannot catch an unreleased CLI change because every example pins a
+published version).
 Reproduce `fast`/`golden` locally with the `dotnet test` invocations above; reproduce `dogfood`
 locally with `pwsh scripts/ci/dogfood.ps1 -RepoRoot . -ScaffoldRoot <dir-outside-the-checkout>
--CliDll <path-to-built-InTest.Cli.dll>`. `scripts/ci/assert-trx-results.ps1` then checks each
+-CliDll <path-to-built-InTest.Cli.dll>`; reproduce `examples` locally with
+`pwsh scripts/ci/examples.ps1 -RepoRoot .`. `scripts/ci/assert-trx-results.ps1` then checks each
 `.trx` actually reports executed tests for the right assembly, so a suite silently matching
 nothing cannot read as green. Every third-party action the workflow uses is pinned by commit
 SHA — see CONTRIBUTING.md's dependency policy.

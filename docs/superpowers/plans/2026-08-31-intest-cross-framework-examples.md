@@ -155,7 +155,7 @@ Commit message: `examples: Orders under NUnit`
 
 **Depends on Tasks 1-4.** Do not start until all four are merged.
 
-- [ ] **Step 1: Diff the generated output across frameworks and record what differs**
+- [x] **Step 1: Diff the generated output across frameworks and record what differs**
 
 For each spec, diff the MSTest example's `Generated/*.g.cs` against its xUnit and NUnit siblings.
 
@@ -166,7 +166,30 @@ it. **Stop and report; do not edit a generated file to make the diff clean.**
 
 Record the observed diff in the plan's Task 5 section as evidence.
 
-- [ ] **Step 2: CI**
+**Evidence, recorded 2026-08-31.** For both specs, the only differences between frameworks are the
+framework substitutions below — nothing semantic differs (no URL building, no role gating, no
+fixture lookup, no assertion). Measured with the non-substitution lines filtered out; the filtered
+set came back empty for Orders under both xUnit and NUnit, and independently re-verified here by
+diffing `examples/Orders.ApiTests.XUnit/Generated/OrdersTests.g.cs` against
+`examples/Orders.ApiTests/Generated/OrdersTests.g.cs` (namespace/class-name differences normalized
+away first, since those differ only because the projects are named differently) — every remaining
+line falls in the table below.
+
+| MSTest | xUnit | NUnit |
+|---|---|---|
+| `[TestClass]` | *(none)* | `[TestFixture]` |
+| `[TestMethod, TestCategory(…)]` | `[Fact]` + `[Trait("Category",…)]` | `[Test]` + `[Category(…)]` |
+| `[Description(…)]` | `[Trait("Description",…)]` | `[Description(…)]` |
+| `[DoNotParallelize]` | `[Fact(DisableParallelization = true)]` | `[NonParallelizable]` |
+| `TestContext.CancellationToken` | `TestContext.Current.CancellationToken` | `TestContext.CurrentContext.CancellationToken` |
+
+xUnit renders `[Trait("Description", …)]` rather than a dedicated attribute because xUnit has no
+`Description` attribute at all — the template adapting to what the framework offers, not a
+divergence from the other two. Plus namespace and base-class names, which differ only because the
+projects are named differently (`Orders.ApiTests` vs. `Orders.ApiTests.XUnit` vs.
+`Orders.ApiTests.NUnit`), not because of any framework-specific code shape.
+
+- [x] **Step 2: CI**
 
 Add a job to `.github/workflows/build-and-test.yml` that, for **every** directory under `examples/`
 containing an `intest.json`:
@@ -184,19 +207,58 @@ directories are discovered.
 This job resolves the **published** packages from nuget.org, so it runs the adopter path rather
 than the local build. That is deliberate: Golden already covers the local CLI's rendering.
 
-- [ ] **Step 3: Prove the CI job can fail**
+Implemented as a new `examples` job (matrixed `ubuntu-latest`/`windows-latest`, same as every other
+job in the workflow) that delegates to a new script, `scripts/ci/examples.ps1` — discovery,
+anti-vacuity check, and the three commands per directory, with full reasoning in the script's own
+header comment. See `.github/workflows/build-and-test.yml`'s `examples` job for the job-level
+comment and pinned-action reasoning.
+
+- [x] **Step 3: Prove the CI job can fail**
 
 Change one committed generated file, confirm `generate --check` exits non-zero and the job would
 fail, then revert. A CI job never observed failing is not yet a guard.
 
-- [ ] **Step 4: Docs**
+**Proven, 2026-08-31.** In `examples/Orders.ApiTests/`, changed `Generated/OrdersTests.g.cs`'s
+first `[Description(...)]` attribute to `[Description("MUTATED for CI-fail proof")]`, then ran
+`dotnet intest generate --check`:
+
+```
+Generated/OrdersTests.g.cs differs from a fresh render.
+Run 'intest generate' to update.
+```
+Exit code: `1`.
+
+Reverted with `git checkout -- examples/Orders.ApiTests/Generated/OrdersTests.g.cs` (confirmed by
+`git status --porcelain` coming back clean), then re-ran the identical command:
+
+```
+Generated/ and coverage-report.json match a fresh render.
+```
+Exit code: `0`.
+
+- [x] **Step 4: Docs**
 
 `README.md` and `docs/getting-started.md` reference `examples/` — update them to say all three
 frameworks are represented. `CLAUDE.md`'s ownership table and repository description mention the
 examples; keep them accurate. State in one place that examples exercise the published packages
 while Golden exercises the templates, and point the other mentions at it rather than restating.
 
-- [ ] **Step 5: Commit**
+**Correction found while implementing:** as of this task's starting point, neither `README.md` nor
+`docs/getting-started.md` referenced `examples/` at all — the premise above does not match current
+source. Rather than stopping (this is a doc-accuracy gap, not an architectural contradiction),
+added a new, clearly-scoped pointer to each: README.md's "Using it" section gets a "Worked
+examples" paragraph; getting-started.md gets a pointer directly after the MSTest/xUnit/NUnit
+scaffold-diff tables in Phase 2. Both point at `CLAUDE.md`'s "What this is" section, which now
+carries the canonical "examples/ vs. Golden" statement (added there, not invented as a new
+location) — the one place this reasoning is stated in full; every other mention (this plan's own
+"Why this is not redundant" section, the new CI job's comment, `scripts/ci/examples.ps1`'s header)
+points at either that or this plan rather than restating it. `CLAUDE.md`'s "What this is" section
+and its CI-jobs paragraph (the "Commands" section) were both updated: the former to describe all
+six committed examples instead of a stale one-framework sentence, the latter to add the fourth
+(`examples`) CI job alongside `fast`/`golden`/`dogfood`, which it did not previously mention at
+all.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "ci: build and check every example project"

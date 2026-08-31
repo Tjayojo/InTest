@@ -169,6 +169,13 @@ path/query parameters live in `fixtures/`, which only `fixtures repair` writes t
 **Full walkthrough:** [docs/getting-started.md](docs/getting-started.md) — from an existing API
 to a suite running as a post-deployment gate, including CI wiring and the things that bite.
 
+**Worked examples:** [`examples/`](examples/) commits the generated output of two sample APIs —
+Catalog and Orders — each under all three frameworks, six projects in total, every one resolving
+its adapter package (`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit`)
+from nuget.org rather than from this repository's own source. CI builds and `--check`s every one
+on every push and pull request (see `CLAUDE.md`'s "What this is" section for why this is not
+redundant with the template tests).
+
 ## Design principles
 
 1. **You own the output.** A full test project, committed, readable, editable.
