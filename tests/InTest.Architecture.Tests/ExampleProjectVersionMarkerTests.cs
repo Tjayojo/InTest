@@ -52,16 +52,26 @@ namespace InTest.Architecture.Tests;
 [TestClass]
 public class ExampleProjectVersionMarkerTests
 {
-    // Deliberately matches either id: examples/ stays pinned to the bare InTest.Runtime at
-    // 0.1.0-preview.1 (see each example's own .csproj comment) because that is the *published*
-    // version examples actually restore from nuget.org, and InTest.Runtime.MSTest 0.1.0-preview.1
-    // does not exist yet — it ships with the next release, alongside the runtime split
-    // (src/InTest.Runtime.MSTest/). Repointing examples/ to the adapter id today would break
-    // `dotnet restore` for anyone running them. Once the adapter is published, migrating each
-    // example is a one-line PackageReference id edit rather than a surprise red test here — do NOT
-    // "fix" that migration by touching examples/ preemptively (see CLAUDE.md's Task 8 notes).
+    // Matches the bare neutral id or any of the three adapter ids, because an example legitimately
+    // references whichever adapter matches its own project.framework and gets InTest.Runtime
+    // transitively from it. All four spellings are the same version marker for this guard's
+    // purpose: the version an example restores from nuget.org.
+    //
+    // The history is worth keeping, because it explains why the bare id is still accepted at all.
+    // Until 0.1.0-preview.2 this pattern matched only `InTest.Runtime` and `InTest.Runtime.MSTest`,
+    // and examples deliberately pinned the bare neutral id — no adapter package existed on
+    // nuget.org to reference, so repointing them would have broken `dotnet restore` for anyone
+    // running them. 0.1.0-preview.2 published all three adapters, examples/ migrated to
+    // InTest.Runtime.MSTest, and the four xUnit/NUnit examples arrived referencing the other two.
+    // The bare id stays matchable so this guard keeps working against an example (or an adopter's
+    // project, if this pattern is ever reused) that predates the split.
+    //
+    // Adding a fourth adapter means adding it here. That is a real coupling, and it announces
+    // itself as a red test naming the offending example rather than as a silent pass — which is the
+    // behaviour that caught this exact omission when the xUnit and NUnit examples first landed.
     private static readonly Regex RuntimePackageReferencePattern =
-        new(@"<PackageReference\s+Include=""InTest\.Runtime(?:\.MSTest)?""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
+        new(@"<PackageReference\s+Include=""InTest\.Runtime(?:\.(?:MSTest|xUnit|NUnit))?""\s+Version=""([^""]+)""\s*/>",
+            RegexOptions.Compiled);
 
     private static string RepoRoot()
     {
@@ -147,7 +157,7 @@ public class ExampleProjectVersionMarkerTests
             {
                 offenders.Add(
                 $"{exampleName}: no <PackageReference Include=\"InTest.Runtime\" (or " +
-                "\"InTest.Runtime.MSTest\") Version=\"...\" /> found in " +
+                "\"InTest.Runtime.MSTest\"/\".xUnit\"/\".NUnit\") Version=\"...\" /> found in " +
                 $"{Path.GetFileName(csprojFiles[0])} — either the scaffold shape changed or this " +
                 "example lost its runtime reference.");
                 continue;
