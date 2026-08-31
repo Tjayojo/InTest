@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>InTest.Runtime.NUnit</PackageId>
+    <Description>NUnit adapter for InTest-generated API integration tests. Brings in InTest.Runtime and adds the NUnit-specific TestHost and ApiTestBase types.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>testing;nunit;openapi;api-testing;test-runtime</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Both TestHost.cs and ApiTestBase.cs declare `namespace InTest.Runtime;` explicitly, so
+         compilation does not depend on this setting. It exists anyway so the SDK default
+         (InTest.Runtime.NUnit, from the project/assembly name) isn't left sitting as a trap for
+         the next file added to this project without an explicit namespace declaration. The
+         namespace deliberately matches the neutral InTest.Runtime package: an adopter moving from
+         the (now nonexistent) all-in-one package to this split only changes the PackageReference
+         id in their .csproj, never a `using` or a type name in their own source. -->
+    <RootNamespace>InTest.Runtime</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- InternalsVisibleTo grant for InTest.Runtime.NUnit.Tests only, mirroring
+         InTest.Runtime.MSTest.csproj's own InternalsVisibleTo for InTest.Runtime.Tests. This is
+         explicitly NOT an InternalsVisibleTo between InTest.Runtime and InTest.Runtime.NUnit, the
+         two shipped packages: the entire point of the split is that no such grant exists between
+         them. -->
+    <InternalsVisibleTo Include="InTest.Runtime.NUnit.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- MinVer is NOT optional here. Without it this package packs at the SDK's default 1.0.0
+         instead of the git-derived version every other shipped package carries, silently, because
+         nothing about a missing MinVer reference fails the build — it just stops contributing a
+         version. -->
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <!-- Version comes from Directory.Packages.props (central package management) — an inline
+         Version here would be a build error.
+
+         One package, not two. Unlike xunit.v3, which refuses to compile from a library project
+         and splits into extensibility.core plus assert, NUnit 4.6.1 alone compiles a class
+         library calling Assert.Ignore, TestContext.CurrentContext.Test.Name and
+         TestContext.Error.WriteLine. See [one-package] in the NUnit framework pack plan. -->
+    <PackageReference Include="NUnit" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The SDK turns this into a nuspec <dependency id="InTest.Runtime" ...> automatically —
+         nothing to hand-write here. -->
+    <ProjectReference Include="../InTest.Runtime/InTest.Runtime.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
