@@ -10,7 +10,35 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ## [Unreleased]
 
+## [0.1.0-preview.2] - 2026-08-31
+
+Adds xUnit v3 and NUnit as supported test frameworks, bringing the published package count to
+five. `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` are all published
+here for the first time; `InTest.Cli` and `InTest.Runtime` move from `0.1.0-preview.1`.
+
 ### Added
+
+- **xUnit v3 and NUnit are now supported test frameworks**, chosen with `intest init --framework
+  xunit` / `--framework nunit` and frozen per project. Two new adapter packages ship alongside the
+  MSTest one — `InTest.Runtime.xUnit` (depending on `InTest.Runtime` at the exact same
+  version plus `xunit.v3.extensibility.core` and `xunit.v3.assert`) and `InTest.Runtime.NUnit`
+  (plus `NUnit` alone, which needs no equivalent split). All three adapters declare their types in
+  the same `namespace InTest.Runtime`, so the only things that differ between a generated MSTest,
+  xUnit and NUnit project are the `PackageReference` id and the framework's own attributes —
+  never a `using`, never a type name. `InTest.Runtime` itself gained nothing and lost nothing: the
+  design spec's §3 promised a second framework would cost "a template set plus an adapter package"
+  and no change to the neutral runtime, and that held for both additions, each verified by an empty
+  `git diff src/InTest.Runtime/`. **Migration:** none — existing MSTest projects are
+  untouched, and a suite still cannot be migrated between frameworks in place. See
+  `docs/superpowers/specs/2026-08-30-intest-xunit-framework-pack.md` and
+  `docs/superpowers/plans/2026-08-31-intest-nunit-framework-pack.md`.
+- Both new adapters were run **live against real deployed APIs**, not only against generated-code
+  fixtures. Each reproduces the MSTest figures exactly (Catalog 13 of 13; Orders 20 passed, 0
+  failed, 4 skipped), with all four skips bottoming out in `RequireSecondaryIdentityLacks` across
+  three different skip mechanisms (`Assert.Inconclusive`, `Assert.Skip`, `Assert.Ignore`) while the
+  three write-scope 403 cases run and pass — so the skip decision is per-operation, not a
+  blanket avoidance. `docs/v0-acceptance.md`'s framework-pack record has the full account,
+  including two findings that are environmental rather than product defects.
 
 - Opt-in invocation through a team's own pre-generated API client (Kiota, NSwag, or Refit): a new
   `client` section in `intest.json` (`{ "kind": "kiota", "typeName": "..." }`) routes qualifying
@@ -51,7 +79,7 @@ goes in `Unreleased` and when it moves to a version heading.
   test's own assertion and the run otherwise exits 0. `ApiTestBase.ApiTestInitialize` already calls
   the two-argument form with a real per-test sink, so every case this repository ships gets the
   warning for free. This is additive, not a break, at the `InTest.Runtime` package boundary a
-  hypothetical third-party xUnit/NUnit adapter sits on: the pre-existing one-argument
+  third-party adapter sits on: the pre-existing one-argument
   `BeginTest(string?)` survives as a compatibility overload, so a caller built against
   `0.1.0-preview.1` keeps compiling and keeps running with the exact old silent-discard behaviour,
   unchanged, until it migrates to the two-argument form to start receiving the warning.
@@ -60,10 +88,15 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ### Changed
 
+- `project.framework` in `intest.json` is now validated against three accepted values —
+  `"mstest"`, `"xunit"` and `"nunit"` — and `TemplateRenderer` selects one of three
+  Scriban templates from it at construction time. Previously only `"mstest"` was accepted and the
+  value was read but never branched on. **Migration:** none; existing `intest.json` files already
+  say `"mstest"`.
 - **Breaking:** `InTest.Runtime` split into two packages — the framework-neutral `InTest.Runtime`
   (no test-framework dependency) and a new `InTest.Runtime.MSTest` adapter (`TestHost`,
-  `ApiTestBase`, and the `MSTest.TestFramework` dependency) — so that a future xUnit or NUnit
-  adapter never pulls MSTest in transitively, and vice versa. A generated project now references
+  `ApiTestBase`, and the `MSTest.TestFramework` dependency) — so that the xUnit and NUnit
+  adapters shipped in this same version never pull MSTest in transitively, and vice versa. A generated project now references
   `InTest.Runtime.MSTest` instead of `InTest.Runtime`. **Migration:** change the
   `PackageReference` id in your `.csproj` from `InTest.Runtime` to `InTest.Runtime.MSTest`; both
   packages declare their types in the same `namespace InTest.Runtime`, so no source change is
@@ -143,5 +176,6 @@ defect: `intest survey`, `intest fixtures promote`, `intest assertions add`,
 not exist yet. xUnit and NUnit are not supported — MSTest only. See `README.md`'s status banner
 and `docs/getting-started.md` for what each gap means in practice.
 
-[Unreleased]: https://github.com/Tjayojo/intest/compare/0.1.0-preview.1...HEAD
+[Unreleased]: https://github.com/Tjayojo/intest/compare/0.1.0-preview.2...HEAD
+[0.1.0-preview.2]: https://github.com/Tjayojo/intest/releases/tag/0.1.0-preview.2
 [0.1.0-preview.1]: https://github.com/Tjayojo/intest/releases/tag/0.1.0-preview.1
