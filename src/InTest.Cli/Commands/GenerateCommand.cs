@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using InTest.Cli.Clients;
 using InTest.Cli.Configuration;
 using InTest.Cli.Coverage;
@@ -183,6 +184,23 @@ public static class GenerateCommand
             // ConfigLoader for why that lives in one loader rather than at each read site.
             var config = ConfigLoader.Load(projectRoot);
 
+            // [frozen-axis-becomes-reachable]: checked immediately after the config loads, before
+            // anything else — the spec is not even loaded yet. §5 makes the test framework a
+            // frozen axis and promises that changing one "fails with a real error"; with only
+            // "mstest" ever accepted, that promise was unreachable, because there was no second
+            // value to disagree with a scaffolded project's adapter reference. Accepting "xunit"
+            // makes it reachable: an adopter could otherwise edit project.framework in intest.json
+            // and get a wholesale-rewritten Generated/ (this command deletes and rewrites
+            // Generated/ wholesale) targeting a framework the project's own .csproj does not
+            // reference — code that will not compile, discovered only after generation, not
+            // before it.
+            var frameworkMismatch = DetectFrameworkMismatch(projectRoot, config.Framework);
+            if (frameworkMismatch is not null)
+            {
+                Console.Error.WriteLine(frameworkMismatch);
+                return ExitCode.ToolError;
+            }
+
             // [exact-match], checked first: before the spec is even loaded, let alone before any
             // output comparison. §8 requires the version check to fail "before comparing any
             // output" — a version mismatch and a real diff must report as 4, not 1, or a stale
@@ -323,6 +341,109 @@ public static class GenerateCommand
             "than \"kiota\", \"nswag\" or \"refit\" — this indicates a defect in that validation, " +
             "not bad adopter input.")
     };
+
+    /// <summary>
+    /// [frozen-axis-becomes-reachable]: refuses when <c>project.framework</c> disagrees with the
+    /// adapter <c>PackageReference</c> already present in the project's own <c>.csproj</c> — the
+    /// same comparison <see cref="UpgradeCommand.DetectRuntimeReferenceMismatch"/> already makes
+    /// for a version drift, applied here to the framework identity instead. §5's "Frozen vs.
+    /// additive axes" table makes the test framework a frozen axis for exactly this reason:
+    /// lifecycle, parameterization and parallelism differ between frameworks, and every
+    /// hand-written partial targets one of them — a suite cannot be migrated in place by editing
+    /// this one string.
+    /// <para>
+    /// <b>Mirrors <see cref="UpgradeCommand.DetectRuntimeReferenceMismatch"/>'s
+    /// silence-on-ambiguity discipline, not just its comparison.</b> No <c>.csproj</c> found, more
+    /// than one, an unreadable one, or one whose text names neither adapter's
+    /// <c>PackageReference</c> — all return <see langword="null"/> (no refusal) rather than
+    /// guess. A detector confident enough to guess a project's framework from an unrecognised
+    /// shape is not thereby confident enough to be right, and a false-positive refusal blocking an
+    /// adopter's ordinary `generate` on an unusual project layout is a worse failure than silently
+    /// trusting <c>intest.json</c> the way this command always has — which is exactly what ran,
+    /// bug-free, for every project this repository ships before this method existed.
+    /// </para>
+    /// <para>
+    /// Returns the message <see cref="RunAsync"/> should print, or <see langword="null"/> when no
+    /// mismatch is detected (including every "could not tell" case above) — same shape as
+    /// <see cref="UpgradeCommand.DetectRuntimeReferenceMismatch"/>, for the same reason: this only
+    /// ever reads, and never writes to <paramref name="projectRoot"/>.
+    /// </para>
+    /// </summary>
+    internal static string? DetectFrameworkMismatch(string projectRoot, string configuredFramework)
+    {
+        string[] csprojFiles;
+        try
+        {
+            csprojFiles = Directory.GetFiles(projectRoot, "*.csproj", SearchOption.TopDirectoryOnly);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+
+        // Zero: nothing to check against — a missing .csproj is not this method's job to
+        // diagnose. More than one: ambiguous which project this generate is about; guessing
+        // wrong would misdirect an adopter, so this says nothing rather than pick one. Same
+        // reasoning as DetectRuntimeReferenceMismatch's identical guard.
+        if (csprojFiles.Length != 1)
+        {
+            return null;
+        }
+
+        string csprojText;
+        try
+        {
+            csprojText = File.ReadAllText(csprojFiles[0]);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+
+        var mstestMatch = MsTestAdapterReferencePattern.IsMatch(csprojText);
+        var xunitMatch = XunitAdapterReferencePattern.IsMatch(csprojText);
+
+        // Neither pattern matched (a reformatted or hand-edited .csproj this narrow pattern no
+        // longer recognises — see the doc comment above), or both matched (never produced by
+        // `init`, and guessing which one is "the" adapter reference is worse than silence): say
+        // nothing either way.
+        string? adapterFramework = (mstestMatch, xunitMatch) switch
+        {
+            (true, false) => "mstest",
+            (false, true) => "xunit",
+            _ => null,
+        };
+
+        if (adapterFramework is null || adapterFramework == configuredFramework)
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(csprojFiles[0]);
+        var adapterPackageId = adapterFramework == "mstest" ? "InTest.Runtime.MSTest" : "InTest.Runtime.xUnit";
+        return
+            $"{fileName} references {adapterPackageId}, but intest.json declares " +
+            $"project.framework \"{configuredFramework}\". The test framework is a frozen axis " +
+            "(§5 \"Frozen vs. additive axes\") — lifecycle, parameterization and parallelism " +
+            "differ between frameworks, and hand-written partials target the one the project was " +
+            "scaffolded with, so a suite cannot be migrated in place by editing this value. " +
+            $"Generate a fresh project with `intest init --framework {configuredFramework}`, port " +
+            "hand-written tests across manually, and delete this one — or set project.framework " +
+            $"back to \"{adapterFramework}\" if intest.json was the value edited by mistake.";
+    }
+
+    /// <summary>
+    /// Matches the exact shape <c>InitCommand</c>'s scaffold writes for the MSTest adapter's
+    /// <c>PackageReference</c> — <c>Include</c> before <c>Version</c>, a self-closing tag — the
+    /// version itself is not needed here, only whether the reference exists at all, so unlike
+    /// <see cref="UpgradeCommand"/>'s equivalent pattern this one captures nothing.
+    /// </summary>
+    private static readonly Regex MsTestAdapterReferencePattern =
+        new(@"<PackageReference\s+Include=""InTest\.Runtime\.MSTest""", RegexOptions.Compiled);
+
+    /// <summary>The xUnit adapter's counterpart to <see cref="MsTestAdapterReferencePattern"/>.</summary>
+    private static readonly Regex XunitAdapterReferencePattern =
+        new(@"<PackageReference\s+Include=""InTest\.Runtime\.xUnit""", RegexOptions.Compiled);
 
     /// <summary>
     /// Either the loaded spec, or the exit code a caller should return because this step already
