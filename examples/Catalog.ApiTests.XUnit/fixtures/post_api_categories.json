@@ -1,0 +1,11 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "post_api_categories",
+    "generatedBy": "intest 0.1.0"
+  },
+  "body": {
+    "name": "Accessories",
+    "notes": "Created by the generated integration suite"
+  }
+}
