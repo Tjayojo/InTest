@@ -198,6 +198,11 @@ differently:
 | `intest.json` | `"framework": "nunit"` |
 | `Orders.ApiTests.runsettings` | **not written at all**, for the same reason as xUnit — NUnit has no run-settings equivalent either |
 
+**Working, committed reference for all three:** [`examples/`](../examples/) carries the generated
+output of both sample APIs under MSTest, xUnit and NUnit side by side (six projects total), each
+restoring its adapter package from nuget.org rather than from this repository's own source — see
+`CLAUDE.md`'s "What this is" section for why that is not redundant with the template-level tests.
+
 The framework is frozen per project once `init` runs (§5): editing `project.framework` in
 `intest.json` afterward without also changing the `.csproj`'s adapter reference is a mismatch
 `generate` detects and refuses, rather than silently rewriting `Generated/` against a project that

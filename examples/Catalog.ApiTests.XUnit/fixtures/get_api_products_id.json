@@ -1,0 +1,10 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "get_api_products_id",
+    "generatedBy": "intest 0.1.0"
+  },
+  "$parameters": {
+    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+  }
+}

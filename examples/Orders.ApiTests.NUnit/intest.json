@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "intestVersion": "0.1.0-preview.2",
+  "spec": { "source": "../../samples/Orders.Api/Orders.Api.json", "producer": "auto" },
+  "project": {
+    "name": "Orders.ApiTests.NUnit",
+    "rootNamespace": "Orders.ApiTests.NUnit",
+    "framework": "nunit",
+    "assertions": ["shouldly"],
+    "testBaseClass": "Orders.ApiTests.NUnit.OrdersTestBase"
+  }
+}

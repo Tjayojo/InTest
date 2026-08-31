@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "intestVersion": "0.1.0-preview.2",
+  "spec": { "source": "../../samples/Catalog.Api/Catalog.Api.json", "producer": "auto" },
+  "project": {
+    "name": "Catalog.ApiTests.XUnit",
+    "rootNamespace": "Catalog.ApiTests.XUnit",
+    "framework": "xunit",
+    "assertions": ["shouldly"],
+    "testBaseClass": "Catalog.ApiTests.XUnit.CatalogTestBase"
+  }
+}

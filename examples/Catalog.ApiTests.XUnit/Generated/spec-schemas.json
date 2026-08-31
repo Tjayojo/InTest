@@ -1,0 +1,526 @@
+{
+  "definitions": {
+    "CategoryResponse": {
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notes": {
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      }
+    },
+    "CreateCategoryRequest": {
+      "required": [
+        "name"
+      ],
+      "type": "object",
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "type": "string"
+        },
+        "notes": {
+          "maxLength": 1000,
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      }
+    },
+    "CreateProductRequest": {
+      "required": [
+        "sku",
+        "name",
+        "price",
+        "stockQuantity",
+        "categoryId"
+      ],
+      "type": "object",
+      "properties": {
+        "sku": {
+          "maxLength": 32,
+          "pattern": "^[A-Z]{3}-[0-9]{4}$",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "price": {
+          "maximum": 1000000,
+          "minimum": 0.01,
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "stockQuantity": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "categoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "category": {
+          "$ref": "#/definitions/ProductCategory"
+        },
+        "availableFrom": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "format": "date"
+        },
+        "supplierEmail": {
+          "maxLength": 320,
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "dimensions": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/DimensionsRequest"
+            }
+          ]
+        },
+        "tags": {
+          "type": [
+            "null",
+            "array"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "DimensionsRequest": {
+      "required": [
+        "lengthCentimetres",
+        "widthCentimetres",
+        "heightCentimetres"
+      ],
+      "type": "object",
+      "properties": {
+        "lengthCentimetres": {
+          "maximum": 10000,
+          "minimum": 0,
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "widthCentimetres": {
+          "maximum": 10000,
+          "minimum": 0,
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "heightCentimetres": {
+          "maximum": 10000,
+          "minimum": 0,
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        }
+      }
+    },
+    "DimensionsResponse": {
+      "required": [
+        "lengthCentimetres",
+        "widthCentimetres",
+        "heightCentimetres"
+      ],
+      "type": "object",
+      "properties": {
+        "lengthCentimetres": {
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "widthCentimetres": {
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "heightCentimetres": {
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        }
+      }
+    },
+    "PagedResponseOfProductResponse": {
+      "required": [
+        "items",
+        "totalCount",
+        "page",
+        "pageSize"
+      ],
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProductResponse"
+          }
+        },
+        "totalCount": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "page": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "pageSize": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        }
+      }
+    },
+    "ProblemDetails": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "title": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "status": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "null",
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "detail": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "instance": {
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      }
+    },
+    "ProductCategory": {
+      "type": "integer"
+    },
+    "ProductResponse": {
+      "required": [
+        "id",
+        "sku",
+        "name",
+        "price",
+        "stockQuantity",
+        "viewCount",
+        "weightKilograms",
+        "isActive",
+        "category",
+        "createdAt",
+        "categoryId",
+        "tags"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sku": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "price": {
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "stockQuantity": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "viewCount": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int64"
+        },
+        "weightKilograms": {
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "ratingAverage": {
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?(?:[eE][\u002B-]?\\d\u002B)?$",
+          "type": [
+            "null",
+            "number",
+            "string"
+          ],
+          "format": "float"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "category": {
+          "$ref": "#/definitions/ProductCategory"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "discontinuedAt": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "format": "date-time"
+        },
+        "availableFrom": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "format": "date"
+        },
+        "dailyCutoff": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "format": "time"
+        },
+        "leadTime": {
+          "pattern": "^-?(\\d\u002B\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$",
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "thumbnail": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "format": "byte"
+        },
+        "productUrl": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "supplierEmail": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "parentProductId": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "format": "uuid"
+        },
+        "categoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "dimensions": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/DimensionsResponse"
+            }
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProductTagResponse"
+          }
+        }
+      }
+    },
+    "ProductTagResponse": {
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    },
+    "UpdateProductRequest": {
+      "required": [
+        "name",
+        "price",
+        "stockQuantity",
+        "isActive"
+      ],
+      "type": "object",
+      "properties": {
+        "name": {
+          "maxLength": 200,
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "price": {
+          "maximum": 1000000,
+          "minimum": 0.01,
+          "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d\u002B)?$",
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "double"
+        },
+        "stockQuantity": {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "pattern": "^-?(?:0|[1-9]\\d*)$",
+          "type": [
+            "integer",
+            "string"
+          ],
+          "format": "int32"
+        },
+        "isActive": {
+          "type": "boolean"
+        }
+      }
+    },
+    "op:get_api_categories:200:application/json": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/CategoryResponse"
+      }
+    },
+    "op:get_api_products_id_tags:200:application/json": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ProductTagResponse"
+      }
+    }
+  }
+}

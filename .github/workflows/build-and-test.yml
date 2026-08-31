@@ -291,3 +291,65 @@ jobs:
             exit 1
           }
           Write-Host "Working tree clean."
+
+  # `[examples-ci]` (docs/superpowers/plans/2026-08-31-intest-cross-framework-examples.md, Task 5
+  # Step 2): six committed example projects now live under examples/ -- Catalog and Orders, each
+  # under MSTest, xUnit and NUnit -- and until this job existed, nothing in CI touched any of them.
+  # `dogfood` above is the closest existing job in shape, but it deliberately runs against
+  # samples/, not examples/, and deliberately never builds what it scaffolds (see that job's own
+  # header comment). InTest.Golden.Tests proves the templates render correctly, but every Golden
+  # project substitutes a `ProjectReference` for the adapter's `PackageReference` (CLAUDE.md,
+  # scripts/ci/examples.ps1's own header), so it cannot prove the *published*
+  # InTest.Runtime.MSTest / InTest.Runtime.xUnit / InTest.Runtime.NUnit packages on nuget.org still
+  # produce the committed output. This job is what actually restores each example's own local tool
+  # manifest and PackageReferences from nuget.org and builds the result -- the adopter path, not
+  # the local build. Deliberate limitation, stated once here rather than left implicit: because
+  # every example pins a *published* CLI version, this job cannot catch drift introduced by an
+  # unreleased CLI change -- that is `golden`'s job above, not this one's. See
+  # scripts/ci/examples.ps1's own header for the full division of labour and the anti-vacuity
+  # reasoning behind discovering example directories rather than listing them.
+  examples:
+    name: Examples (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Identical pins and identical reasoning to the `fast` job above -- see those comments for
+      # how each SHA was resolved.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every example project inherits the repo-root Directory.Build.props (examples/ has no
+          # Directory.Build.props of its own -- only a Directory.Packages.props that opts out of
+          # central package management, see that file's own comment), so `dotnet build` below runs
+          # InTestEnsureNotShallowClone for each one exactly as it does for src/ and tests/. A
+          # shallow clone here would fail loudly with that target's own error text, not silently --
+          # but fetch-depth: 0 is what avoids hitting that path at all, same as every other job.
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        # Same key shape as the other jobs. examples/Directory.Packages.props and every example
+        # .csproj are already covered by the existing `**/Directory.Packages.props` and
+        # `**/*.csproj` globs, so this job's restore (the published InTest.Runtime.MSTest /
+        # InTest.Runtime.xUnit / InTest.Runtime.NUnit and their own transitive dependencies, all
+        # resolved from nuget.org rather than src/) needs no key change of its own.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore, check and build every example project
+        # For every directory under examples/ that carries its own intest.json (discovered, not
+        # listed -- scripts/ci/examples.ps1's own header has the anti-vacuity reasoning, the same
+        # ExampleProjectVersionMarkerTests already applies): dotnet tool restore, then
+        # `dotnet intest generate --check` (must exit 0 -- a non-zero exit means the committed
+        # Generated/ output disagrees with what the published CLI renders today), then
+        # `dotnet build`. Fails loudly, by name, if zero directories are discovered at all.
+        run: ./scripts/ci/examples.ps1 -RepoRoot ${{ github.workspace }}

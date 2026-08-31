@@ -1,0 +1,10 @@
+{
+  "$meta": {
+    "tier": 4,
+    "operationId": "delete_api_orders_id",
+    "generatedBy": "intest 0.1.0"
+  },
+  "$parameters": {
+    "id": "dddddddd-dddd-dddd-dddd-dddddddddddd"
+  }
+}
