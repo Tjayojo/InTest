@@ -141,7 +141,7 @@ public class TemplateRendererClientTests
             ClientCallExpression: "Api.Orders[{id}].GetAsync")]);
 
     private static string Render(TestClassPlan plan, string? clientTypeName = ClientTypeName)
-        => new TemplateRenderer().RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase", clientTypeName);
+        => new TemplateRenderer("mstest").RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase", clientTypeName);
 
     [TestMethod]
     public void CallsTheClientThroughApiClientOfTheConfiguredType()

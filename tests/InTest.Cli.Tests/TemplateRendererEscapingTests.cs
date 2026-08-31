@@ -199,5 +199,5 @@ public class TemplateRendererEscapingTests
     }
 
     private static string Render(TestClassPlan plan)
-        => new TemplateRenderer().RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+        => new TemplateRenderer("mstest").RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
 }

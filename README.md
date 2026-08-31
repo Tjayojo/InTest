@@ -5,9 +5,11 @@
 Generates a complete, owned .NET test project that exercises a deployed API over real HTTP,
 from its OpenAPI document.
 
-The output is a normal MSTest project. You commit it, edit it, and run it with `dotnet test`
-like any other test project. InTest is a development-time tool — it generates on your machine
-or in a pull request, never as part of the deployment pipeline.
+The output is a normal MSTest or xUnit project — your choice, made once at `init` and frozen per
+project. You commit it and edit it like any other test project; an MSTest project runs with
+`dotnet test`, an xUnit v3 one runs as a built executable (see [`docs/getting-started.md`](docs/getting-started.md)
+Phase 6 for why the two differ). InTest is a development-time tool — it generates on your
+machine or in a pull request, never as part of the deployment pipeline.
 
 > **Status: v0. Working, but early — `0.1.0-preview.1` is published to nuget.org as a prerelease.**
 >
@@ -45,10 +47,11 @@ or in a pull request, never as part of the deployment pipeline.
 > nuget.org — `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1` resolves and
 > installs cleanly (verified by installing it into a scratch directory right after the push
 > went live). This is a v0 prerelease: breaking changes are still expected before a `0.1.0`
-> stable release. Building from source is still how you get anything past that tag. A third
-> package, `InTest.Runtime.MSTest` — the MSTest adapter a generated project actually references,
-> split out of `InTest.Runtime` so a future xUnit or NUnit adapter never pulls MSTest in
-> transitively — is not published yet; build from source to try it.
+> stable release. Building from source is still how you get anything past that tag. The two
+> adapter packages a generated project actually references — `InTest.Runtime.MSTest` and
+> `InTest.Runtime.xUnit`, split out of `InTest.Runtime` so a future NUnit adapter never pulls
+> either test framework in transitively — are not published yet; build from source to try
+> either.
 >
 > The design spec is still the source of truth and is worth reading before the code:
 > [`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md)
@@ -78,7 +81,7 @@ Read these before evaluating — they are firm for v1, and they rule InTest out 
 | | |
 |---|---|
 | Test project TFM | `net10.0`. Independent of your API's TFM — an API on `net8.0` is fine |
-| Test framework | **MSTest only in v1.** xUnit and NUnit are the highest-priority v2 work, and the architecture is built to keep them additive — but today, if you are standardised on either, InTest is not for you yet |
+| Test framework | **MSTest or xUnit v3**, chosen with `init --framework` (defaults to `mstest`) and frozen per project — a suite cannot be migrated in place. NUnit is the remaining highest-priority work, and the architecture is built to keep it additive — but today, if you are standardised on NUnit, InTest is not for you yet |
 | Spec | OpenAPI 3.x, JSON or YAML, local file or URL. **Today: JSON only** — a local file, or a URL InTest can reach anonymously |
 | Target | A deployed, reachable API |
 

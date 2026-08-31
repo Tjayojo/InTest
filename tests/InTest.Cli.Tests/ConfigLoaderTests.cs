@@ -485,7 +485,15 @@ public class ConfigLoaderTests
     /// The message a team hand-editing intest.json toward a real, roadmapped framework should
     /// see: it names what they wrote, names what is actually supported, and reads as "not
     /// supported yet" rather than "invalid" — §3 designs InTest for three frameworks and ships
-    /// one, and this is the one place that fact has to reach the adopter directly.
+    /// two (mstest and xunit) so far, and this is the one place that fact has to reach the
+    /// adopter directly.
+    /// <para>
+    /// The exemplar is "nunit", not "xunit" — this test used "xunit" as its unsupported-framework
+    /// counter-example until intest actually started accepting it (Task 4 of the xUnit framework
+    /// pack plan), at which point "xunit" stopped being an unsupported value and this test would
+    /// have gone red for a reason that has nothing to do with what it is pinning. "nunit" is the
+    /// one remaining framework §3 designs for but does not yet ship, so it is the exemplar now.
+    /// </para>
     /// </summary>
     [TestMethod]
     public void ExplainsAnUnsupportedFrameworkAsNotYetSupportedRatherThanInvalid()
@@ -494,14 +502,14 @@ public class ConfigLoaderTests
                                { "schemaVersion": 1, "spec": { "source": "orders.json" },
                                  "project": { "rootNamespace": "Orders.ApiTests",
                                               "testBaseClass": "Orders.ApiTests.OrdersTestBase",
-                                              "framework": "xunit" } }
+                                              "framework": "nunit" } }
                                """);
 
-        reason.ShouldContain("xunit", Case.Sensitive);
+        reason.ShouldContain("nunit", Case.Sensitive);
         reason.ShouldContain("mstest", Case.Sensitive);
         reason.ShouldContain("not", Case.Sensitive);
         reason.ShouldContain("yet", Case.Sensitive,
-        customMessage: "xunit is a real, roadmapped framework (§3) — the message must read as " +
+        customMessage: "nunit is a real, roadmapped framework (§3) — the message must read as " +
                        "\"not supported yet\", not as a bare validation failure");
     }
 
@@ -545,6 +553,40 @@ public class ConfigLoaderTests
 
         reason.ShouldContain("MSTest", Case.Sensitive);
         reason.ShouldContain("mstest", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// [config-opens-by-one-value]: xunit is the second framework value ConfigLoader accepts,
+    /// mirroring the InTest.Runtime.xUnit adapter package another task in this plan adds.
+    /// </summary>
+    [TestMethod]
+    public void AcceptsXunitAsAFrameworkValue()
+    {
+        WriteConfig("""
+                    { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                      "project": { "rootNamespace": "Orders.ApiTests",
+                                   "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                   "framework": "xunit" } }
+                    """);
+
+        ConfigLoader.Load(_root).Framework.ShouldBe("xunit");
+    }
+
+    /// <summary>
+    /// Ordinal-exact lowercase, the same discipline the mstest value has always had: this is
+    /// adopter-facing JSON, not a C# identifier with case-insensitive lookup.
+    /// </summary>
+    [TestMethod]
+    public void RefusesAFrameworkValueThatOnlyDiffersInCase()
+    {
+        var reason = ReasonFor("""
+                               { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                 "project": { "rootNamespace": "Orders.ApiTests",
+                                              "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                              "framework": "xUnit" } }
+                               """);
+
+        reason.ShouldContain("xUnit", Case.Sensitive);
     }
 
     // ---- schemaVersion ---------------------------------------------------------------------

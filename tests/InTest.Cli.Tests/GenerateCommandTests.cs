@@ -81,6 +81,30 @@ public class GenerateCommandTests
     private void WriteConfig(string json) => File.WriteAllText(Path.Combine(_root, "intest.json"), json);
 
     /// <summary>
+    /// A minimal .csproj referencing the MSTest adapter, in the one shape
+    /// <c>GenerateCommand</c>'s frozen-axis detection recognises — mirroring the exact
+    /// <c>InTest.Runtime.MSTest</c> <c>PackageReference</c> line <c>InitCommand</c> scaffolds.
+    /// The rest of a real scaffolded .csproj (TFM, other packages) is irrelevant to that
+    /// detection, so it is omitted here.
+    /// </summary>
+    private static void ScaffoldMsTestProject(string root) =>
+        File.WriteAllText(Path.Combine(root, "Orders.ApiTests.csproj"), """
+                                                                        <Project Sdk="Microsoft.NET.Sdk">
+                                                                          <ItemGroup>
+                                                                            <PackageReference Include="InTest.Runtime.MSTest" Version="0.1.0-preview.1" />
+                                                                          </ItemGroup>
+                                                                        </Project>
+                                                                        """);
+
+    /// <summary>Rewrites intest.json with project.framework set to <paramref name="framework"/>, everything else unchanged.</summary>
+    private static void SetConfiguredFramework(string root, string framework) =>
+        File.WriteAllText(Path.Combine(root, "intest.json"), $$"""
+                                                                { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                  "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                                                               "framework": "{{framework}}" } }
+                                                                """);
+
+    /// <summary>
     /// The contract for every malformed-config case: exit 2 (§5 — "Nothing was written"), nothing
     /// under Generated/, and an explanation rather than a stack-trace-shaped line. The
     /// "unexpected failure" assertion is the load-bearing one — before ConfigLoader every case
@@ -192,6 +216,32 @@ public class GenerateCommandTests
                                                               """);
 
         (await RunAsync()).ShouldBe(2);
+        Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// [frozen-axis-becomes-reachable]: §5 makes the test framework a frozen axis and promises that
+    /// changing one "fails with a real error". Nothing enforced that, because with one supported value
+    /// it was unreachable. Accepting "xunit" makes it reachable: an adopter could edit one string and get
+    /// a wholesale-rewritten Generated/ targeting a framework their .csproj does not match.
+    /// <para>
+    /// Detected the way UpgradeCommand.DetectRuntimeReferenceMismatch already detects version drift —
+    /// by comparing intest.json against the adapter PackageReference in the .csproj. No new state is
+    /// recorded.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task RefusesWhenTheConfiguredFrameworkDisagreesWithTheAdapterReference()
+    {
+        ScaffoldMsTestProject(_root);
+        SetConfiguredFramework(_root, "xunit");
+
+        var exit = await RunAsync();
+
+        exit.ShouldBe(2);
+        // Directory.Exists, not GetFiles: a refusal means Generated/ is never created at all, so
+        // GetFiles throws DirectoryNotFoundException on the very path it is asserting about. This is
+        // the idiom every other exit-2 refusal in this file already uses.
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
     }
 

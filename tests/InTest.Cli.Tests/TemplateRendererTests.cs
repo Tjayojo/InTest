@@ -128,7 +128,31 @@ public class TemplateRendererTests
             HasRequestBody: true)]);
 
     private static string Render(TestClassPlan plan)
-        => new TemplateRenderer().RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+        => new TemplateRenderer("mstest").RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+
+    /// <summary>
+    /// [framework-selects-template]: the xUnit template must diverge from the MSTest one in every
+    /// place a framework-specific attribute or API differs — see xunit-class.scriban's own doc
+    /// comment for the substitution table. This is the smoke test that the right template was
+    /// actually selected, not just that it parses.
+    /// </summary>
+    [TestMethod]
+    public void RendersTheXunitShapeWhenTheFrameworkIsXunit()
+    {
+        // RenderClass takes namespace and base class too — the neighbouring Render(TestClassPlan)
+        // helper above shows the shape.
+        var rendered = new TemplateRenderer(framework: "xunit")
+            .RenderClass(Plan(), "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
+
+        rendered.ShouldContain("using Xunit;");
+        rendered.ShouldContain("[Fact]");
+        rendered.ShouldContain("[Trait(\"Category\", \"Contract\")]");
+        rendered.ShouldContain("TestContext.Current.CancellationToken");
+
+        rendered.ShouldNotContain("[TestClass]");
+        rendered.ShouldNotContain("[TestMethod");
+        rendered.ShouldNotContain("Microsoft.VisualStudio.TestTools.UnitTesting");
+    }
 
     [TestMethod]
     public void EmitsAPartialClassDerivingFromTheConfiguredBase()

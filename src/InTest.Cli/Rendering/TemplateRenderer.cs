@@ -7,7 +7,57 @@ namespace InTest.Cli.Rendering;
 
 public sealed class TemplateRenderer
 {
-    private readonly Template _classTemplate = Template.Parse(LoadEmbedded("mstest-class.scriban"));
+    private readonly Template _classTemplate;
+
+    /// <summary>
+    /// [v3-only]'s own cancellation-token accessor, per framework — <c>TestContext.CancellationToken</c>
+    /// for MSTest, <c>TestContext.Current.CancellationToken</c> for xUnit v3 (there is no per-test
+    /// constructor-injected <c>TestContext</c> under xUnit v3; <c>TestContext.Current</c> is its
+    /// ambient accessor instead). Both templates already spell their own raw-HTTP branch's token
+    /// sites literally, per framework, in the <c>.scriban</c> source itself — this field exists
+    /// only for <see cref="BuildClientCallExpression"/>, whose token argument is not template text
+    /// at all but a string this class computes once and splices into <c>TestCasePlan.ClientCallExpression</c>'s
+    /// placeholder-substituted result.
+    /// <para>
+    /// <b>Task 8's own finding, fixed in the same change:</b> before this field existed,
+    /// <see cref="BuildClientCallExpression"/> appended the literal text
+    /// <c>"(cancellationToken: TestContext.CancellationToken)"</c> unconditionally, regardless of
+    /// which template <see cref="_classTemplate"/> had selected — correct for MSTest, but CS0120
+    /// ("An object reference is required for the non-static field, method, or property
+    /// 'TestContext.CancellationToken'") under xUnit, since xUnit's own <c>TestContext</c> type has
+    /// no static <c>CancellationToken</c> member. Nothing before Task 8 ever rendered a
+    /// client-routed case through an xUnit <see cref="TemplateRenderer"/> and then compiled the
+    /// result — <c>TemplateRendererClientTests.cs</c> constructs every one of its
+    /// <see cref="TemplateRenderer"/> instances with <c>"mstest"</c>, and Task 7's own xUnit golden
+    /// file (<c>docs/superpowers/plans/2026-08-30-intest-xunit-framework-pack.md</c>) configures no
+    /// <c>client</c> section — so the gap was invisible until
+    /// <c>GeneratedSuiteExecutionTests.XunitGeneratedClientRoutedSuccessCaseReceivesAConformingBody</c>
+    /// actually built a generated xUnit project with one, which is exactly the kind of gap Task 8
+    /// exists to close (measured directly: that test failed with the CS0120 above before this fix).
+    /// </para>
+    /// </summary>
+    private readonly string _cancellationTokenExpression;
+
+    /// <summary>
+    /// [framework-selects-template]: one template per framework, chosen once at construction.
+    /// Two files rather than one file branching internally — the templates are ~121 lines and
+    /// mostly identical, and a third framework would otherwise add a third set of conditionals to
+    /// every block. <see cref="_cancellationTokenExpression"/> is selected alongside
+    /// <see cref="_classTemplate"/>, from the same switch and the same input, so the two can never
+    /// disagree about which framework this instance renders for.
+    /// </summary>
+    public TemplateRenderer(string framework)
+    {
+        ArgumentNullException.ThrowIfNull(framework);
+
+        (_classTemplate, _cancellationTokenExpression) = framework switch
+        {
+            "mstest" => (Template.Parse(LoadEmbedded("mstest-class.scriban")), "TestContext.CancellationToken"),
+            "xunit" => (Template.Parse(LoadEmbedded("xunit-class.scriban")), "TestContext.Current.CancellationToken"),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(framework), framework, "expected \"mstest\" or \"xunit\"."),
+        };
+    }
 
     /// <param name="clientTypeName">
     /// The adopter's typed-client dotted type name — <c>LoadedConfig.Client?.TypeName</c> — or
@@ -330,8 +380,18 @@ public sealed class TemplateRenderer
     /// unknown", wrapped identically to <see cref="PathParameterKind.String"/>: no wrap at all,
     /// the same bare splice this method always produced before this field existed.
     /// </para>
+    /// <para>
+    /// <b>Instance method, not static — Task 8's own fix.</b> The cancellation-token argument
+    /// appended below used to be the literal text <c>"TestContext.CancellationToken"</c>, correct
+    /// for MSTest and a CS0120 under xUnit v3, where <c>TestContext.CancellationToken</c> is not a
+    /// static member at all — see <see cref="_cancellationTokenExpression"/>'s own doc comment for
+    /// the measured error and why nothing had compiled this path against an xUnit-selected
+    /// <see cref="TemplateRenderer"/> before Task 8. Now spliced from that field, which the
+    /// constructor sets from the same switch that picks <see cref="_classTemplate"/>, so this
+    /// method can no longer disagree with whichever template it is about to feed.
+    /// </para>
     /// </summary>
-    private static string? BuildClientCallExpression(TestCasePlan plan, string? clientTypeName)
+    private string? BuildClientCallExpression(TestCasePlan plan, string? clientTypeName)
     {
         if (clientTypeName is null || plan.ClientCallExpression is null)
         {
@@ -355,7 +415,7 @@ public sealed class TemplateRenderer
         // exists to cover) is spliced verbatim; only a bare call chain gets the cancellation token
         // appended. See this method's own doc comment for the reproduced CS0149 this guards
         // against and why "already ends with ')'" is the correct — not merely convenient — test.
-        return expression.EndsWith(')') ? expression : $"{expression}(cancellationToken: TestContext.CancellationToken)";
+        return expression.EndsWith(')') ? expression : $"{expression}(cancellationToken: {_cancellationTokenExpression})";
     }
 
     /// <summary>

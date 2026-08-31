@@ -92,4 +92,68 @@ public class ScaffoldCompileVerificationTests
         exitCode.ShouldBe(0,
         $"a fresh scaffold with no ITestTokenProvider registered must still build:{Environment.NewLine}{output}");
     }
+
+    /// <summary>
+    /// Task 8 Step 2's xUnit counterpart to <see cref="ScaffoldStillBuildsWithNoTokenProviderRegistered"/>
+    /// above — this file is the only place in the repository that compiles raw <c>InitCommand.Run</c>
+    /// scaffold output at all (everything in <c>CompileVerificationTests</c> instead hand-writes
+    /// its own <c>intest.json</c>/<c>.csproj</c>, never calling <c>InitCommand</c>), and the xUnit
+    /// scaffold is what changed the most for this plan: a fifth of its eleven files differ by
+    /// framework ([scaffold-per-framework], <c>InitCommand.cs</c>'s own doc comment), and none of
+    /// that had ever been built until this test.
+    /// <para>
+    /// Catches <c>&lt;OutputType&gt;Exe&lt;/OutputType&gt;</c> (a library-shaped xUnit v3 project
+    /// fails outright — "xUnit.net v3 test projects must be executable", per
+    /// <c>InTest.Runtime.xUnit.csproj</c>'s own measured comment), the assembly-fixture file
+    /// (<c>TestStartup.cs</c>'s <c>InTestAssemblyFixture : IAsyncLifetime</c>, registered via
+    /// <c>[assembly: AssemblyFixture(typeof(...))]</c> — xUnit v3 has no <c>[AssemblyInitialize]</c>
+    /// equivalent), and the package set (<c>xunit.v3</c> plus <c>InTest.Runtime.xUnit</c> instead of
+    /// the MSTest trio). <b>It cannot catch the parallelism attribute</b> — a missing
+    /// <c>[assembly: Xunit.v3.Parallelization(...)]</c> compiles just as cleanly as a present one,
+    /// since nothing about the attribute's absence is a compile error; Task 5's own
+    /// <c>InitCommandTests</c> text assertion is what actually covers that gap, the same way
+    /// this file's own doc comment already notes for <c>ScaffoldStillBuildsWithNoTokenProviderRegistered</c>'s
+    /// analogous "an assertion elsewhere, not this build, is what would catch a live registration"
+    /// reasoning.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task ScaffoldStillBuildsWithNoTokenProviderRegisteredUnderXunit()
+    {
+        InitCommand.Run(_root, "Orders.ApiTests", "orders.json", framework: "xunit").ShouldBe(0);
+
+        var runtimeProject = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.xUnit", "InTest.Runtime.xUnit.csproj"));
+        var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
+        var csprojText = File.ReadAllText(csprojPath);
+
+        // Same discipline as ScaffoldStillBuildsWithNoTokenProviderRegistered's own needle above,
+        // and the same reason: a hardcoded "0.1.0" would have matched by coincidence (InTest.Cli's
+        // own version happening to equal it) rather than by construction, and String.Replace with
+        // no match found is a silent no-op that resurfaces several steps downstream as a confusing
+        // NU1101 against nuget.org, where InTest.Runtime.xUnit is not published either.
+        var needle = $"""<PackageReference Include="InTest.Runtime.xUnit" Version="{CliVersion.Current}" />""";
+        csprojText.ShouldContain(needle, Case.Sensitive,
+        "InitCommand's xUnit scaffold no longer writes InTest.Runtime.xUnit's PackageReference in " +
+        "the expected shape (Include=\"InTest.Runtime.xUnit\" Version=\"{CliVersion.Current}\") — " +
+        "update this test's needle alongside whatever changed, or the ProjectReference swap below " +
+        "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
+
+        File.WriteAllText(csprojPath, csprojText.Replace(
+        needle,
+        $"""<ProjectReference Include="{runtimeProject}" />""",
+        StringComparison.Ordinal));
+
+        // Same reason as the MSTest scaffold above: this test never runs `generate`, so the two
+        // files the csproj copies to the output directory must exist for the build to have
+        // anything to copy from.
+        Directory.CreateDirectory(Path.Combine(_root, "Generated"));
+        File.WriteAllText(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}");
+        File.WriteAllText(Path.Combine(_root, "Generated", "spec-paths.json"), "{}");
+
+        var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+
+        exitCode.ShouldBe(0,
+        $"a fresh xUnit scaffold with no ITestTokenProvider registered must still build:{Environment.NewLine}{output}");
+    }
 }

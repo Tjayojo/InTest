@@ -144,7 +144,19 @@ public static class InitCommand
     /// call site — production and test alike — compiling unchanged.
     /// </para>
     /// </summary>
-    public static int Run(string projectRoot, string projectName, string specSource, string clientLockfilePath = "")
+    /// <param name="framework">
+    /// [framework-is-an-init-flag] (Task 5 of docs/superpowers/plans/2026-08-30-intest-xunit-framework-pack.md):
+    /// the test framework the scaffold targets, frozen for the life of the project — §5 makes this
+    /// a frozen axis, and <c>ConfigLoader.RequireSupportedFramework</c> is what <c>generate</c>
+    /// enforces that against afterward, on whatever value <c>intest.json</c> ends up carrying.
+    /// Defaults to <c>"mstest"</c>, last of the parameter list, so every pre-existing 3- and
+    /// 4-argument call site — production and test alike — keeps compiling and keeps scaffolding
+    /// an MSTest project exactly as before. Only <c>"mstest"</c> and <c>"xunit"</c> are accepted —
+    /// matching <c>ConfigLoader</c>'s own <c>SupportedFrameworks</c> list exactly, so `init` never
+    /// writes an <c>intest.json</c> that `generate` would then refuse to load — refused with exit
+    /// 2 before any write, the same treatment every other argument on this surface gets.
+    /// </param>
+    public static int Run(string projectRoot, string projectName, string specSource, string clientLockfilePath = "", string framework = "mstest")
     {
         // Every argument, refused the same way, before the first write — §5's exit 2 is "Nothing
         // was written", and an argument is the one thing that can be judged with nothing on disk
@@ -171,6 +183,22 @@ public static class InitCommand
             Console.Error.WriteLine($"{nameReason} Pass a valid C# name to `intest init --name` — for example \"Orders.ApiTests\".");
             return ExitCode.ToolError;
         }
+
+        // [framework-is-an-init-flag]: judged as soon as it can be — it depends on nothing else
+        // on this surface — and before the intest.json-already-exists check below, same reasoning
+        // as --name above: an invalid value is invalid regardless of what is already on disk.
+        // Matches ConfigLoader.SupportedFrameworks exactly, so `init` never writes a framework
+        // value `generate` would refuse to load a moment later.
+        if (framework != "mstest" && framework != "xunit")
+        {
+            Console.Error.WriteLine(
+            $"--framework '{framework}' is not supported. Pass mstest (default) or xunit to " +
+            "`intest init --framework` — InTest is designed to support three frameworks (§3); " +
+            "NUnit is not supported yet.");
+            return ExitCode.ToolError;
+        }
+
+        var isXunit = framework == "xunit";
 
         // [lockfile-recovery]: --spec and --client-lockfile name the same thing two different
         // ways, so giving both is a contradiction, not a preference — refused before either is
@@ -415,7 +443,7 @@ public static class InitCommand
                                               "project": {
                                                 "name": "{{projectName}}",
                                                 "rootNamespace": "{{projectName}}",
-                                                "framework": "mstest",
+                                                "framework": "{{framework}}",
                                                 "assertions": ["shouldly"],
                                                 "testBaseClass": "{{projectName}}.{{baseClassName}}"
                                               }{{clientSection}}
@@ -456,27 +484,82 @@ public static class InitCommand
         // either escaping rule exists to guard against. A build that somehow produced an
         // informational version outside that grammar would be a build-system defect to fix at the
         // source, not a value either escaper could safely paper over here.
+        // [scaffold-per-framework] (Task 5): five of the eleven scaffolded files differ by
+        // framework. The .csproj is one of them — <OutputType>, <RunSettingsFilePath>, the
+        // package references, and the MSTest-only parallelism guard target all differ — composed
+        // here as fragments and spliced into one shared template below, the same technique
+        // clientSection above already uses, rather than two near-duplicate templates that could
+        // silently drift apart.
+        //
+        // xunit.v3 must be marked <OutputType>Exe</OutputType> — referencing xunit.v3 itself from
+        // a library project fails outright ("xUnit.net v3 test projects must be executable"; see
+        // InTest.Runtime.xUnit.csproj's own comment for the measured error text). A generated
+        // adopter project is exactly that: executable, unlike InTest.Runtime.xUnit itself, which
+        // references xunit.v3.extensibility.core + xunit.v3.assert instead.
+        //
+        // <RunSettingsFilePath> and the *.runsettings file it points at are an MSTest/VSTest-only
+        // mechanism (the profile MSTest's TestContext reads at TestRunParameters) — xUnit v3 has
+        // no equivalent, so neither the property nor the file are scaffolded for it; see
+        // [profile-loses-its-first-source] on TestHost.InitializeAsync's null profile argument for
+        // what replaces it (INTEST_PROFILE).
+        var outputTypeElement = isXunit ? "\n    <OutputType>Exe</OutputType>" : string.Empty;
+
+        var runSettingsElement = isXunit
+            ? string.Empty
+            : $"\n    <RunSettingsFilePath>$(MSBuildProjectDirectory)/{projectName}.runsettings</RunSettingsFilePath>";
+
+        var packageReferencesBlock = isXunit
+            ? $"""
+                   <PackageReference Include="xunit.v3" Version="4.0.0" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                   <PackageReference Include="Shouldly" Version="4.3.0" />
+                   <!-- The xUnit adapter ProjectReferences the neutral InTest.Runtime package and
+                        brings it in transitively, so only this one reference is scaffolded — both
+                        packages declare types in namespace InTest.Runtime, so nothing downstream (the
+                        template, testBaseClass) needs to know two packages are involved. -->
+                   <PackageReference Include="InTest.Runtime.xUnit" Version="{CliVersion.Current}" />
+              """
+            : $"""
+                   <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
+                   <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
+                   <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                   <PackageReference Include="Shouldly" Version="4.3.0" />
+                   <!-- The MSTest adapter ProjectReferences the neutral InTest.Runtime package and
+                        brings it in transitively, so only this one reference is scaffolded — both
+                        packages declare types in namespace InTest.Runtime, so nothing downstream (the
+                        template, testBaseClass) needs to know two packages are involved. -->
+                   <PackageReference Include="InTest.Runtime.MSTest" Version="{CliVersion.Current}" />
+              """;
+
+        // The INTEST0001 guard target names MSTestParallelizeScope/MSTestParallelizeWorkers —
+        // properties that mean nothing to xUnit's runner — so it is scaffolded for MSTest only.
+        // xUnit's parallelism opt-out lives entirely in AssemblyInfo.cs's assembly attribute,
+        // with no MSBuild-property equivalent to guard against.
+        var parallelizationGuardBlock = isXunit
+            ? string.Empty
+            : """
+
+                <!-- Parallelization intent lives in AssemblyInfo.cs. The MSBuild properties below
+                     generate a second assembly attribute, which fails as CS0579 inside obj/. -->
+                <Target Name="InTestGuardParallelizeProperties" BeforeTargets="BeforeBuild"
+                        Condition="'$(MSTestParallelizeScope)' != '' or '$(MSTestParallelizeWorkers)' != ''">
+                  <Error Code="INTEST0001"
+                         Text="Parallelization intent is declared in AssemblyInfo.cs. Remove MSTestParallelizeScope/MSTestParallelizeWorkers from the project file and edit [assembly: Parallelize] or [assembly: DoNotParallelize] instead." />
+                </Target>
+              """;
+
         Write(projectRoot, $"{projectName}.csproj", $"""
                                                      <Project Sdk="Microsoft.NET.Sdk">
                                                        <PropertyGroup>
                                                          <TargetFramework>net10.0</TargetFramework>
                                                          <Nullable>enable</Nullable>
                                                          <ImplicitUsings>enable</ImplicitUsings>
-                                                         <IsPackable>false</IsPackable>
-                                                         <RunSettingsFilePath>$(MSBuildProjectDirectory)/{projectName}.runsettings</RunSettingsFilePath>
+                                                         <IsPackable>false</IsPackable>{outputTypeElement}{runSettingsElement}
                                                          <InTestSpecSource>{buildTimeSpecPath}</InTestSpecSource>
                                                        </PropertyGroup>
                                                        <ItemGroup>
-                                                         <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
-                                                         <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
-                                                         <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
-                                                         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-                                                         <PackageReference Include="Shouldly" Version="4.3.0" />
-                                                         <!-- The MSTest adapter ProjectReferences the neutral InTest.Runtime package and
-                                                              brings it in transitively, so only this one reference is scaffolded — both
-                                                              packages declare types in namespace InTest.Runtime, so nothing downstream (the
-                                                              template, testBaseClass) needs to know two packages are involved. -->
-                                                         <PackageReference Include="InTest.Runtime.MSTest" Version="{CliVersion.Current}" />
+                                                     {packageReferencesBlock}
                                                        </ItemGroup>
                                                        <ItemGroup>
                                                          <Content Include="Generated/spec-schemas.json" Link="spec-schemas.json" CopyToOutputDirectory="PreserveNewest" />
@@ -489,25 +572,38 @@ public static class InitCommand
                                                               fixture is invisible at runtime — every operation that needs one 400s or sends
                                                               literal "TODO:..." sentinels, and nothing at compile time catches it. -->
                                                          <Content Include="fixtures/**/*.json" CopyToOutputDirectory="PreserveNewest" />
-                                                       </ItemGroup>
-                                                       <!-- Parallelization intent lives in AssemblyInfo.cs. The MSBuild properties below
-                                                            generate a second assembly attribute, which fails as CS0579 inside obj/. -->
-                                                       <Target Name="InTestGuardParallelizeProperties" BeforeTargets="BeforeBuild"
-                                                               Condition="'$(MSTestParallelizeScope)' != '' or '$(MSTestParallelizeWorkers)' != ''">
-                                                         <Error Code="INTEST0001"
-                                                                Text="Parallelization intent is declared in AssemblyInfo.cs. Remove MSTestParallelizeScope/MSTestParallelizeWorkers from the project file and edit [assembly: Parallelize] or [assembly: DoNotParallelize] instead." />
-                                                       </Target>
+                                                       </ItemGroup>{parallelizationGuardBlock}
                                                      </Project>
                                                      """);
 
-        Write(projectRoot, "AssemblyInfo.cs", """
-                                              using Microsoft.VisualStudio.TestTools.UnitTesting;
+        // [scaffold-per-framework]: xUnit v3 parallelises by default (measured: "parallel mode =
+        // collections [22 threads]"). Without its own opt-out, a scaffolded suite would run
+        // concurrently against a *deployed* API — silently reversing the same decision the MSTest
+        // branch's [assembly: DoNotParallelize] makes. No build-only test can catch a missing
+        // attribute (it compiles fine either way), which is why InitCommandTests asserts on this
+        // text directly.
+        //
+        // CollectionBehavior(DisableTestParallelization = true) is NOT the right attribute here —
+        // it is obsolete-as-error in xunit.v3 4.0.0 (CS0619, a hard error regardless of warning
+        // settings). ParallelizationAttribute lives in namespace Xunit.v3; ParallelMode lives in
+        // Xunit.Sdk — neither is where a reader would guess, so both are named fully qualified
+        // below rather than via a `using`, matching the exact shape confirmed to compile.
+        Write(projectRoot, "AssemblyInfo.cs", isXunit
+            ? """
+              // The single authoritative declaration of parallelization intent. xUnit v3
+              // parallelises by default; this attribute is the counterpart of the MSTest
+              // scaffold's [assembly: DoNotParallelize] — without it a scaffolded suite runs
+              // concurrently against a deployed API.
+              [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+              """
+            : """
+              using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-                                              // The single authoritative declaration of parallelization intent.
-                                              // Do NOT set MSTestParallelizeScope in the .csproj — it generates this attribute,
-                                              // and two of them is a build error.
-                                              [assembly: DoNotParallelize]
-                                              """);
+              // The single authoritative declaration of parallelization intent.
+              // Do NOT set MSTestParallelizeScope in the .csproj — it generates this attribute,
+              // and two of them is a build error.
+              [assembly: DoNotParallelize]
+              """);
 
         Write(projectRoot, ".editorconfig", """
                                             root = true
@@ -522,68 +618,140 @@ public static class InitCommand
         // repository's "one canonical explanation" rule exists to prevent.
         Write(projectRoot, ".gitattributes", GitattributesContent);
 
-        Write(projectRoot, "TestStartup.cs", $$"""
-                                               using InTest.Runtime;
-                                               using Microsoft.Extensions.Configuration;
-                                               using Microsoft.Extensions.DependencyInjection;
-                                               using Microsoft.VisualStudio.TestTools.UnitTesting;
+        // [scaffold-per-framework]: the assembly-setup file is the fourth of the five files that
+        // differ by framework. Both branches carry an identical Register(IServiceCollection,
+        // IConfiguration) method, comments included — it is the one scaffolded place an adopter
+        // registers ITestTokenProvider and their own services regardless of framework, and an
+        // xUnit scaffold with nowhere to do that was rev 1 of this plan's own dropped requirement.
+        Write(projectRoot, "TestStartup.cs", isXunit
+            ? $$"""
+                using InTest.Runtime;
+                using Microsoft.Extensions.Configuration;
+                using Microsoft.Extensions.DependencyInjection;
+                using Xunit;
 
-                                               namespace {{projectName}};
+                [assembly: AssemblyFixture(typeof({{projectName}}.InTestAssemblyFixture))]
 
-                                               [TestClass]
-                                               public static class TestStartup
-                                               {
-                                                   [AssemblyInitialize]
-                                                   public static async Task AssemblyInit(TestContext context)
-                                                   {
-                                                       TestHost.ConfigureServices = Register;
-                                                       await TestHost.InitializeAsync(context, context.CancellationToken);
-                                                   }
+                namespace {{projectName}};
 
-                                                   /// <summary>Drains any fixture teardown registered during AssemblyInit — runs even
-                                                   /// when AssemblyInit itself failed, and never fails the run: see
-                                                   /// TestHost.CleanupAsync for why a drain failure is written to the test log instead
-                                                   /// of thrown.</summary>
-                                                   [AssemblyCleanup]
-                                                   public static async Task AssemblyCleanup(TestContext context)
-                                                   {
-                                                       await TestHost.CleanupAsync(context);
-                                                   }
+                /// <summary>
+                /// Assembly-scope setup. xUnit v3 has no [AssemblyInitialize] equivalent — an
+                /// AssemblyFixture is constructed before any test runs and disposed after all of
+                /// them finish.
+                /// </summary>
+                public sealed class InTestAssemblyFixture : IAsyncLifetime
+                {
+                    public async ValueTask InitializeAsync()
+                    {
+                        TestHost.ConfigureServices = Register;
+                        await TestHost.InitializeAsync();
+                    }
 
-                                                   /// <summary>Team-owned registrations. Add configuration providers here. AuthHandler
-                                                   /// is already attached to InTestClients.Api; a secured API needs only an
-                                                   /// ITestTokenProvider registered below — do not also append a DelegatingHandler of
-                                                   /// your own, or two handlers will set Authorization and the last one registered
-                                                   /// silently wins. See "Auth" in Phase 3 of getting-started.md for a worked
-                                                   /// example.</summary>
-                                                   private static void Register(IServiceCollection services, IConfiguration configuration)
-                                                   {
-                                                       // StaticTokenProvider ships as the one-identity, one-token implementation; write
-                                                       // your own (like YourTokenProvider below) for more than one identity, which the
-                                                       // wrong-scope 403 cases need — and declare each identity's Scopes, or a read-only
-                                                       // identity's own read operations can never produce a provable 403. Catalog and
-                                                       // Inventory declare no `security` and register nothing at all — they cannot,
-                                                       // since StaticTokenProvider needs a real token neither has a source for — so this
-                                                       // stays commented for the same reason the IAssemblyFixture example below does: a
-                                                       // live registration here would reference a type that does not exist yet, breaking
-                                                       // every fresh scaffold's build before a team has written one. See "Auth" in Phase
-                                                       // 3 of getting-started.md for a worked example.
-                                                       // services.AddSingleton<ITestTokenProvider, YourTokenProvider>();
+                    /// <summary>Drains any fixture teardown registered during InitializeAsync — runs
+                    /// even when InitializeAsync itself failed, and never fails the run: see
+                    /// TestHost.CleanupAsync for why a drain failure is written to the test log
+                    /// instead of thrown.</summary>
+                    public async ValueTask DisposeAsync()
+                    {
+                        await TestHost.CleanupAsync();
+                    }
 
-                                                       // Per-request fixtures: path and query parameter values live in fixtures/, not
-                                                       // here — each operation that needs one has a fixture file with a "TODO:"
-                                                       // sentinel for every value it requires. Fill those in by hand, or run
-                                                       // `intest fixtures repair` after a spec change to add sentinels for anything
-                                                       // newly required.
+                    /// <summary>Team-owned registrations. Add configuration providers here. AuthHandler
+                    /// is already attached to InTestClients.Api; a secured API needs only an
+                    /// ITestTokenProvider registered below — do not also append a DelegatingHandler of
+                    /// your own, or two handlers will set Authorization and the last one registered
+                    /// silently wins. See "Auth" in Phase 3 of getting-started.md for a worked
+                    /// example.</summary>
+                    private static void Register(IServiceCollection services, IConfiguration configuration)
+                    {
+                        // StaticTokenProvider ships as the one-identity, one-token implementation; write
+                        // your own (like YourTokenProvider below) for more than one identity, which the
+                        // wrong-scope 403 cases need — and declare each identity's Scopes, or a read-only
+                        // identity's own read operations can never produce a provable 403. Catalog and
+                        // Inventory declare no `security` and register nothing at all — they cannot,
+                        // since StaticTokenProvider needs a real token neither has a source for — so this
+                        // stays commented for the same reason the IAssemblyFixture example below does: a
+                        // live registration here would reference a type that does not exist yet, breaking
+                        // every fresh scaffold's build before a team has written one. See "Auth" in Phase
+                        // 3 of getting-started.md for a worked example.
+                        // services.AddSingleton<ITestTokenProvider, YourTokenProvider>();
 
-                                                       // A different kind of fixture: assembly fixtures seed data once before any test
-                                                       // runs, registered here rather than under fixtures/. Order is resolved
-                                                       // automatically from DependsOn; profile-restrict with AppliesTo. See "fixtures"
-                                                       // in Phase 5 of getting-started.md for a worked example.
-                                                       // services.AddSingleton<IAssemblyFixture, YourFixture>();
-                                                   }
-                                               }
-                                               """);
+                        // Per-request fixtures: path and query parameter values live in fixtures/, not
+                        // here — each operation that needs one has a fixture file with a "TODO:"
+                        // sentinel for every value it requires. Fill those in by hand, or run
+                        // `intest fixtures repair` after a spec change to add sentinels for anything
+                        // newly required.
+
+                        // A different kind of fixture: assembly fixtures seed data once before any test
+                        // runs, registered here rather than under fixtures/. Order is resolved
+                        // automatically from DependsOn; profile-restrict with AppliesTo. See "fixtures"
+                        // in Phase 5 of getting-started.md for a worked example.
+                        // services.AddSingleton<IAssemblyFixture, YourFixture>();
+                    }
+                }
+                """
+            : $$"""
+                using InTest.Runtime;
+                using Microsoft.Extensions.Configuration;
+                using Microsoft.Extensions.DependencyInjection;
+                using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+                namespace {{projectName}};
+
+                [TestClass]
+                public static class TestStartup
+                {
+                    [AssemblyInitialize]
+                    public static async Task AssemblyInit(TestContext context)
+                    {
+                        TestHost.ConfigureServices = Register;
+                        await TestHost.InitializeAsync(context, context.CancellationToken);
+                    }
+
+                    /// <summary>Drains any fixture teardown registered during AssemblyInit — runs even
+                    /// when AssemblyInit itself failed, and never fails the run: see
+                    /// TestHost.CleanupAsync for why a drain failure is written to the test log instead
+                    /// of thrown.</summary>
+                    [AssemblyCleanup]
+                    public static async Task AssemblyCleanup(TestContext context)
+                    {
+                        await TestHost.CleanupAsync(context);
+                    }
+
+                    /// <summary>Team-owned registrations. Add configuration providers here. AuthHandler
+                    /// is already attached to InTestClients.Api; a secured API needs only an
+                    /// ITestTokenProvider registered below — do not also append a DelegatingHandler of
+                    /// your own, or two handlers will set Authorization and the last one registered
+                    /// silently wins. See "Auth" in Phase 3 of getting-started.md for a worked
+                    /// example.</summary>
+                    private static void Register(IServiceCollection services, IConfiguration configuration)
+                    {
+                        // StaticTokenProvider ships as the one-identity, one-token implementation; write
+                        // your own (like YourTokenProvider below) for more than one identity, which the
+                        // wrong-scope 403 cases need — and declare each identity's Scopes, or a read-only
+                        // identity's own read operations can never produce a provable 403. Catalog and
+                        // Inventory declare no `security` and register nothing at all — they cannot,
+                        // since StaticTokenProvider needs a real token neither has a source for — so this
+                        // stays commented for the same reason the IAssemblyFixture example below does: a
+                        // live registration here would reference a type that does not exist yet, breaking
+                        // every fresh scaffold's build before a team has written one. See "Auth" in Phase
+                        // 3 of getting-started.md for a worked example.
+                        // services.AddSingleton<ITestTokenProvider, YourTokenProvider>();
+
+                        // Per-request fixtures: path and query parameter values live in fixtures/, not
+                        // here — each operation that needs one has a fixture file with a "TODO:"
+                        // sentinel for every value it requires. Fill those in by hand, or run
+                        // `intest fixtures repair` after a spec change to add sentinels for anything
+                        // newly required.
+
+                        // A different kind of fixture: assembly fixtures seed data once before any test
+                        // runs, registered here rather than under fixtures/. Order is resolved
+                        // automatically from DependsOn; profile-restrict with AppliesTo. See "fixtures"
+                        // in Phase 5 of getting-started.md for a worked example.
+                        // services.AddSingleton<IAssemblyFixture, YourFixture>();
+                    }
+                }
+                """);
 
         Write(projectRoot, $"{baseClassName}.cs", $$"""
                                                     using InTest.Runtime;
@@ -620,6 +788,14 @@ public static class InitCommand
                                                        { "Api": { "BaseUrl": "https://REPLACE-ME.example.com/" } }
                                                        """);
 
+        // [scaffold-per-framework]: the fifth and last file that differs by framework — this one
+        // is simply not written for xUnit. *.runsettings is an MSTest/VSTest mechanism start to
+        // finish (TestRunParameters, the <MSTest> element) with no xUnit equivalent; scaffolding
+        // one anyway would name a profile mechanism that does nothing under xUnit, worse than
+        // omitting the file. See <RunSettingsFilePath>'s own comment above for the .csproj half of
+        // this same decision.
+        if (!isXunit)
+        {
         Write(projectRoot, $"{projectName}.runsettings", """
                                                          <?xml version="1.0" encoding="utf-8"?>
                                                          <RunSettings>
@@ -633,6 +809,7 @@ public static class InitCommand
                                                            </MSTest>
                                                          </RunSettings>
                                                          """);
+        }
 
         Write(projectRoot, Path.Combine(".config", "dotnet-tools.json"), DotnetToolsJsonContent(CliVersion.Current));
 
