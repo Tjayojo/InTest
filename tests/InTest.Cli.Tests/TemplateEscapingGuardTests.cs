@@ -90,17 +90,26 @@ public class TemplateEscapingGuardTests
     /// </summary>
     private static readonly Regex TcReference = new(@"tc\s*\.\s*(\w+)", RegexOptions.Compiled);
 
+    // Task 7 [second-template-was-blind]: this guard used to read only mstest-class.scriban.
+    // xunit-class.scriban existed from Task 3 onward, quoting the exact same tc.<name> fields
+    // into the exact same literal positions, and nothing here ever looked at it — a future edit
+    // that quoted a new, unescaped field into xunit-class.scriban would have had zero mechanical
+    // enforcement, and nothing would have failed to say so. [DataRow] over both template file
+    // names, rather than a second copy of this method, keeps the classification logic — which is
+    // the part actually worth trusting — in exactly one place.
     [TestMethod]
-    public void EveryTemplateFieldReferenceIsEscapedOrExplicitlyAllowed()
+    [DataRow("mstest-class.scriban")]
+    [DataRow("xunit-class.scriban")]
+    public void EveryTemplateFieldReferenceIsEscapedOrExplicitlyAllowed(string templateFileName)
     {
-        var template = LoadEmbeddedTemplate("mstest-class.scriban");
+        var template = LoadEmbeddedTemplate(templateFileName);
         var references = ExtractReferences(template);
 
         // If this is ever zero, tag extraction has stopped matching the template's actual
         // syntax — that is this guard silently going blind, not a clean bill of health, so it
         // must fail loudly rather than pass vacuously.
         references.Count.ShouldBeGreaterThan(0,
-            "no tc.<name> references were found in mstest-class.scriban at all. Either tag " +
+            $"no tc.<name> references were found in {templateFileName} at all. Either tag " +
             "extraction in TemplateEscapingGuardTests no longer matches the template's syntax, " +
             "or this guard is passing vacuously — do not leave it silently disabled.");
 
@@ -112,7 +121,7 @@ public class TemplateEscapingGuardTests
             .ToList();
 
         offenders.ShouldBeEmpty(
-            "mstest-class.scriban references tc.<name> for [" + string.Join(", ", offenders) +
+            $"{templateFileName} references tc.<name> for [" + string.Join(", ", offenders) +
             "] without accounting for it. A '(quoted)' entry sits inside a C# string literal: " +
             "either it carries spec text — apply CSharpLiteral.Escape to it in " +
             "TemplateRenderer.RenderClass and rename it with a '_literal' suffix — or it never " +
