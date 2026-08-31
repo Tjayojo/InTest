@@ -1,4 +1,4 @@
-# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, the full Phase 0-8 walkthrough, and the three-package-split acceptance run
+# Acceptance runs — v0, v1-a, v1-b, v1-c, the F11 phase, v1-e Task 6, the 0.1.0-preview.1 publish, the adopter dry run, the full Phase 0-8 walkthrough, and the three-package-split acceptance run, and the framework-pack acceptance run
 
 A living record. Each phase ends by regenerating against `samples/` and appending its results
 here, so the defect numbering (`F1`, `F2`, …) runs continuously across phases and the "carried
@@ -16,6 +16,7 @@ forward" list at the end is always the current one.
 | Adopter dry run | 2026-08-24 | `a4c8315` + this commit | The first real adoption run against the published packages (publish-actions item 6, previously open). Found both committed examples' `intestVersion` and `.config/dotnet-tools.json` pins hand-edited to `0.1.0` — a version never published — while their `.csproj`'s `InTest.Runtime` reference correctly named `0.1.0-preview.1` (**F14**). Reproduced the consequence: `dotnet tool restore` fails outright on a bare clone. Fixed with the published `0.1.0-preview.1` CLI's own `intest upgrade`, not by hand; regeneration changed nothing beyond the two version markers. Re-proved the full `dotnet tool restore` → `dotnet intest generate --check` → `dotnet build` path against both examples, cold `NUGET_PACKAGES`, all green. New guard, `ExampleProjectVersionMarkerTests`, proven to fire by reverting one marker |
 | Full Phase 0-8 walkthrough | 2026-08-25 | `b349e25` + this commit | The first full `getting-started.md` walkthrough — Phase 0 through Phase 8, in order — against the published packages with zero substitutions: `dotnet tool install -g InTest.Cli --version 0.1.0-preview.1`, three fresh `intest init` scaffolds, `fixtures repair`, a hand-written `ITestTokenProvider` for Orders, `dotnet tool restore`, `generate --check`, and `dotnet build` all against a cold, isolated `NUGET_PACKAGES` with no local leftovers. Live results: Catalog **13 of 13**, Orders **20 passed, 0 failed, 4 skipped** (all four `RequireSecondaryIdentityLacks`), Inventory **9 of 9** — reproducing `getting-started.md`'s own stated banner numbers for the first time against the *published* tool rather than a local build. `generate --check`'s exit `4` and `intest upgrade` both exercised on a fresh scaffold and closed the loop (exit 0, suite passing again). **No new defect found** — every phase matched the document exactly. One re-run of `dotnet test InTest.sln` in the repo caught a transient `MSB3713` file-lock build failure in `InTest.Golden.Tests`, consistent with the other session's concurrent activity in this shared tree; reproduced clean in isolation, not a product defect |
 | Three-package split | 2026-08-26 | `d152412` + this commit | First adoption walk against the **runtime-framework split** (`InTest.Runtime.MSTest`, never published) — a *simulated* publish (three packages packed locally, never nuget.org) via `scripts/local-e2e-test.ps1`, run twice. All three packages pack at one identical version; a fresh scaffold's `InTest.Runtime.MSTest` `PackageReference` matches it and resolves `InTest.Runtime` transitively at the exact same version (confirmed via `dotnet list package --include-transitive`, not assumed). Extended beyond the script's own documented scope with a live run: Catalog **13 of 13** over real HTTP against the locally-packed three-package build. `release.yml`/`pack.yml` confirmed three-package-complete (the release job's own 6-asset positive control already covered this), with a stale two-package step name/comment fixed alongside the one real defect found: **F15**, `local-e2e-test.ps1`'s own "cache is clean" confirmation printing even on a run where its own tripwire had just warned that pre-existing `intest.cli`/`intest.runtime` entries (an unrelated earlier session's leftovers) were sitting in the global cache — fixed with a `$CacheClean` flag, negative-controlled by re-running against the same still-dirty cache
+| Framework packs | 2026-08-31 | `69f0918` | The first live run of a **generated suite that is not MSTest**. xUnit and NUnit each reproduce the MSTest numbers exactly against the same live APIs: Catalog **13 of 13**, Orders **20 passed, 0 failed, 4 skipped**. All 4 skips bottom out in `RequireSecondaryIdentityLacks` under all three adapters' different skip mechanisms (`Assert.Inconclusive` / `Assert.Skip` / `Assert.Ignore`), and the 3 write-scope 403s run and pass — so the skip decision is per-operation, not a blanket avoidance. `[error-is-the-sink]` confirmed end to end: NUnit's assembly-scope `Note`/`Warn` reach the `.trx`. **No InTest defect found.** Two findings, neither a product defect: **F16**, NUnit3TestAdapter's `.trx` `<Counters>` reports `notExecuted="0"` while four `NotExecuted` results are present in the same file; **F17**, the sample SQLite stores are never reset, so committed example fixture values no longer apply to a long-lived store |
 
 ---
 
@@ -2966,3 +2967,104 @@ Passed!  - Failed: 0, Passed:  50, Skipped: 0, Total:  50 - InTest.Golden.Tests.
 | 5 | Exercise `Orders.Api`/`Inventory.Api` live against the split three-package runtime specifically (not just the published two-package build) | future run | Open -- see "What this run does not claim" |
 | 6 | Prove the third package publishes for real (OIDC/Trusted Publishing/`nuget-release` gate against `InTest.Runtime.MSTest`) | the actual tag push | Open -- cannot be simulated locally by design |
 
+---
+
+# Framework-pack acceptance run
+
+**Task:** prove the xUnit and NUnit framework packs against real HTTP. Every check in PR #10 and
+PR #11 was static or ran against an in-process stub; **no generated non-MSTest suite had ever made a
+real HTTP request** before this run. Run before tagging `0.1.0-preview.2`, deliberately: a NuGet
+version is permanent, so anything this run could still change had to be found first.
+
+## Environment
+
+All four samples started from their own `launchSettings.json` with no hand-set environment
+variables — the F9 condition the v0 run recorded is genuinely fixed. Verified by measurement, not
+by `/health/ready`, which is anonymous and passes even when the identity pairing is wrong:
+
+| check | result |
+|---|---|
+| `GET /api/orders`, no `Authorization` | **401** |
+| same, full-access `orders-client` token | **200** |
+| `POST /api/orders`, read-only `orders-readonly` token | **403** |
+
+Runs were **sequential, never concurrent** — the same discipline v1-b established (not
+concurrently — §11). These APIs share one SQLite store; two suites at once produce
+interference that reads as a product defect.
+
+## Results
+
+| Suite | Framework | Result |
+|---|---|---|
+| Catalog | xUnit | **13 of 13** |
+| Orders | xUnit | **24 total — 20 passed, 0 failed, 4 skipped** |
+| Catalog | NUnit | **13 of 13** |
+| Orders | NUnit | **24 total — 20 passed, 0 failed, 4 skipped** |
+
+Both reproduce the MSTest figures recorded for the full Phase 0-8 walkthrough exactly. Verified from
+each `.trx` directly, not from the runner's summary line.
+
+## The skip path, which is why Orders matters more than Catalog
+
+Skip is the seam that differs most between adapters: MSTest `Assert.Inconclusive`, xUnit
+`Assert.Skip`, NUnit `Assert.Ignore`. All three reduce to the neutral layer's reason `string?`
+(null meaning "run"), and all three produced the same outcome here.
+
+The four skipped cases are the **GET** siblings — `GetApiOrders_Forbidden`,
+`GetApiOrdersId_Forbidden`, `GetApiCustomers_Forbidden`, `GetApiCustomersId_Forbidden` — each
+with the same reason:
+
+> Skipped: the secondary identity 'orders-readonly' holds orders.read, which this operation
+> requires, so it cannot produce a 403. Declare different scopes on that identity, or leave
+> Scopes null to run this test anyway.
+
+The three **write** cases — `PostApiOrders_Forbidden`, `PostApiCustomers_Forbidden`,
+`DeleteApiOrdersId_Forbidden` — **ran and passed** against real 403s. That contrast is the
+whole point: `RequireSecondaryIdentityLacks` decides per operation. A blanket skip would have shown
+seven skips and still reported "green", which is precisely the vacuous-suite failure §16 exists to
+prevent.
+
+## `[error-is-the-sink]`, confirmed outside a unit test
+
+NUnit's `.trx` carries two `<RunInfo>` entries holding InTest's own assembly-scope diagnostics
+(`InTest run id: ...`, `All fixtures resolved cleanly.`). `InTest.Runtime.NUnit.Tests` already proved
+`TestContext.Error` is the only sink that survives a passing run; this is the same claim holding in a
+real VSTest run rather than a subprocess grep. Every rejected candidate fails **silently**, so this
+is worth having twice.
+
+## F16 — NUnit's `.trx` `<Counters>` under-reports skips - **not a product defect**
+
+The Orders NUnit `.trx` reports `total="24" executed="20" ... notExecuted="0"` while the same file
+contains four `<UnitTestResult ... outcome="NotExecuted">` entries. The per-result data is right; the
+summary attribute is not. This is NUnit3TestAdapter's trx writer, not InTest — InTest writes
+no `.trx`.
+
+**CI is unaffected, checked rather than assumed:** `scripts/ci/assert-trx-results.ps1` guards on
+`total` (it fails a run reporting `total=0`), which NUnit reports correctly. Recorded so a future
+reader comparing the counter against the result list does not conclude four tests vanished.
+
+## F17 — the sample stores are never reset - **environmental**
+
+The SQLite stores still hold rows from acceptance runs dated 2026-08-19 onward. Consequences, both
+handled at the fixture level with no product code touched:
+
+- Catalog's seeded "deletable" category `33333333-...` **was already deleted** by an earlier run, so
+  `delete_api_categories_id` must point at a freshly created category rather than the seed row the
+  committed example uses.
+- POST fixtures collide with real unique indexes on `sku`/`name`/`email`/`reference`, so each run
+  needs values distinct from every previous run's.
+
+`getting-started.md` already names the unreset-store condition; what is new is that **the committed
+examples' own fixture values no longer work against it**. Anyone following the examples verbatim on
+this machine hits a 404 and a 409 before any InTest behaviour is in question.
+
+## What this run does not claim
+
+- **Not a publish.** Nothing was pushed to nuget.org; `release.yml` remains unexercised at five
+  packages. `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` are not published, so both scaffolds
+  substituted a `ProjectReference` for the scaffolded `PackageReference`. A real adopter's path
+  still has not been walked for either framework.
+- **Not Inventory.** Only Catalog and Orders were run per framework. Inventory adds a third producer
+  and string/int route parameters, not a new adapter path, and MSTest already covers it 9 of 9.
+- **Not a fresh store.** See F17 — these numbers come from a long-lived database, not a
+  clean one.
