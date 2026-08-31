@@ -14,9 +14,11 @@ All five packages — `InTest.Cli`, `InTest.Runtime`, `InTest.Runtime.MSTest`,
 how you try anything past that tag. The third, fourth and fifth package — `InTest.Runtime.MSTest`,
 `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit`, the MSTest, xUnit and NUnit adapters split out
 of `InTest.Runtime`, described in "Releases" below — were published for the first time in this
-release, each resolving `InTest.Runtime 0.1.0-preview.2` transitively. For now,
-`examples/` still pins the neutral `InTest.Runtime` package directly at `0.1.0-preview.1` rather
-than whichever adapter it would reference once one exists on nuget.org. The
+release, each resolving `InTest.Runtime 0.1.0-preview.2` transitively. `examples/` referenced the
+neutral `InTest.Runtime` package directly until this release, only because no adapter existed on
+nuget.org to reference; both examples now pin `InTest.Runtime.MSTest` at `0.1.0-preview.2` and
+get `InTest.Runtime` transitively at the identical version, which is what a generated project
+has referenced since the split. The
 [design spec](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md) remains the
 reference for why things are built the way they are.
 
