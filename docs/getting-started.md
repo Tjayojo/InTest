@@ -46,7 +46,7 @@ Running example: an `Orders` API using Swashbuckle, deployed to a `staging` envi
 | | |
 |---|---|
 | .NET SDK | 10.0 or later — the **test project** targets `net10.0`; your API can target anything |
-| Test framework | MSTest. xUnit and NUnit are not supported in v1 |
+| Test framework | MSTest or xUnit v3, chosen with `init --framework` (default `mstest`) and frozen per project. NUnit is not supported yet |
 | Spec | OpenAPI 3.x, JSON — a **local file**, or a URL InTest can reach anonymously. YAML is not built yet |
 | API | Deployed and reachable from wherever the tests run |
 
@@ -149,7 +149,7 @@ intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.jso
 
 | File | Owner | Purpose |
 |---|---|---|
-| `intest.json` | yours | Configuration |
+| `intest.json` | yours | Configuration, including `project.framework` — `"mstest"` below, `"xunit"` if you chose it |
 | `Orders.ApiTests.csproj` | yours | Pins packages — including `InTest.Runtime.MSTest`, which brings in `InTest.Runtime` transitively at the same version — copies the spec to output, sets `RunSettingsFilePath`, adds the `INTEST0001` guard |
 | `AssemblyInfo.cs` | yours | `[assembly: DoNotParallelize]` — the **only** place parallelization is declared |
 | `TestStartup.cs` | yours | DI registrations, named `HttpClient`, handlers |
@@ -159,7 +159,31 @@ intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.jso
 | `.config/dotnet-tools.json` | yours | Pins the CLI version so CI and your machine agree |
 | `.gitattributes` | yours | Pins `Generated/`, `coverage-report.json` and `fixtures/**/*.json` to CRLF, so a clone with `core.autocrlf=input` — which normalizes to LF on commit but does not re-expand it back to CRLF on checkout, unlike `core.autocrlf=true` — cannot flatten them to LF and fail `generate --check` on every line |
 
-Everything above is yours to edit and is never regenerated.
+Everything above is yours to edit and is never regenerated. The table shows the `mstest` default;
+see "Choosing xUnit instead" just below for the five files that differ.
+
+### Choosing xUnit instead
+
+```bash
+intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.json --framework xunit
+```
+
+`--framework` defaults to `mstest`; give it anything else and `init` refuses with exit `2` and
+writes nothing. `xunit` scaffolds an **xunit.v3** project instead, and five of the eleven files
+above differ:
+
+| File | xUnit form |
+|---|---|
+| `Orders.ApiTests.csproj` | `<OutputType>Exe</OutputType>` — a hard build error without it — plus `xunit.v3` and `InTest.Runtime.xUnit` in place of the three MSTest packages and `InTest.Runtime.MSTest` |
+| `AssemblyInfo.cs` | `[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]` in place of `[assembly: DoNotParallelize]` — **not cosmetic**: xUnit v3 parallelises test collections by default, so without this line a scaffolded suite runs concurrently against a *deployed* API |
+| `TestStartup.cs` | replaced by an `InTestAssemblyFixture : IAsyncLifetime` class carrying `[assembly: AssemblyFixture(typeof(InTestAssemblyFixture))]` — xUnit v3 has no `[AssemblyInitialize]` equivalent, so the assembly fixture is the lifecycle hook instead. It still carries the same `TestHost.ConfigureServices = Register;` line and `Register` method, so DI registrations (Auth section below) go in the same place either way |
+| `intest.json` | `"framework": "xunit"` |
+| `Orders.ApiTests.runsettings` | **not written at all** — xUnit v3 / Microsoft.Testing.Platform has no run-settings equivalent, see Phase 3 |
+
+The framework is frozen per project once `init` runs (§5): editing `project.framework` in
+`intest.json` afterward without also changing the `.csproj`'s adapter reference is a mismatch
+`generate` detects and refuses, rather than silently rewriting `Generated/` against a project that
+can no longer build it.
 
 **Every command from here on is `dotnet intest …`, not bare `intest`.** `.config/dotnet-tools.json`
 is a **local** tool manifest (`isRoot: true`) — that is the whole reason it exists: it pins the
@@ -204,6 +228,20 @@ Precedence, first match wins:
 The scaffolded `Orders.ApiTests.runsettings` leaves `profile` commented out on purpose. Uncomment it and
 tier 1 always matches, making `INTEST_PROFILE` unreachable. Pin the profile only in
 environment-specific files like `qa.runsettings`.
+
+**xUnit projects have no tier 1 at all.** xUnit v3 / Microsoft.Testing.Platform has no
+run-settings equivalent, so an xUnit-scaffolded project writes no `.runsettings` file (Phase 2) and
+the adapter passes `null` where the MSTest one would read one. That is a smaller gap than it
+sounds: the MSTest scaffold already ships `profile` **commented out**, so `INTEST_PROFILE` is
+already tier 1 in practice for an MSTest adopter who has not gone out of their way to uncomment
+it. xUnit loses the *opt-in* to override it with a runsettings file, not the default — for an
+xUnit project, `INTEST_PROFILE` is simply the highest-precedence mechanism there is.
+
+**One capability has no xUnit equivalent at all, not just a lost opt-in.** The MSTest
+`.runsettings` file also carries `<MSTest><TestTimeout>60000</TestTimeout></MSTest>`, a
+project-wide default test timeout. xUnit's equivalent, `[Fact(Timeout = …)]`, is per-test, not a
+global default — there is nothing to scaffold in its place. If you rely on the MSTest timeout
+default today, an xUnit project needs that value set on every `[Fact]` that matters, by hand.
 
 ### Secrets
 
@@ -440,9 +478,11 @@ dotnet intest generate
 
 Writes `Generated/` — one `.g.cs` class per tag (`OrdersTests.g.cs` here), `spec-paths.json` and
 `spec-schemas.json` — plus `coverage-report.json` at the project root. All regenerated wholesale;
-never hand-edit them. `TestHost` itself is not generated — it ships in `InTest.Runtime.MSTest`
-(a thin facade over `InTest.Runtime`'s neutral `InTestRun`) and `TestStartup.cs` delegates
-`[AssemblyInitialize]` to it (Phase 2).
+never hand-edit them. `TestHost` itself is not generated — it ships in the adapter package for
+your project's framework (`InTest.Runtime.MSTest` or `InTest.Runtime.xUnit`, both a thin facade
+over `InTest.Runtime`'s neutral `InTestRun`), and the scaffolded assembly-setup file delegates to
+it — `TestStartup.cs`'s `[AssemblyInitialize]` method under MSTest, `InTestAssemblyFixture`'s
+`InitializeAsync`/`DisposeAsync` under xUnit (Phase 2).
 
 Read `coverage-report.json` now. It tells you what was skipped and why, which operations run on
 synthesized IDs, which produce status-only tests, and which auth tests are gated on a second
@@ -647,9 +687,27 @@ clients too, and every InTest run reports the percentage so the number visibly m
 
 ## Phase 6 — run
 
+**MSTest:**
+
 ```bash
 dotnet test
 ```
+
+**xUnit:**
+
+```bash
+dotnet build
+./bin/Debug/net10.0/Orders.ApiTests.exe -result-trx out.trx
+```
+
+`dotnet test` does not work against an xUnit v3 project on this SDK generation — it uses the
+VSTest target, which .NET 10 refuses for a Microsoft.Testing.Platform project ("Testing with
+VSTest target is no longer supported"). That is not specific to InTest or to xUnit: an MSTest
+project opted into the Microsoft.Testing.Platform runner fails the identical way here. Run the
+built executable directly instead — it needs no extra package, no `global.json` opt-in, and
+writes a `.trx` with `-result-trx` exactly as `dotnet test --logger trx` would. Do not spend time
+trying to make `dotnet test` work for an xUnit project; it is out of scope for this tool, on
+purpose.
 
 Startup order: build configuration → mint the run ID → build the service provider → load the
 schema bundle → check the base URL for a repeated path prefix → wait for readiness → run
@@ -698,8 +756,14 @@ Two pipelines, two different jobs.
 dotnet tool restore
 dotnet build ../Orders                 # produce the spec artifact — local spec.source only
 dotnet intest generate --check         # fail if committed output is stale
-dotnet test
+dotnet test                            # MSTest projects — see Phase 6 for the xUnit equivalent
 ```
+
+An xUnit project's last line is `dotnet build` followed by the built executable directly
+(`./bin/Debug/net10.0/Orders.ApiTests.exe -result-trx out.trx`), for the same reason Phase 6
+gives: `dotnet test` does not work against an xUnit v3 project on this SDK generation. A filter
+carries over too — `--filter "<query>"` becomes `-filterVSTest "<query>"` on the direct runner,
+same query string.
 
 If `spec.source` is a URL there is no artifact to build, and the second line drops out: `--check`
 reads the committed `spec.json` snapshot and **never fetches**, so this job needs no network
@@ -739,6 +803,10 @@ dotnet test --filter "TestCategory=Contract" --settings qa.runsettings
 
 Contract tests only. Variation tests send hundreds of malformed payloads — useful in lower
 environments, noise in a gate, and liable to trip a WAF or rate limiter.
+
+**xUnit has no `--settings` equivalent** — there is no run-settings file to point at (Phase 3), so
+pin the environment with `INTEST_PROFILE` instead of `qa.runsettings`. The filter carries over as
+`-filterVSTest` against the built executable, the same as Phase 8's pull-request job above.
 
 ---
 
@@ -782,18 +850,30 @@ the colliding signature; the fix is to give one of the routes a distinct segment
 InTest transliterates and appends a hash when a name is lossy, so emoji and RTL variation cases
 stay distinct. Custom display names you write yourself go through the same path.
 
-**Parallelization.** Declared **only** in `AssemblyInfo.cs`. Setting `MSTestParallelizeScope` in
-the project file generates a second attribute and breaks the build; InTest catches this with a
-clear `INTEST0001` error rather than letting you meet `CS0579`. The default is sequential.
-Before enabling parallelism, make sure every test creates its own data — and note that two
-concurrent pipelines against one environment cannot coordinate at all.
+**Parallelization.** Declared **only** in `AssemblyInfo.cs`. Under MSTest, setting
+`MSTestParallelizeScope` in the project file generates a second attribute and breaks the build;
+InTest catches this with a clear `INTEST0001` error rather than letting you meet `CS0579`. The
+MSTest default is sequential — the scaffold pins `[assembly: DoNotParallelize]` deliberately.
+**xUnit v3 parallelises test collections by default — the opposite of MSTest** — so the xUnit
+scaffold pins the equivalent opt-out instead,
+`[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]`. There is no
+project-file guard equivalent to `INTEST0001` on the xUnit side; the MSBuild target that enforces
+it names MSTest-specific properties and does not apply. Before enabling parallelism on either
+framework, make sure every test creates its own data — and note that two concurrent pipelines
+against one environment cannot coordinate at all.
 
 **Fixture diagnostics go missing during a *passing* run.** `TestContext.WriteLine`,
 `Console.Out`, and `Console.Error` written during `[AssemblyInitialize]` are invisible on a
 passing run — not stdout, not the `.trx` (mechanics: spec §18, New findings). That is why the
 fixture-validation report and `FixtureRunner`'s skip lines (Phase 5) go through
 `TestContext.DisplayMessage` instead. Do the same in your own `IAssemblyFixture` logging, and
-pick `Warning` or `Informational` — `MessageLevel.Error` fails the run.
+pick `Warning` or `Informational` — `MessageLevel.Error` fails the run. **Under xUnit** the
+adapter cannot use an MSTest-only mechanism, and the obvious xUnit analogue
+(`TestContext.SendDiagnosticMessage`) turns out to need an operator-remembered `-diagnostics`
+flag to show anything at all — so it reaches the operator through `Console.WriteLine` at
+assembly scope instead, and through `TestContext.Current.TestOutputHelper`/`AddWarning` once a
+test is actually running. The effect is the same either way: a diagnostic reaches you on a
+passing run without extra flags.
 
 **Cleanup is best-effort.** `AssemblyCleanup` does not run on a crash, a cancelled pipeline, or
 an agent timeout. Everything is tagged with a run ID whose timestamp is UTC, so an out-of-band
@@ -801,28 +881,34 @@ sweeper can delete anything older than a day using the ID alone. Write one. With
 cancelled pipelines slowly fill your environment with orphans nobody can reproduce locally.
 
 To confirm cleanup is running at all, run `dotnet test --logger "console;verbosity=detailed"`
-once a fixture has registered at least one `OnCleanup`, and look for
-`InTest fixture cleanup: drained N action(s).` Unlike `[AssemblyInitialize]` output on a passing
-run (above), that line does reach both the console at that verbosity and the `.trx`'s last test
-result — so seeing neither means cleanup did not run, not that it succeeded quietly.
+(MSTest) or the built executable directly (xUnit — see Phase 6) once a fixture has registered at
+least one `OnCleanup`, and look for `InTest fixture cleanup: drained N action(s).` Unlike
+`[AssemblyInitialize]` output on a passing run (above), that line does reach both the console at
+that verbosity and the `.trx`'s last test result — so seeing neither means cleanup did not run,
+not that it succeeded quietly. On an xUnit run, a skipped test's stated reason lands in the
+`.trx`'s `<StdOut>`, not `<Message>` — worth knowing before you go looking for it in the wrong
+element.
 
 **A stale local package cache can shadow a fresh build.** This is specifically a trap for
 testing an *unpublished* change: `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published
 to nuget.org now, so an ordinary Phase 2 restore against a released version no
 longer needs a local feed at all. Iterating on a change ahead of the last published tag still
-does — a scaffolded project resolves `InTest.Runtime.MSTest` (which brings in `InTest.Runtime`
-transitively, at the exact same version) from wherever you point NuGet, typically a local feed you
+does — a scaffolded project resolves `InTest.Runtime.MSTest` or `InTest.Runtime.xUnit` (whichever
+matches `--framework`; either way brings in `InTest.Runtime` transitively, at the exact same
+version) from wherever you point NuGet, typically a local feed you
 `dotnet pack` yourself. NuGet does not overwrite an already-cached version: an older
-`InTest.Runtime.MSTest 0.1.0` — or, for the neutral package it depends on, an older
-`InTest.Runtime 0.1.0` — left in `~/.nuget/packages/intest.runtime.mstest` /
+`InTest.Runtime.MSTest 0.1.0` (or `InTest.Runtime.xUnit 0.1.0`) — or, for the neutral package
+either depends on, an older `InTest.Runtime 0.1.0` — left in
+`~/.nuget/packages/intest.runtime.mstest` / `~/.nuget/packages/intest.runtime.xunit` /
 `~/.nuget/packages/intest.runtime` by an earlier local build resolves ahead of a freshly packed
 one carrying the identical version number, and the scaffolded project fails to compile against
 members that plainly exist in the source you just built (`RequireFixture`, `FixtureBody` and
 similar — confirmed by direct experiment: deleting that cache entry and rebuilding is what fixes
 it, not any change to the generated code). Clear the specific entries
 (`dotnet nuget locals global-packages --clear` is blunt but works; deleting just the
-`intest.runtime.mstest` and `intest.runtime` folders under the packages directory is narrower)
-before rebuilding, or bump the local packages' version so neither can collide with what is cached.
+`intest.runtime.mstest`, `intest.runtime.xunit` and `intest.runtime` folders under the packages
+directory is narrower) before rebuilding, or bump the local packages' version so neither can
+collide with what is cached.
 
 **The honest way to avoid this, rather than recover from it after the fact**: don't improvise
 Phase 8 by hand at all. Run `scripts/local-e2e-test.ps1` (see `CONTRIBUTING.md`'s "Testing
@@ -830,7 +916,10 @@ against a local build") — it packs at a version that can never collide with a 
 redirects the whole run's restores away from your real package cache, so this cannot happen in
 the first place. Phase 8 being runnable from a bare clone against a *published* version is no
 longer an open gap — see `docs/v0-acceptance.md`'s publish record — but this script is still the
-current answer to "how do I try a change I haven't tagged and pushed yet."
+current answer to "how do I try a change I haven't tagged and pushed yet." **It scaffolds an
+MSTest project only** — it predates `--framework` and packs `InTest.Runtime.MSTest`, not
+`InTest.Runtime.xUnit`, so trying an unpublished xUnit-path change still means the manual
+pack-and-restore this section otherwise warns against.
 
 **This is for pre-production.** InTest adds no guard rails against being pointed at production,
 deliberately. Pointing it there is your decision and your consequences.

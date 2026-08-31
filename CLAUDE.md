@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-InTest generates a committed, owned MSTest project that exercises a **deployed** API over real
-HTTP, from its OpenAPI document. Three shipped packages (`InTest.Cli`, `InTest.Runtime`,
-`InTest.Runtime.MSTest`), four sample APIs used as fixtures, four test suites.
+InTest generates a committed, owned MSTest or xUnit project that exercises a **deployed** API over
+real HTTP, from its OpenAPI document. Four shipped packages (`InTest.Cli`, `InTest.Runtime`,
+`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit`), four sample APIs used as fixtures, five test
+suites — the fifth, `InTest.Runtime.XUnit.Tests`, exists because the two adapters declare the same
+types in the same namespace and cannot share a compilation with `InTest.Runtime.Tests`.
 `InTest.Cli`/`InTest.Runtime` `0.1.0-preview.1` are published to nuget.org (prerelease, via
-`release.yml`'s trusted-publishing push) — build from source for anything past that tag.
-`InTest.Runtime.MSTest` does not exist on nuget.org at that tag; `examples/` still pins
-`InTest.Runtime` there for that reason.
+`release.yml`'s trusted-publishing push) — build from source for anything past that tag. Neither
+`InTest.Runtime.MSTest` nor `InTest.Runtime.xUnit` exists on nuget.org at that tag; `examples/`
+still pins `InTest.Runtime` there for that reason.
 
 `init`, `generate`, `fixtures repair`, `generate --check` and `upgrade` work end to end.
 A URL `spec.source` also works: `generate` fetches it and writes a committed `spec.json`
@@ -263,5 +265,6 @@ regardless of the value — the config now carries `project.framework` correctly
 
 ## Constraints that are not negotiable in v1
 
-MSTest only. Test project TFM is `net10.0` (independent of the API's). Real HTTP against a
+MSTest or xUnit v3, chosen with `init --framework` and frozen per project — NUnit is not
+supported yet. Test project TFM is `net10.0` (independent of the API's). Real HTTP against a
 deployed target — no mocking, no in-memory host, no stateful CRUD flow ordering.
