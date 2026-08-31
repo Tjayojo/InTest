@@ -1125,6 +1125,11 @@ Xunit.TestContext has no static CancellationToken, which is the fact that forces
 
 **A second template the guard does not read has no text-safety enforcement at all, and nothing fails to tell you.** Convert the test to run over both template names — a `[DataRow("mstest-class.scriban")]` / `[DataRow("xunit-class.scriban")]` pair is the smallest change that keeps the existing logic.
 
+**Use `[TestMethod]` + `[DataRow]`, not `[DataTestMethod]`.** The latter is analyzer-obsolete
+(MSTEST0044) and this repo builds with `TreatWarningsAsErrors`, so it will not compile. Two
+independent agents hit this — in this task and in Task 9. `NeutralityTests.cs:245-246` is the
+established convention to copy.
+
 - [ ] **Step 2: Prove the guard now covers the new template**
 
 Temporarily add `"{{ tc.expected_status }}"` — quoted, which is wrong for a bare field — to `xunit-class.scriban`. Run:
@@ -1186,6 +1191,11 @@ Per `[matrix-stays-representative]`, run under xUnit only the shapes whose rende
 
 **Files:**
 - Modify: `tests/InTest.Golden.Tests/CompileVerificationTests.cs`, `GeneratedSuiteExecutionTests.cs`, `ScaffoldCompileVerificationTests.cs`
+
+**Task 7 has already created `tests/InTest.Golden.Tests/Specs/mutating-operation.json`** and golden
+files for it under both frameworks, so the `mutates` shape is covered from checked-in output. Do not
+duplicate it here — use it if you need a mutating case, and spend this task's budget on the shapes
+that are still uncovered.
 
 - [ ] **Step 0: Parameterise `CompileVerificationTests.CreateProject` on three things, not one**
 
