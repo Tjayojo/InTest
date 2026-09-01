@@ -6,65 +6,17 @@ Generates a complete, owned .NET test project that exercises a deployed API over
 from its OpenAPI document.
 
 The output is a normal MSTest, xUnit or NUnit project — your choice, made once at `init` and
-frozen per project. You commit it and edit it like any other test project; an MSTest or NUnit
-project runs with `dotnet test`, an xUnit v3 one runs as a built executable (see
-[`docs/getting-started.md`](docs/getting-started.md) Phase 6 for why xUnit differs). InTest is a
-development-time tool — it generates on your machine or in a pull request, never as part of the
+frozen per project. You commit it and edit it like any other test project. InTest is a
+development-time tool: it generates on your machine or in a pull request, never as part of the
 deployment pipeline.
 
-> **Status: v0. Working, but early — `0.1.0-preview.2` is published to nuget.org as a prerelease.**
->
-> `intest init`, `intest generate` and `intest fixtures repair` work: together they produce a
-> compiling MSTest, xUnit or NUnit project — the framework is chosen once with `init --framework`
-> — whose contract tests pass against a live API. That has been verified against three sample
-> APIs, one per OpenAPI producer, for MSTest — see
-> [`docs/v0-acceptance.md`](docs/v0-acceptance.md). Catalog and Inventory pass in full, twice
-> each, against an unreset store. Orders — the one sample with declared `security` — generates 24
-> tests: **0 failed, 4 skipped, 20 passed**. The 4 skips are the wrong-scope 403 cases whose
-> secondary identity already holds the scope the operation requires — a runtime guard
-> (`RequireSecondaryIdentityLacks`) skips each with a stated reason instead of letting it run
-> against a request that identity is genuinely authorized for (**F11, closed**). The 3
-> write-scope 403s — the cases the sample's identity pair can actually prove — ran and passed.
-> xUnit and NUnit reproduce the Catalog and Orders numbers above exactly (the framework-pack
-> acceptance run, same document); Inventory has not been run under either yet.
-> `intest fixtures repair` creates and maintains the fixture files under `fixtures/` that supply
-> request bodies and path/query parameters, so an operation that needs one no longer generates a
-> test that cannot send it — see "What day one actually looks like" below.
->
-> `intest generate --check` and `intest upgrade` also work end to end, but neither has its own
-> entry in `docs/v0-acceptance.md` yet — that acceptance run predates both commands, and
-> extending it to cover them is still open work. Until then, "verified against three sample APIs"
-> is a claim about `init`/`generate`/`fixtures repair` only.
->
-> **A URL `spec.source` now works** (§9): `generate` fetches the document, writes it into the
-> project as a committed `spec.json` snapshot, and everything downstream — `generate --check`,
-> `fixtures repair` — reads that snapshot rather than the network, so CI stays hermetic. JSON
-> only; the fetch is anonymous, so an authenticated Swagger endpoint still needs the fetch-it-
-> yourself route below. This has unit and end-to-end coverage but has **not** been through an
-> acceptance run against a live Swagger endpoint, so it is not in `docs/v0-acceptance.md`.
->
-> **Not yet built:** variation tests, `intest survey`, `intest fixtures promote`,
-> `intest assertions add`, `intest generate --emit-plan`, and YAML input — from a file or a URL
-> alike; a URL serving YAML is refused by name rather than failing as a parse error.
->
-> **Installable today:** all five packages — `InTest.Cli`, `InTest.Runtime`,
-> `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` — are live on
-> nuget.org at `0.1.0-preview.2` — `dotnet tool install -g InTest.Cli --version 0.1.0-preview.2`
-> resolves and installs cleanly, reporting
-> `0.1.0-preview.2+b7fab09cc78c5ec65563cd21d3bed74635c53d2c` — the exact tagged commit (verified by
-> installing it into a scratch directory; the install briefly failed with "not found in NuGet
-> feeds" for about four minutes right after the push, ordinary registration-index propagation lag
-> rather than a broken publish, then succeeded). This is a v0 prerelease: breaking changes are
-> still expected before a `0.1.0` stable release. Building from source is still how you get
-> anything past that tag. The three adapter packages a generated project actually references —
-> `InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit`, split out of
-> `InTest.Runtime` so no adapter ever pulls another test framework in transitively — are published
-> for the first time in this release, and each resolves `InTest.Runtime 0.1.0-preview.2`
-> transitively at the exact same version (confirmed with `dotnet list package
-> --include-transitive`), the §3 compatibility contract holding at the published version.
->
-> The design spec is still the source of truth and is worth reading before the code:
-> [`docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md`](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md)
+```bash
+dotnet tool install -g InTest.Cli --version 0.1.0-preview.2
+```
+
+> **Status: v0 prerelease.** Working, but early — breaking changes are expected before a `0.1.0`
+> stable release. See [Status and limits](#status-and-limits) below for what is proven, what is
+> unproven, and what does not exist yet.
 
 ## What it is for
 
@@ -95,17 +47,34 @@ Read these before evaluating — they are firm for v1, and they rule InTest out 
 | Spec | OpenAPI 3.x, JSON or YAML, local file or URL. **Today: JSON only** — a local file, or a URL InTest can reach anonymously |
 | Target | A deployed, reachable API |
 
+## Quickstart
+
+```bash
+intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.json
+dotnet intest generate                    # exits non-zero on a first run — see below
+dotnet intest fixtures repair             # create the fixtures it asked for
+dotnet intest generate                    # regenerate now that fixtures exist
+dotnet test                               # an xUnit v3 suite runs as an executable instead
+dotnet intest generate --check            # CI: fail if committed output is stale
+dotnet intest upgrade                     # adopt a new tool version deliberately
+```
+
+An MSTest or NUnit suite runs with `dotnet test`; an xUnit v3 one runs as a built executable —
+[`docs/getting-started.md`](docs/getting-started.md) Phase 6 explains why, and what to run.
+
+**Why `init` is bare and everything after it is `dotnet intest`.** `init` scaffolds a *local*
+tool manifest (`.config/dotnet-tools.json`), so from `generate` on, commands resolve through it —
+that is what pins CI and your machine to the identical version. Bare `intest` is only on `PATH`
+after a **global** install. Full explanation in
+[`docs/getting-started.md`](docs/getting-started.md), Phases 2 and 8.
+
+Generated code lands in `Generated/` and is regenerated wholesale. Your code lives in same-named
+partial classes outside it, and InTest never touches those. Request bodies and path/query
+parameters live in `fixtures/`, which only `fixtures repair` writes to.
+
 ## What day one actually looks like
 
 Worth knowing before you start, because it surprises people.
-
-```bash
-dotnet intest generate          # reports missing/stale fixtures, exits non-zero
-dotnet intest fixtures repair   # creates and updates them
-```
-
-Shown as `dotnet intest …`, not bare `intest`, because these run inside a project `init` already
-scaffolded — see "Using it" below for why the invocation changes at that point.
 
 `intest fixtures repair` creates a fixture for every operation that needs a request body or a
 required path/query parameter. Where your spec provides an `example` or a `default`, that value
@@ -117,64 +86,48 @@ which a permissive endpoint accepts, so the suite passes while asserting nothing
 gets fixed; a green test that proves nothing never does.
 
 In practice that means, on an API with lots of POSTs and few spec examples, your first run after
-`fixtures repair` is mostly red and there is real work to do. Two things make that manageable:
+`fixtures repair` is mostly red and there is real work to do.
 
-- Run `intest survey` **before** adopting — it will tell you what fraction of operations carry
-  examples, so you can size the work in advance instead of discovering it. (Designed, not yet
-  built.)
-- A useful suite runs on day one with the least hand-editing: every GET and DELETE contract
-  test, every declared-error test (404s), and every no-token 401 test needs no request body, and
-  any parameter the spec already gives an `example` or `default` for arrives filled, with no
-  `TODO:` sentinel to fix by hand. `fixtures repair` still creates a fixture **file** for every
-  operation that has a parameter at all, whether or not that file ends up needing an edit.
+What still lands green on day one, with no hand-editing: every GET and DELETE contract test,
+every declared-error test (404s), and every no-token 401 test needs no request body, and any
+parameter the spec already gives an `example` or `default` for arrives filled. `fixtures repair`
+still creates a fixture **file** for every operation that has a parameter at all, whether or not
+that file ends up needing an edit.
 
-## Using it
+## Learn more
 
-Working today:
+- **[Full walkthrough](docs/getting-started.md)** — from an existing API to a suite running as a
+  post-deployment gate, including CI wiring and the things that bite.
+- **[Worked examples](examples/)** — the generated output of two sample APIs, Catalog and Orders,
+  each committed under all three frameworks. Every one references its adapter package from
+  nuget.org rather than this repository's source, and CI builds and `--check`s all six on every
+  pull request and every push to `main`.
 
-```bash
-intest init --name Orders.ApiTests --spec ../Orders/bin/Debug/net10.0/orders.json
-dotnet intest generate                    # exits non-zero on a first run — see below
-dotnet intest fixtures repair
-dotnet intest generate                    # regenerate now that fixtures exist
-dotnet test
-dotnet intest generate --check            # CI: fail if committed output is stale
-dotnet intest upgrade                     # adopt a new tool version deliberately
-```
+## Status and limits
 
-`init` is the one command above shown bare: it is what creates the local tool manifest
-(`.config/dotnet-tools.json`) every command after it restores against, so there is nothing yet
-for `init` itself to resolve through. From `generate` on, `dotnet intest …` is what actually
-runs — bare `intest` is only on `PATH` after a **global** install, and `init` scaffolds a
-**local** one instead, so CI and your machine restore the identical pinned version (`dotnet tool
-restore`, confirmed against a real restore, cross-shell — see
-[`docs/getting-started.md`](docs/getting-started.md), Phase 2 and Phase 8, for the full
-explanation and evidence).
+**Published.** All five packages — `InTest.Cli`, `InTest.Runtime`, and the three adapters
+`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` and `InTest.Runtime.NUnit` — are on nuget.org at
+`0.1.0-preview.2`. A generated project references whichever adapter matches its framework and
+gets `InTest.Runtime` transitively at the same version. Building from source is how you get
+anything past that tag.
 
-Designed, not yet built:
+**Proven against live APIs.** `init`, `generate` and `fixtures repair` produce a compiling project
+whose contract tests pass over real HTTP against three sample APIs, one per OpenAPI producer.
+Under MSTest, Catalog and Inventory pass in full; Orders — the one sample declaring `security` —
+generates 24 tests, of which 20 pass and 4 skip with a stated reason, because the sample's
+identity pair cannot produce the 403 those four assert. xUnit and NUnit reproduce the Catalog and
+Orders results exactly. The full record, including every defect found and how, is in
+[`docs/v0-acceptance.md`](docs/v0-acceptance.md).
 
-```bash
-intest survey "specs/**/*.json"    # size the work before adopting
-```
+**Works, but not yet covered by an acceptance run.** `generate --check`, `intest upgrade`, and a
+URL `spec.source`. The URL path fetches the document once and commits it as a `spec.json`
+snapshot, so `--check` and `fixtures repair` read that snapshot rather than the network and CI
+stays hermetic. JSON only, and the fetch is anonymous — an authenticated Swagger endpoint still
+needs you to fetch the document yourself.
 
-Shown bare, unlike everything in "Using it" above: there is no project yet at this point, so no
-local manifest either — `survey` runs pre-adoption against whatever a **global**
-`dotnet tool install -g InTest.Cli` put on `PATH`, the same shape shown in
-[`docs/getting-started.md`](docs/getting-started.md)'s Phase 0.
-
-Generated code lands in `Generated/` and is regenerated wholesale. Your code lives in
-same-named partial classes outside it, and InTest never touches those. Request bodies and
-path/query parameters live in `fixtures/`, which only `fixtures repair` writes to.
-
-**Full walkthrough:** [docs/getting-started.md](docs/getting-started.md) — from an existing API
-to a suite running as a post-deployment gate, including CI wiring and the things that bite.
-
-**Worked examples:** [`examples/`](examples/) commits the generated output of two sample APIs —
-Catalog and Orders — each under all three frameworks, six projects in total, every one resolving
-its adapter package (`InTest.Runtime.MSTest`, `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit`)
-from nuget.org rather than from this repository's own source. CI builds and `--check`s every one
-on every push and pull request (see `CLAUDE.md`'s "What this is" section for why this is not
-redundant with the template tests).
+**Not built yet.** Variation tests, `intest survey`, `intest fixtures promote`,
+`intest assertions add`, `intest generate --emit-plan`, and YAML input from a file or a URL alike
+(a URL serving YAML is refused by name rather than failing as a parse error).
 
 ## Design principles
 
@@ -190,10 +143,12 @@ redundant with the template tests).
 
 ## Contributing
 
-Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). A careful
-reading of the spec remains among the most valuable contributions: prior review rounds caught
-contradictions, a build-breaking interaction, and a correlation identifier that silently
-collapsed across data-driven test rows, all before any of it was written.
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The
+[design spec](docs/superpowers/specs/2026-08-16-intest-api-test-generator-design.md) is the
+source of truth for why things are built the way they are, and a careful reading of it remains
+among the most valuable contributions: prior review rounds caught contradictions, a
+build-breaking interaction, and a correlation identifier that silently collapsed across
+data-driven test rows, all before any of it was written.
 
 ## Security
 
