@@ -471,19 +471,27 @@ public class ClientCallPlannerTests
     }
 
     /// <summary>
-    /// <c>[path-item-parameters]</c>: the same <c>hasUntypablePathParameter: true</c> bool this
-    /// gate already reacts to also carries a second, distinct cause — a path parameter TestPlanBuilder
-    /// never even saw declared on the operation at all (most likely because the spec declares it one
-    /// level up, at the path-item, which nothing in this codebase reads). <c>declaredPathParameterOrder</c>
-    /// not naming <c>'id'</c>, the same fact <c>[nswag-path-parameter-order]</c>'s own gate above
-    /// tests for NSwag, is what this test reproduces for Kiota — Kiota has no equivalent
-    /// argument-order gate of its own, so this is the only place that catches it, and the note text
-    /// must say "declared at the path-item level", not the generic "no client-side type conversion"
-    /// text an unsupported-<em>type</em> case gets (<see cref="ResolveWithholdsConventionForAnUntypablePathParameterKindOnKiota"/>
+    /// <c>[path-item-parameters]</c>, corrected: the same <c>hasUntypablePathParameter: true</c>
+    /// bool this gate already reacts to also carries a second, distinct cause — a path parameter
+    /// TestPlanBuilder never saw declared for this operation at all, at any level it reads. Before
+    /// <c>[effective-parameters]</c> (docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md),
+    /// <c>declaredPathParameterOrder</c> omitting <c>'id'</c> was ambiguous — it could mean "declared
+    /// one level up, at the path-item" just as easily as "declared nowhere" — because
+    /// <c>TestPlanBuilder.Build</c> only ever fed this method <c>operation.Parameters</c>. Now that
+    /// <c>Build</c> merges <c>pathItem.Parameters</c> in before computing
+    /// <c>declaredPathParameterOrder</c> at all, a path-item-level declaration is no longer a way to
+    /// reach this test's inputs — this reproduces the one cause that remains: the spec declares
+    /// <c>'id'</c> nowhere this planner reads, neither on the operation nor on the path item.
+    /// <c>declaredPathParameterOrder</c> not naming <c>'id'</c>, the same fact
+    /// <c>[nswag-path-parameter-order]</c>'s own gate above tests for NSwag, is what this test
+    /// reproduces for Kiota — Kiota has no equivalent argument-order gate of its own, so this is the
+    /// only place that catches it, and the note text must still say the parameter has no
+    /// declaration anywhere in the spec, not the generic "no client-side type conversion" text an
+    /// unsupported-<em>type</em> case gets (<see cref="ResolveWithholdsConventionForAnUntypablePathParameterKindOnKiota"/>
     /// above) — the two call for different remedies.
     /// </summary>
     [TestMethod]
-    public void ResolveNamesThePathItemLevelCauseWhenTheUntypableParameterWasNeverDeclaredOnTheOperation()
+    public void ResolveNamesTheUndeclaredCauseWhenTheUntypableParameterWasNeverDeclaredAnywhere()
     {
         var resolution = ClientCallPlanner.Resolve(
             ClientKind.Kiota, "getOrderById", hasOperationId: true, "GET", "/api/orders/{id}",
@@ -493,7 +501,7 @@ public class ClientCallPlannerTests
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
         resolution.UnresolvedReason.ShouldContain("'id'", Case.Sensitive);
-        resolution.UnresolvedReason.ShouldContain("path-item level", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldContain("no matching parameter declaration anywhere", Case.Sensitive);
         resolution.UnresolvedReason.ShouldContain("client-map.json", Case.Sensitive);
     }
 
@@ -516,7 +524,7 @@ public class ClientCallPlannerTests
         resolution.Expression.ShouldBeNull();
         resolution.UnresolvedReason.ShouldNotBeNull();
         resolution.UnresolvedReason.ShouldContain("client-side type", Case.Sensitive);
-        resolution.UnresolvedReason.ShouldNotContain("path-item level", Case.Sensitive);
+        resolution.UnresolvedReason.ShouldNotContain("no matching parameter declaration anywhere", Case.Sensitive);
     }
 
     /// <summary>An override still wins outright for an untypable path-parameter kind — the same

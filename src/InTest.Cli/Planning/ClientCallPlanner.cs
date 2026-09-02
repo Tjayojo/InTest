@@ -217,19 +217,29 @@ public static class ClientCallPlanner
     /// both conventions' <c>{param}</c> placeholders share.
     /// </para>
     /// <para>
-    /// <b><c>[path-item-parameters]</c> — a second, distinct cause behind the same bool.</b> OpenAPI
-    /// 3.x also lets a path parameter be declared once at the path-item level rather than repeated
-    /// on every operation beneath it; nothing in this codebase reads <c>pathItem.Parameters</c>
-    /// (merging it in is deliberately out of scope — it would also have to change
-    /// <see cref="Fixtures.FixtureComposer"/>, and therefore fixtures and generated raw-HTTP output).
-    /// <c>TestPlanBuilder.ResolvePathParameterKinds</c> fails such a parameter closed to
-    /// <see langword="null"/> too, so it sets <paramref name="hasUntypablePathParameter"/> exactly
-    /// like an unsupported <em>type</em> does — but "InTest never saw this parameter declared
-    /// anywhere it looked" and "InTest saw it declared with a type it cannot convert" call for two
-    /// different remedies, so this method re-derives which one applies (the same
+    /// <b><c>[path-item-parameters]</c>, corrected — a second, distinct cause behind the same
+    /// bool, now narrower than it was.</b> OpenAPI 3.x also lets a path parameter be declared once
+    /// at the path-item level rather than repeated on every operation beneath it. This paragraph
+    /// used to say nothing in this codebase read <c>pathItem.Parameters</c>, so any placeholder
+    /// this planner never saw declared was presumed to be exactly that shape — declared, just one
+    /// level up. That premise is gone: <c>TestPlanBuilder.Build</c> now merges
+    /// <c>pathItem.Parameters</c> with <c>operation.Parameters</c>
+    /// (<see cref="Spec.EffectiveParameters"/>, <c>[effective-parameters]</c>,
+    /// docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md) before either
+    /// <c>ResolvePathParameterKinds</c> or <c>DeclaredPathParameterOrder</c> ever run, so a
+    /// path-item-level parameter now reaches both exactly the way an operation-level one always
+    /// did — typed, ordered, and no longer a cause of this <see langword="null"/>.
+    /// <c>TestPlanBuilder.ResolvePathParameterKinds</c> still fails a parameter closed to
+    /// <see langword="null"/>, setting <paramref name="hasUntypablePathParameter"/>, but the
+    /// remaining cause behind that <see langword="null"/> is narrower: a placeholder the spec
+    /// never declares as a parameter <em>anywhere this planner reads</em> — not on the operation,
+    /// not on its enclosing path item. That is still a distinct fact from "InTest saw it declared
+    /// with a type it cannot convert" (an unsupported <em>type</em>, the other cause of the same
+    /// bool), so this method still re-derives which one applies (the same
     /// <c>undeclaredPathParameterName</c> lookup <c>[nswag-path-parameter-order]</c> already needed)
-    /// and picks the note accordingly, rather than sending an adopter to <c>client-map.json</c>
-    /// chasing an unsupported type that was never declared at all.
+    /// and picks the note accordingly — see the note text itself, below, which was also corrected:
+    /// it no longer tells an adopter the parameter is "declared at the path-item level", since that
+    /// is exactly the case this gate can no longer reach.
     /// </para>
     /// </summary>
     public static Resolution Resolve(
@@ -284,14 +294,17 @@ public static class ClientCallPlanner
             "to route it through the client");
         }
 
-        // [path-item-parameters]: computed unconditionally (not just for the NSwag-only gate
-        // below) — a path-template placeholder absent from declaredPathParameterOrder is the same
-        // fact TestPlanBuilder.ResolvePathParameterKinds's own [path-item-parameters] fail-closed
-        // mapping just resolved to a null (untypable) kind: nothing in this codebase reads
-        // pathItem.Parameters, so a placeholder with no matching 'in: path' entry among the
-        // operation's own declared parameters is most likely declared one level up, at the
-        // path-item rather than the operation. Reused below by the hasUntypablePathParameter gate
-        // to give Kiota the same distinguishing note NSwag's own gate already gives itself.
+        // [path-item-parameters], corrected: computed unconditionally (not just for the
+        // NSwag-only gate below) — a path-template placeholder absent from
+        // declaredPathParameterOrder is the same fact behind TestPlanBuilder.ResolvePathParameterKinds's
+        // own null (untypable) result. declaredPathParameterOrder is itself
+        // TestPlanBuilder.DeclaredPathParameterOrder's output over Build's merged
+        // EffectiveParameters.Resolve result, pathItem.Parameters included — so a placeholder
+        // absent here is no longer "most likely declared one level up, at the path-item"; that
+        // case is merged in before this method ever sees it. What remains absent is a placeholder
+        // the spec never declares as a parameter anywhere this planner reads (operation or path
+        // item). Reused below by the hasUntypablePathParameter gate to give Kiota the same
+        // distinguishing note NSwag's own gate already gives itself.
         var declaredNames = new HashSet<string>(declaredPathParameterOrder, StringComparer.Ordinal);
         var undeclaredPathParameterName = PathTemplatePlaceholderNames(pathTemplate)
             .FirstOrDefault(name => !declaredNames.Contains(name));
@@ -329,24 +342,28 @@ public static class ClientCallPlanner
         // {param} placeholders share — see this method's own doc comment above for the measured
         // evidence and the reasoning this gate corrects.
         //
-        // [path-item-parameters]: this gate is also what a path-item-level path parameter reaches
-        // for Kiota (NSwag's own [nswag-path-parameter-order] gate above already caught it, with
-        // its own note, before control gets here). undeclaredPathParameterName distinguishes the
-        // two causes with two different remedies: a parameter this method never even saw declared
-        // (most likely one level up, at the path-item) has no schema to type-check at all, which is
-        // a different fact from a parameter that IS declared on the operation but whose declared
-        // schema is a shape InTest has no client-side conversion for (date-time, number, ...).
-        // Conflating the two into one message would send an adopter chasing an "unsupported type"
-        // that was never declared anywhere this planner looked.
+        // [path-item-parameters], corrected: this gate is what a genuinely undeclared path
+        // parameter reaches for Kiota (NSwag's own [nswag-path-parameter-order] gate above already
+        // caught it, with its own note, before control gets here) — no longer what a path-item-
+        // level one reaches, now that TestPlanBuilder.Build merges pathItem.Parameters in before
+        // either declaredPathParameterOrder or hasUntypablePathParameter is computed
+        // ([effective-parameters]). undeclaredPathParameterName still distinguishes two causes with
+        // two different remedies: a parameter this planner never saw declared at all — not on the
+        // operation, not on its enclosing path item — has no schema to type-check, which is a
+        // different fact from a parameter that IS declared (on either) but whose declared schema is
+        // a shape InTest has no client-side conversion for (date-time, number, ...). Conflating the
+        // two into one message would send an adopter chasing an "unsupported type" that was never
+        // declared anywhere this planner looked — or, now, wrongly pointing them at "move the
+        // declaration up/down a level" when the real problem is that it is missing outright.
         if (hasUntypablePathParameter)
         {
             if (undeclaredPathParameterName is not null)
             {
                 return new Resolution(null,
-                $"has a path parameter ('{undeclaredPathParameterName}') declared at the path-item " +
-                "level rather than on the operation, which intest does not yet read " +
-                $"([path-item-parameters]) — add an entry to {ClientCallMap.FileName} to route it " +
-                "through the client");
+                $"has a path parameter ('{undeclaredPathParameterName}') in its path template with " +
+                "no matching parameter declaration anywhere in the spec — neither on the operation " +
+                "nor on its enclosing path item ([path-item-parameters]) — declare it in one of the " +
+                $"two, or add an entry to {ClientCallMap.FileName} to route it through the client");
             }
 
             return new Resolution(null,

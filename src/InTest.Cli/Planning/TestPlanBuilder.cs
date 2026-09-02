@@ -687,23 +687,42 @@ public static class TestPlanBuilder
             .Where(p => p.In == ParameterLocation.Path)
             .ToDictionary(p => p.Name!, p => p.Schema, StringComparer.Ordinal);
 
-        // [path-item-parameters]: OpenAPI 3.x lets a path parameter be declared once at the
-        // path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every
+        // [path-item-parameters], corrected: OpenAPI 3.x lets a path parameter be declared once
+        // at the path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every
         // operation under it — a common way to declare an `id` once for GET/PUT/DELETE on
-        // `/orders/{id}`. Nothing in this codebase reads `pathItem.Parameters` — every read here
-        // and in FixtureComposer is `operation.Parameters` only — so a name absent from `declared`
-        // is not "no schema was given for it", it is "this method never saw a declaration for it
-        // at all". Falling through to PathParameterKind.String used to treat that exactly like the
-        // genuinely-undeclared-schema case ResolvePathParameterKind itself handles (a real
-        // assumption, documented there, that a fresh GUID is well-typed for a parameter with no
-        // schema). That conflated two different unknowns: "no schema, but this method IS the
-        // parameter's operation" vs "this method was never given the parameter's declaration to
-        // begin with". The latter deserves null (untypable), not a guess — merging
-        // `pathItem.Parameters` into this read is deliberately out of scope (it would also change
-        // FixtureComposer, and therefore fixtures and generated raw-HTTP output — see
-        // ClientCallPlanner.Resolve's own doc comment and [typed-client-invocation]'s plan doc for
-        // the full reasoning); this fail-closed mapping is the gate that stands in for that fix
-        // until it lands.
+        // `/orders/{id}`. This comment used to say nothing in this codebase read
+        // `pathItem.Parameters`, so a name absent from `declared` could mean either "declared, but
+        // one level up, where this method never looked" or "declared nowhere at all" and there was
+        // no way to tell the two apart — that was the gap issue #7 named and this fail-closed
+        // mapping stood in for.
+        //
+        // The premise is gone: `parameters` here is `Build`'s already-merged
+        // `EffectiveParameters.Resolve` result (`[effective-parameters]`, `Spec/EffectiveParameters.cs`,
+        // docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md), computed once per
+        // operation from both `operation.Parameters` and `pathItem.Parameters` before this method
+        // ever runs. A path-item-level `id` now lands in `declared` exactly the way an
+        // operation-level one always did, and resolves through `ResolvePathParameterKind` to a real
+        // kind (typically `PathParameterKind.Guid`) instead of falling through to `null` — confirmed
+        // by `TestPlanBuilderTests.APathParameterDeclaredOnlyAtThePathItemLevelNowResolvesToGuidKindJustLikeItsOperationLevelTwin`.
+        //
+        // A name still absent from `declared` after the merge means something narrower now: this
+        // path-template placeholder is declared as a parameter nowhere in the spec this planner can
+        // see — not on the operation, not on its enclosing path item. OpenAPI 3.x requires every
+        // templated path segment to have a matching parameter declaration, but nothing in
+        // `SpecLoader` currently rejects a document that omits one, so this case is still reachable
+        // (confirmed directly: a spec with `/orders/{id}` and no `id` parameter anywhere still
+        // parses and reaches this method). That is neither of the two unknowns this comment used to
+        // distinguish: it is not "no schema was given, but this method IS the parameter's operation"
+        // (`ResolvePathParameterKind` handles that directly — a real, separately documented
+        // assumption that a fresh GUID is well-typed for a parameter declared with no schema), and
+        // it is no longer "this method was never given the parameter's declaration because it only
+        // read `operation.Parameters`" (the merge above closed exactly that gap). It is instead "the
+        // spec itself never declares this placeholder's parameter, at any level this planner reads"
+        // — a genuinely incomplete spec, not a blind spot in this method. `null` (untypable) remains
+        // the right answer: there is no schema anywhere to guess a kind from. See
+        // `ClientCallPlanner.Resolve`'s own `[path-item-parameters]` gate — also corrected — for how
+        // this now-narrower cause is turned into a withheld-convention note on the client-routed
+        // branch, distinct from the unsupported-*type* note the other `null` cause gets.
         return pathParameterNames
             .Select(name => declared.TryGetValue(name, out var schema) ? ResolvePathParameterKind(schema) : null)
             .ToList();
