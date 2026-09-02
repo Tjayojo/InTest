@@ -11,7 +11,7 @@ development-time tool: it generates on your machine or in a pull request, never 
 deployment pipeline.
 
 ```bash
-dotnet tool install -g InTest.Cli --version 0.1.0-preview.2
+dotnet tool install -g InTest.Cli --prerelease
 ```
 
 > **Status: v0 prerelease.** Working, but early — breaking changes are expected before a `0.1.0`
