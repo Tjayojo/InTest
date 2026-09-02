@@ -425,11 +425,70 @@ public class FixtureComposerTests
 
         foreach (var (path, method) in cases)
         {
-            var operation = document.Paths[path].Operations![new HttpMethod(method)];
+            var pathItem = document.Paths[path];
+            var operation = pathItem.Operations![new HttpMethod(method)];
+            var effectiveParameters = InTest.Cli.Spec.EffectiveParameters.Resolve(pathItem, operation);
             var fixture = FixtureComposer.Compose(document, path, method, "op_key", "intest 0.2.0");
             var composeProducesSomething = fixture.Body is not null || fixture.Parameters.Count > 0;
 
-            FixtureComposer.NeedsFixture(operation).ShouldBe(composeProducesSomething, $"{method} {path}");
+            FixtureComposer.NeedsFixture(effectiveParameters, operation).ShouldBe(composeProducesSomething, $"{method} {path}");
         }
+    }
+
+    // Issue #7: nothing in FixtureComposer used to read pathItem.Parameters, so an "id" declared
+    // only at the path-item level (rather than repeated on the operation) never became a fixture
+    // entry — the operation's own success case still generated, and the raw-HTTP call it emitted
+    // referenced a FixtureParameter that was never written. Reproduced against getWidget below,
+    // structurally identical to getGadget except for where "id" is declared.
+    private const string PathItemParameterSpec = """
+    {
+      "openapi": "3.0.3", "info": { "title": "T", "version": "1" },
+      "paths": {
+        "/gadgets/{id}": { "get": {
+          "operationId": "getGadget",
+          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "ok" } } } },
+        "/widgets/{id}": {
+          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "get": {
+            "operationId": "getWidget",
+            "responses": { "200": { "description": "ok" } } } }
+      }
+    }
+    """;
+
+    [TestMethod]
+    public async Task ComposesAFixtureEntryForAParameterDeclaredOnlyOnThePathItem()
+    {
+        var fixture = await ComposeAsync(PathItemParameterSpec, "/widgets/{id}", "GET");
+
+        // Same sentinel a required path parameter always gets (decision 1), proving the
+        // path-item-declared "id" reached Compose exactly the way the operation-declared twin's
+        // does — see the next test.
+        fixture.Parameters.ShouldContainKey("id");
+        fixture.Parameters["id"].ShouldBe("TODO:id");
+    }
+
+    [TestMethod]
+    public async Task AnOperationLevelAndAPathItemLevelTwinComposeIdenticalFixtures()
+    {
+        var fromOperationLevel = await ComposeAsync(PathItemParameterSpec, "/gadgets/{id}", "GET");
+        var fromPathItemLevel = await ComposeAsync(PathItemParameterSpec, "/widgets/{id}", "GET");
+
+        fromPathItemLevel.Parameters.ShouldBe(fromOperationLevel.Parameters,
+            "getGadget (id on the operation) and getWidget (id on the path item) are structurally " +
+            "identical and must compose the same fixture — the bug was that only one of them did");
+    }
+
+    [TestMethod]
+    public async Task NeedsFixtureIsTrueForAParameterDeclaredOnlyOnThePathItem()
+    {
+        var loaded = await SpecLoader.LoadFromTextAsync(PathItemParameterSpec);
+        var pathItem = loaded.Document.Paths["/widgets/{id}"];
+        var operation = pathItem.Operations![HttpMethod.Get];
+        var effectiveParameters = InTest.Cli.Spec.EffectiveParameters.Resolve(pathItem, operation);
+
+        FixtureComposer.NeedsFixture(effectiveParameters, operation).ShouldBeTrue(
+            "a path-item-declared required path parameter must be seen just like an operation-declared one");
     }
 }

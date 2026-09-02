@@ -10,6 +10,31 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Path parameters declared on the path item are no longer invisible**
+  ([#7](https://github.com/Tjayojo/intest/issues/7)). OpenAPI 3.x lets a parameter be declared once
+  on the path item and inherited by every operation beneath it — a common way to declare `id`
+  once for `GET`/`PUT`/`DELETE` on `/orders/{id}`. Nothing in InTest read `pathItem.Parameters`, so
+  such a parameter reached neither planning nor fixtures. **The symptom was silence rather than an
+  error:** `fixtures repair` reported creating nothing for the operation, `generate` exited **0**,
+  the project compiled and `generate --check` passed — and the suite then failed only against a
+  live API, with a fixture-lookup error that pointed nowhere near the spec. Path-item and operation
+  parameters are now merged, with an operation-level entry overriding a path-item one when **both**
+  `name` and `in` match (`{id}` in `path` and `id` in `query` are different parameters and both
+  survive).
+
+  **Migration:** none required, but expect a change if your spec uses this shape. `fixtures repair`
+  will now create a fixture entry it previously omitted, and it arrives as a `TODO:` sentinel that
+  fails until filled — which is the point: the test was previously passing generation and failing
+  at run time instead. Specs that declare every parameter on the operation are entirely unaffected;
+  no committed fixture, golden file or example in this repository changed.
+
+  The typed-client gate added for this shape in `4a864c6` now fires only when a path placeholder is
+  declared **nowhere** — neither on the operation nor on its path item — and its
+  `coverage-report.json` note was reworded accordingly, since it previously blamed a path-item
+  declaration that in that case does not exist.
+
 ## [0.1.0-preview.2] - 2026-08-31
 
 Adds xUnit v3 and NUnit as supported test frameworks, bringing the published package count to

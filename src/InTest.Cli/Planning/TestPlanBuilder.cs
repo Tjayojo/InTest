@@ -67,11 +67,20 @@ public static class TestPlanBuilder
                 var key = OperationKey.Resolve(operation.OperationId, method.Method, path);
                 allOperationKeys.Add(key.Value);
 
+                // [effective-parameters]: computed exactly once per operation, here, where
+                // pathItem is in scope — every read below that used to go straight to
+                // operation.Parameters (QueryParameters, RequiredQueryParameterNames via
+                // TryPlanDeclaredNotFound, ResolvePathParameterKinds, DeclaredPathParameterOrder,
+                // and FixtureComposer.NeedsFixture) now takes this instead. See
+                // EffectiveParameters's own doc comment for the merge rule and why this is the one
+                // place it runs, not six.
+                var effectiveParameters = EffectiveParameters.Resolve(pathItem, operation);
+
                 // Delegated to the composer rather than reproduced here: it alone knows which
                 // parameters it actually emits a value for (an optional query parameter with an
                 // example or default still produces one), so it is the only place that can answer
                 // this without risking drift from what a fixture write would really do.
-                var needsFixture = FixtureComposer.NeedsFixture(operation);
+                var needsFixture = FixtureComposer.NeedsFixture(effectiveParameters, operation);
 
                 // This is a filename check, not a general "is this operationId OK?" validator —
                 // narrow on purpose, and worth spelling out because two separate investigations
@@ -141,7 +150,7 @@ public static class TestPlanBuilder
                 var methodName = CSharpIdentifier.ToPascalCase(key.Value) + "_Contract";
                 proposedNames[CaseIdentity(key.Value, CaseRole.Success, status)] = methodName;
 
-                var queryParameterNames = QueryParameters(operation);
+                var queryParameterNames = QueryParameters(effectiveParameters);
                 var hasRequestBody = FixtureComposer.HasJsonBodyToCompose(operation);
 
                 // [typed-path-parameters]/[nswag-path-parameter-order]: computed once here, ahead
@@ -151,8 +160,8 @@ public static class TestPlanBuilder
                 // above already follow. pathParameterKinds's elements are nullable
                 // (PathParameterKind?) per the corrected [typed-path-parameters] finding: not every
                 // schema shape a real client generator types is one of this enum's four members.
-                var pathParameterKinds = ResolvePathParameterKinds(operation, pathParameterNames);
-                var declaredPathParameterOrder = DeclaredPathParameterOrder(operation);
+                var pathParameterKinds = ResolvePathParameterKinds(effectiveParameters, pathParameterNames);
+                var declaredPathParameterOrder = DeclaredPathParameterOrder(effectiveParameters);
 
                 // [success-only]: this is the only site in Build that ever resolves a client call
                 // — DeclaredError and Auth cases (TryPlanDeclaredNotFound, PlanAuthCases below)
@@ -201,12 +210,12 @@ public static class TestPlanBuilder
                 // above is already confirmed generated, so neither can outlive an operation this
                 // method already skipped (the `continue`s above it), and the two can never
                 // disagree about the operation.
-                if (TryPlanDeclaredNotFound(operation, key, httpMethod, path, tag, pathParameterNames, proposedNames, notes) is { } notFoundCase)
+                if (TryPlanDeclaredNotFound(effectiveParameters, operation, key, httpMethod, path, tag, pathParameterNames, proposedNames, notes) is { } notFoundCase)
                 {
                     draft.Add((tag, notFoundCase));
                 }
 
-                foreach (var authCase in PlanAuthCases(operation, document, key, httpMethod, path, tag, pathParameterNames, proposedNames, notes))
+                foreach (var authCase in PlanAuthCases(effectiveParameters, operation, document, key, httpMethod, path, tag, pathParameterNames, proposedNames, notes))
                 {
                     draft.Add((tag, authCase));
                 }
@@ -260,7 +269,8 @@ public static class TestPlanBuilder
     /// the caller cannot get without this method already having cleared every guard.
     /// </summary>
     private static TestCasePlan? TryPlanDeclaredNotFound(
-        OpenApiOperation operation, OperationKey key, string httpMethod, string path, string tag,
+        IReadOnlyList<IOpenApiParameter> effectiveParameters, OpenApiOperation operation, OperationKey key,
+        string httpMethod, string path, string tag,
         IReadOnlyList<string> pathParameterNames, Dictionary<string, string> proposedNames, List<CoverageNote> notes)
     {
         if (FindDeclaredResponse(operation, NotFoundStatus) is not { } notFoundResponse)
@@ -268,7 +278,7 @@ public static class TestPlanBuilder
             return null;
         }
 
-        var requiredQueryParameters = RequiredQueryParameterNames(operation);
+        var requiredQueryParameters = RequiredQueryParameterNames(effectiveParameters);
 
         if (pathParameterNames.Count == 0)
         {
@@ -325,7 +335,7 @@ public static class TestPlanBuilder
             // well-typed-but-unmatchable integer, not a GUID string a route-constraint-free
             // binder rejects with 400 before the 404 path ever runs. TemplateRenderer is the
             // only consumer.
-            ResolvePathParameterKinds(operation, pathParameterNames));
+            ResolvePathParameterKinds(effectiveParameters, pathParameterNames));
     }
 
     /// <summary>
@@ -341,7 +351,8 @@ public static class TestPlanBuilder
     /// </para>
     /// </summary>
     private static IReadOnlyList<TestCasePlan> PlanAuthCases(
-        OpenApiOperation operation, OpenApiDocument document, OperationKey key, string httpMethod, string path, string tag,
+        IReadOnlyList<IOpenApiParameter> effectiveParameters, OpenApiOperation operation, OpenApiDocument document,
+        OperationKey key, string httpMethod, string path, string tag,
         IReadOnlyList<string> pathParameterNames, Dictionary<string, string> proposedNames, List<CoverageNote> notes)
     {
         // Operation-level `security` only — an empty array here explicitly overrides a
@@ -349,7 +360,7 @@ public static class TestPlanBuilder
         // document-level inheritance.
         if (operation.Security is { Count: > 0 })
         {
-            var kinds = ResolvePathParameterKinds(operation, pathParameterNames);
+            var kinds = ResolvePathParameterKinds(effectiveParameters, pathParameterNames);
 
             var unauthorizedMethodName = CSharpIdentifier.ToPascalCase(key.Value) + "_Unauthorized";
             proposedNames[CaseIdentity(key.Value, CaseRole.Auth, UnauthorizedStatus)] = unauthorizedMethodName;
@@ -620,9 +631,14 @@ public static class TestPlanBuilder
     /// only — it must not replicate <see cref="FixtureComposer"/>'s tiered precedence for which
     /// of them actually get a fixture entry (decision 1); the template only needs to know whether
     /// to look any query parameters up at runtime at all.
+    /// <para>
+    /// <c>[effective-parameters]</c>: <paramref name="parameters"/> is <see cref="Build"/>'s
+    /// already-merged <see cref="EffectiveParameters.Resolve"/> result, not
+    /// <c>operation.Parameters</c> read again here.
+    /// </para>
     /// </summary>
-    private static IReadOnlyList<string> QueryParameters(OpenApiOperation operation)
-        => (operation.Parameters ?? [])
+    private static IReadOnlyList<string> QueryParameters(IReadOnlyList<IOpenApiParameter> parameters)
+        => parameters
             .Where(p => p.In == ParameterLocation.Query)
             .Select(p => p.Name!)
             .ToList();
@@ -630,10 +646,12 @@ public static class TestPlanBuilder
     /// <summary>
     /// The subset of <see cref="QueryParameters"/> the spec marks <c>required: true</c> — the
     /// ones a declared-error case cannot simply omit without risking a 400-vs-404 mismatch (see
-    /// the required-query-parameter branch above).
+    /// the required-query-parameter branch above). <paramref name="parameters"/> is the same
+    /// already-merged <c>[effective-parameters]</c> list <see cref="QueryParameters"/> takes, not
+    /// re-derived from <c>operation.Parameters</c>.
     /// </summary>
-    private static IReadOnlyList<string> RequiredQueryParameterNames(OpenApiOperation operation)
-        => (operation.Parameters ?? [])
+    private static IReadOnlyList<string> RequiredQueryParameterNames(IReadOnlyList<IOpenApiParameter> parameters)
+        => parameters
             .Where(p => p.In == ParameterLocation.Query && p.Required)
             .Select(p => p.Name!)
             .ToList();
@@ -663,29 +681,48 @@ public static class TestPlanBuilder
     /// </para>
     /// </summary>
     private static IReadOnlyList<PathParameterKind?> ResolvePathParameterKinds(
-        OpenApiOperation operation, IReadOnlyList<string> pathParameterNames)
+        IReadOnlyList<IOpenApiParameter> parameters, IReadOnlyList<string> pathParameterNames)
     {
-        var declared = (operation.Parameters ?? [])
+        var declared = parameters
             .Where(p => p.In == ParameterLocation.Path)
             .ToDictionary(p => p.Name!, p => p.Schema, StringComparer.Ordinal);
 
-        // [path-item-parameters]: OpenAPI 3.x lets a path parameter be declared once at the
-        // path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every
+        // [path-item-parameters], corrected: OpenAPI 3.x lets a path parameter be declared once
+        // at the path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every
         // operation under it — a common way to declare an `id` once for GET/PUT/DELETE on
-        // `/orders/{id}`. Nothing in this codebase reads `pathItem.Parameters` — every read here
-        // and in FixtureComposer is `operation.Parameters` only — so a name absent from `declared`
-        // is not "no schema was given for it", it is "this method never saw a declaration for it
-        // at all". Falling through to PathParameterKind.String used to treat that exactly like the
-        // genuinely-undeclared-schema case ResolvePathParameterKind itself handles (a real
-        // assumption, documented there, that a fresh GUID is well-typed for a parameter with no
-        // schema). That conflated two different unknowns: "no schema, but this method IS the
-        // parameter's operation" vs "this method was never given the parameter's declaration to
-        // begin with". The latter deserves null (untypable), not a guess — merging
-        // `pathItem.Parameters` into this read is deliberately out of scope (it would also change
-        // FixtureComposer, and therefore fixtures and generated raw-HTTP output — see
-        // ClientCallPlanner.Resolve's own doc comment and [typed-client-invocation]'s plan doc for
-        // the full reasoning); this fail-closed mapping is the gate that stands in for that fix
-        // until it lands.
+        // `/orders/{id}`. This comment used to say nothing in this codebase read
+        // `pathItem.Parameters`, so a name absent from `declared` could mean either "declared, but
+        // one level up, where this method never looked" or "declared nowhere at all" and there was
+        // no way to tell the two apart — that was the gap issue #7 named and this fail-closed
+        // mapping stood in for.
+        //
+        // The premise is gone: `parameters` here is `Build`'s already-merged
+        // `EffectiveParameters.Resolve` result (`[effective-parameters]`, `Spec/EffectiveParameters.cs`,
+        // docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md), computed once per
+        // operation from both `operation.Parameters` and `pathItem.Parameters` before this method
+        // ever runs. A path-item-level `id` now lands in `declared` exactly the way an
+        // operation-level one always did, and resolves through `ResolvePathParameterKind` to a real
+        // kind (typically `PathParameterKind.Guid`) instead of falling through to `null` — confirmed
+        // by `TestPlanBuilderTests.APathParameterDeclaredOnlyAtThePathItemLevelNowResolvesToGuidKindJustLikeItsOperationLevelTwin`.
+        //
+        // A name still absent from `declared` after the merge means something narrower now: this
+        // path-template placeholder is declared as a parameter nowhere in the spec this planner can
+        // see — not on the operation, not on its enclosing path item. OpenAPI 3.x requires every
+        // templated path segment to have a matching parameter declaration, but nothing in
+        // `SpecLoader` currently rejects a document that omits one, so this case is still reachable
+        // (confirmed directly: a spec with `/orders/{id}` and no `id` parameter anywhere still
+        // parses and reaches this method). That is neither of the two unknowns this comment used to
+        // distinguish: it is not "no schema was given, but this method IS the parameter's operation"
+        // (`ResolvePathParameterKind` handles that directly — a real, separately documented
+        // assumption that a fresh GUID is well-typed for a parameter declared with no schema), and
+        // it is no longer "this method was never given the parameter's declaration because it only
+        // read `operation.Parameters`" (the merge above closed exactly that gap). It is instead "the
+        // spec itself never declares this placeholder's parameter, at any level this planner reads"
+        // — a genuinely incomplete spec, not a blind spot in this method. `null` (untypable) remains
+        // the right answer: there is no schema anywhere to guess a kind from. See
+        // `ClientCallPlanner.Resolve`'s own `[path-item-parameters]` gate — also corrected — for how
+        // this now-narrower cause is turned into a withheld-convention note on the client-routed
+        // branch, distinct from the unsupported-*type* note the other `null` cause gets.
         return pathParameterNames
             .Select(name => declared.TryGetValue(name, out var schema) ? ResolvePathParameterKind(schema) : null)
             .ToList();
@@ -767,8 +804,8 @@ public static class TestPlanBuilder
     /// orders disagree, and because both parameters share a type the wrong-order call still
     /// compiles, silently asserting against the wrong resource.
     /// </summary>
-    private static IReadOnlyList<string> DeclaredPathParameterOrder(OpenApiOperation operation)
-        => (operation.Parameters ?? [])
+    private static IReadOnlyList<string> DeclaredPathParameterOrder(IReadOnlyList<IOpenApiParameter> parameters)
+        => parameters
             .Where(p => p.In == ParameterLocation.Path)
             .Select(p => p.Name!)
             .ToList();
