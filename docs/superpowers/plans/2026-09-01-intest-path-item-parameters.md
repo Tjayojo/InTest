@@ -80,7 +80,8 @@ threading a parameter through unrelated layers.
 ## Task 1: The merge, and every site that reads parameters
 
 **Files:**
-- Create: `src/InTest.Cli/Planning/EffectiveParameters.cs` (or the nearest existing home — see Step 1)
+- Create: `src/InTest.Cli/Spec/EffectiveParameters.cs` — landed in `Spec/`, not `Planning/`, so that
+  `Fixtures/` need not depend on `Planning/` merely to read parameters
 - Modify: `src/InTest.Cli/Planning/TestPlanBuilder.cs`, `src/InTest.Cli/Fixtures/FixtureComposer.cs`,
   `src/InTest.Cli/Commands/FixturesRepairCommand.cs`, `src/InTest.Cli/Commands/GenerateCommand.cs`
 - Test: `tests/InTest.Cli.Tests/` — the suites already covering these types
