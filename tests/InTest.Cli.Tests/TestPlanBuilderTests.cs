@@ -1796,13 +1796,24 @@ public class TestPlanBuilderTests
 
     // ---- [path-item-parameters]: OpenAPI 3.x also lets a path parameter be declared once at the
     // path-item level (sibling to `get`/`put`/`delete`) rather than repeated on every operation
-    // beneath it. Nothing in this codebase reads pathItem.Parameters — ResolvePathParameterKinds
-    // must fail such a parameter closed (null, "untypable") rather than assume
-    // PathParameterKind.String, or the client-routed branch would splice a bare fixture string
-    // into a strongly-typed indexer exactly like the corrected [typed-path-parameters] finding
-    // above, by a different mechanism (a missing declaration rather than an unsupported one).
-    // Merging pathItem.Parameters is deliberately out of scope for this gate — see
-    // ClientCallPlanner.Resolve's own [path-item-parameters] doc comment for why. ------------------
+    // beneath it. The four tests below used to pin the fail-closed gate commit 4a864c6 added as a
+    // stand-in for this: before [effective-parameters] (issue #7's fix — see
+    // EffectiveParametersTests.cs for the merge itself), nothing in this codebase read
+    // pathItem.Parameters, so ResolvePathParameterKinds had no choice but to fail such a
+    // parameter closed to null ("untypable") rather than assume PathParameterKind.String, or the
+    // client-routed branch would have spliced a bare fixture string into a strongly-typed indexer.
+    // That gate stood in for the fix, not instead of it (see the issue and
+    // docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md's Task 2) — now that
+    // TestPlanBuilder.Build merges pathItem.Parameters in before any of these reads happen, the
+    // schema reaches ResolvePathParameterKinds the same way an operation-level declaration always
+    // did, and every one of these four tests' expectations flips to match: the corrected
+    // behaviour is that a path-item-level parameter is now typed and routed exactly like its
+    // operation-level twin. ClientCallPlanner's own gate code and comments are intentionally left
+    // untouched here — deciding whether that code stays as a guard for a different, still-real
+    // failure mode (a genuinely undeclared parameter) or is now dead is
+    // docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md's Task 2, not this one;
+    // this update only brings these four assertions back in line with the fix Task 1 actually
+    // shipped. ------------------
 
     private const string SpecWithAUuidPathParameterDeclaredAtThePathItemLevel = """
     {
@@ -1849,23 +1860,22 @@ public class TestPlanBuilderTests
     """;
 
     /// <summary>
-    /// Reproduces the finding directly: before this fix, a name absent from
-    /// <c>operation.Parameters</c> fell through to <see cref="PathParameterKind.String"/> — an
-    /// assumption, not a measurement — so a path-item-level <c>id</c> was treated exactly like a
-    /// plain, untyped string and the client-routed branch spliced a bare
-    /// <c>FixtureParameter(...)</c> into what a real kiota client actually declares as
-    /// <c>this[Guid]</c>. <see langword="null"/> is now the verdict, matching the corrected
-    /// <c>[typed-path-parameters]</c> null for an unsupported type — see the paired test below for
-    /// the proof that the same schema resolves normally once it is where this method actually
-    /// looks.
+    /// [effective-parameters]: before this fix, a name absent from <c>operation.Parameters</c>
+    /// fell through to <see langword="null"/> ("untypable") — the fail-closed gate commit 4a864c6
+    /// added because nothing yet merged <c>pathItem.Parameters</c> in. Now that the merge exists,
+    /// this path-item-level <c>id</c> reaches <c>ResolvePathParameterKinds</c> the same way its
+    /// operation-level twin always did, and resolves to the same <see cref="PathParameterKind.Guid"/>
+    /// the paired test below already pins for that twin — see
+    /// <see cref="AnOperationDeclaredAndAPathItemDeclaredTwinProduceTheSamePlanShape"/> above for
+    /// the direct getGadget/getWidget equivalence check this generalizes.
     /// </summary>
     [TestMethod]
-    public async Task APathParameterDeclaredOnlyAtThePathItemLevelResolvesToNoTypableKind()
+    public async Task APathParameterDeclaredOnlyAtThePathItemLevelNowResolvesToGuidKindJustLikeItsOperationLevelTwin()
     {
         var plan = await BuildAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel);
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
 
-        success.PathParameterKinds.ShouldBe([null]);
+        success.PathParameterKinds.ShouldBe([PathParameterKind.Guid]);
     }
 
     [TestMethod]
@@ -1878,34 +1888,33 @@ public class TestPlanBuilderTests
     }
 
     /// <summary>
-    /// The end-to-end proof for Kiota: convention is withheld, and the note names the real cause
-    /// ("declared at the path-item level ... which intest does not yet read") rather than the
-    /// generic "no client-side type conversion" text an unsupported-*type* case gets
-    /// (<see cref="AnUntypablePathParameterKindWithholdsTheClientConventionForKiota"/> above) —
-    /// the two call for different remedies and must not read as the same defect.
+    /// [effective-parameters]: the end-to-end proof for Kiota that the fail-closed gate stops
+    /// firing once the merge is in place (docs/superpowers/plans/2026-09-01-intest-path-item-parameters.md's
+    /// Task 2) — convention now resolves exactly as it would if "id" had been declared on the
+    /// operation itself (the identical expression <c>ClientCallExpressionIsSetForAQualifyingSuccessCase</c>
+    /// pins for that shape), and no note is raised for an operation the planner can now route
+    /// through the client just fine.
     /// </summary>
     [TestMethod]
-    public async Task APathItemLevelPathParameterWithholdsTheClientConventionForKiotaWithADistinguishingNote()
+    public async Task APathItemLevelPathParameterNoLongerWithholdsTheClientConventionForKiota()
     {
         var plan = TestPlanBuilder.Build(
             (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, KiotaClient);
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
 
-        success.ClientCallExpression.ShouldBeNull();
-        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" &&
-            n.Reason.Contains("path-item level", StringComparison.Ordinal) &&
-            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+        success.ClientCallExpression.ShouldBe("Orders[{id}].GetAsync");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
     }
 
     /// <summary>
-    /// NSwag withholds too, but through its own pre-existing <c>[nswag-path-parameter-order]</c>
-    /// gate — a path-template placeholder with no matching declared entry is exactly the shape
-    /// that gate already refuses to guess an argument order for, and it runs before the shared
-    /// untypable-path-parameter gate reaches this operation at all. Convention is withheld either
-    /// way; only the note text differs, which is the correct outcome given the two mechanisms.
+    /// [effective-parameters]: NSwag stops withholding too, for the same reason — the merge feeds
+    /// <c>DeclaredPathParameterOrder</c> as well as <c>ResolvePathParameterKinds</c>, so
+    /// <c>[nswag-path-parameter-order]</c>'s own undeclared-placeholder gate no longer sees "id"
+    /// as undeclared either, and NSwag's convention resolves the same way it does for the
+    /// operation-level twin (<c>ClientCallExpressionAppliesTheNSwagConventionWhenTheOperationIdQualifies</c>).
     /// </summary>
     [TestMethod]
-    public async Task APathItemLevelPathParameterWithholdsTheClientConventionForNSwagToo()
+    public async Task APathItemLevelPathParameterNoLongerWithholdsTheClientConventionForNSwagEither()
     {
         var client = new ClientPlanningConfig(ClientKind.NSwag, "Orders.ApiClient.OrdersClient", NoOverrides);
 
@@ -1913,10 +1922,8 @@ public class TestPlanBuilderTests
             (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, client);
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
 
-        success.ClientCallExpression.ShouldBeNull();
-        plan.Notes.ShouldContain(n => n.OperationKey == "getOrderById" &&
-            n.Reason.Contains("'id'", StringComparison.Ordinal) &&
-            n.Reason.Contains("client-map.json", StringComparison.Ordinal));
+        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
     }
 
     private const string SpecDeclaring404WithAPathItemLevelPathParameter = """
@@ -1944,15 +1951,15 @@ public class TestPlanBuilderTests
     """;
 
     /// <summary>
-    /// Pins the raw-HTTP side against a regression the fail-closed mapping above could cause:
-    /// <c>TryPlanDeclaredNotFound</c> feeds the same <c>ResolvePathParameterKinds</c> output into
-    /// <c>TemplateRenderer.UnmatchableValueFor</c>, which already treats <see langword="null"/>
-    /// exactly like <see cref="PathParameterKind.String"/> — a fresh, well-typed-but-unmatchable
-    /// GUID — so a spec like this one (no <c>client</c> section, declared-error case included)
-    /// must render byte-for-byte the same as it did on <c>main</c>, where the same parameter fell
-    /// through to <see cref="PathParameterKind.String"/> instead of <see langword="null"/>. Both
-    /// map to the same rendered literal, so this is the actual guarantee, not an assumption from
-    /// reading the switch.
+    /// [effective-parameters]: pins the raw-HTTP side once the merge is in place.
+    /// <c>TryPlanDeclaredNotFound</c> feeds <c>ResolvePathParameterKinds</c>'s output into
+    /// <c>TemplateRenderer.UnmatchableValueFor</c>, and now that the path-item-declared "id"
+    /// merges in with its real schema, that output is <see cref="PathParameterKind.Guid"/> rather
+    /// than the old fail-closed <see langword="null"/> — but <c>UnmatchableValueFor</c> maps
+    /// <see cref="PathParameterKind.Guid"/>, <see cref="PathParameterKind.String"/> and
+    /// <see langword="null"/> to the identical <c>Guid.NewGuid().ToString()</c> literal (see its
+    /// own doc comment), so this spec's declared-error rendering is unchanged either way — the
+    /// actual guarantee this test pins, not an assumption from reading the switch.
     /// </summary>
     [TestMethod]
     public async Task APathItemLevelPathParameterDoesNotChangeTheDeclaredErrorCaseRawHttpRendering()
@@ -1961,7 +1968,7 @@ public class TestPlanBuilderTests
         var orders = plan.Classes.Single(c => c.ClassName == "OrdersTests");
         var notFound = orders.Cases.Single(c => c.Role == CaseRole.DeclaredError);
 
-        notFound.PathParameterKinds.ShouldBe([null]);
+        notFound.PathParameterKinds.ShouldBe([PathParameterKind.Guid]);
 
         var rendered = new TemplateRenderer("mstest").RenderClass(orders, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase");
 
@@ -1969,5 +1976,85 @@ public class TestPlanBuilderTests
         // legitimately uses FixtureParameter("getOrderById", "id") regardless of kind and is
         // untouched by this fix either way.
         rendered.ShouldContain("Guid.NewGuid().ToString()");
+    }
+
+    // --- [effective-parameters] / issue #7: pathItem.Parameters is now merged into every
+    // operation that inherits them. These pin the merge as it is actually wired through Build —
+    // EffectiveParametersTests.cs pins the merge algorithm itself, in isolation. ---
+
+    // getGadget declares "id" on the operation; getWidget, structurally identical otherwise,
+    // declares the same "id" only on the path item. This is exactly the two-operation repro from
+    // the issue that motivated this fix.
+    private const string GadgetAndWidgetSpec = """
+    {
+      "openapi": "3.0.3", "info": { "title": "T", "version": "1" },
+      "paths": {
+        "/gadgets/{id}": { "get": {
+          "operationId": "getGadget",
+          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "responses": { "200": { "description": "ok" } } } },
+        "/widgets/{id}": {
+          "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+          "get": {
+            "operationId": "getWidget",
+            "responses": { "200": { "description": "ok" } } } }
+      }
+    }
+    """;
+
+    [TestMethod]
+    public async Task APathItemDeclaredParameterMakesTheCaseNeedAFixtureAndCarriesAPathParameterKind()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(GadgetAndWidgetSpec)).Document);
+        var widget = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getWidget");
+
+        widget.PathParameterNames.ShouldBe(["id"]);
+        widget.NeedsFixture.ShouldBeTrue(
+            "before the fix, FixtureComposer.NeedsFixture never saw a path-item-declared parameter, " +
+            "so this stayed false and fixtures repair created nothing for it (issue #7)");
+        widget.PathParameterKinds.ShouldNotBeNull();
+        widget.PathParameterKinds![0].ShouldBe(PathParameterKind.String,
+            "a real schema (not just a name) reached ResolvePathParameterKinds for the path-item " +
+            "parameter, not the fail-closed null the [path-item-parameters] gate used to assign it");
+    }
+
+    [TestMethod]
+    public async Task AnOperationDeclaredAndAPathItemDeclaredTwinProduceTheSamePlanShape()
+    {
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(GadgetAndWidgetSpec)).Document);
+        var gadget = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getGadget");
+        var widget = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getWidget");
+
+        widget.NeedsFixture.ShouldBe(gadget.NeedsFixture);
+        widget.PathParameterNames.ShouldBe(gadget.PathParameterNames);
+        widget.PathParameterKinds.ShouldBe(gadget.PathParameterKinds);
+        plan.Skipped.ShouldBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task APathItemPathParameterAndAnOperationQueryParameterOfTheSameNameBothSurviveIntoThePlan()
+    {
+        // The case most likely to be got wrong (matching on name alone, dropping one of the two):
+        // a path-item "id" (in: path) and this operation's own "id" (in: query) are different
+        // parameters and must both reach the plan.
+        const string spec = """
+        {
+          "openapi": "3.0.3", "info": { "title": "T", "version": "1" },
+          "paths": { "/widgets/{id}": {
+            "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+            "get": {
+              "operationId": "getWidget",
+              "parameters": [{ "name": "id", "in": "query", "required": false, "schema": { "type": "string" } }],
+              "responses": { "200": { "description": "ok" } }
+            }
+          } }
+        }
+        """;
+
+        var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(spec)).Document);
+        var widget = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getWidget");
+
+        widget.PathParameterNames.ShouldBe(["id"]);
+        widget.QueryParameterNames.ShouldBe(["id"]);
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using InTest.Cli.Spec;
 using Microsoft.OpenApi;
 
 namespace InTest.Cli.Fixtures;
@@ -20,9 +21,19 @@ public static class FixtureComposer
     /// The sole authority for that question, so a caller deciding whether a fixture file will
     /// exist (and therefore whether its filename needs to be usable) never drifts from what
     /// <see cref="Compose"/> itself does.
+    /// <para>
+    /// <paramref name="parameters"/> is the caller's already-merged
+    /// <see cref="EffectiveParameters.Resolve"/> result (<c>[effective-parameters]</c>), not
+    /// <c><paramref name="operation"/>.Parameters</c> read again here — <see cref="TestPlanBuilder.Build"/>
+    /// computes it once per operation, where <c>pathItem</c> is in scope, and this is one of the
+    /// several places it gets passed to rather than re-derived. <paramref name="operation"/> is
+    /// still needed on its own for <see cref="HasJsonBodyToCompose"/>, which has nothing to do with
+    /// the path-item merge.
+    /// </para>
     /// </summary>
-    public static bool NeedsFixture(OpenApiOperation operation)
+    public static bool NeedsFixture(IReadOnlyList<IOpenApiParameter> parameters, OpenApiOperation operation)
     {
+        ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(operation);
 
         if (HasJsonBodyToCompose(operation))
@@ -30,20 +41,31 @@ public static class FixtureComposer
             return true;
         }
 
-        return (operation.Parameters ?? []).Any(p =>
+        return parameters.Any(p =>
             p.In is (ParameterLocation.Path or ParameterLocation.Query) && ParameterValue(p, null) is not null);
     }
 
+    /// <summary>
+    /// <c>[effective-parameters]</c>: <paramref name="path"/> is enough to resolve
+    /// <c>pathItem</c> the same way this method already resolves <paramref name="operation"/>
+    /// itself (<c>document.Paths[path]</c>, one property away from the operation lookup already
+    /// on the next line) — so, unlike <see cref="NeedsFixture"/>, this method's own callers
+    /// (<c>FixturesRepairCommand</c>, <c>GenerateCommand.DetectFixtureDrift</c>) need no signature
+    /// change to supply the merge; <see cref="EffectiveParameters.Resolve"/> is called exactly
+    /// once, right here, from the same data those callers already pass in.
+    /// </summary>
     public static FixtureDocument Compose(
         OpenApiDocument document, string path, string httpMethod, string operationKey, string generatedBy)
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        var operation = document.Paths[path].Operations![new HttpMethod(httpMethod)];
+        var pathItem = document.Paths[path];
+        var operation = pathItem.Operations![new HttpMethod(httpMethod)];
+        var effectiveParameters = EffectiveParameters.Resolve(pathItem, operation);
         var tier = new TierTracker();
 
         var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var parameter in operation.Parameters ?? [])
+        foreach (var parameter in effectiveParameters)
         {
             if (parameter.In is not (ParameterLocation.Path or ParameterLocation.Query))
             {
