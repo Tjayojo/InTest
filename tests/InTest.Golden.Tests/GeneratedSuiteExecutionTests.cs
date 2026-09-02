@@ -3231,4 +3231,104 @@ public class GeneratedSuiteExecutionTests
     {
         Should.Throw<ArgumentOutOfRangeException>(() => GeneratedSuiteCommand.For("junit", "/tmp/proj", "P"));
     }
+
+    /// <summary>
+    /// Task 3 of the path-item-parameters plan — the runtime proof issue #7 itself demands. Every
+    /// other test in this file that touches a required path parameter uses one declared directly
+    /// on the operation (<see cref="SpecWithPathParameter"/>, <see cref="SpecWithItemsLifecycle"/>);
+    /// this is the first to use <c>Specs/path-item-parameters.json</c>, where <c>id</c> is declared
+    /// once on the path item (sibling to <c>get</c>/<c>delete</c>, not inside either) and inherited
+    /// by both <c>getThing</c> and <c>deleteThing</c> — the shape <c>EffectiveParameters</c>'s own
+    /// doc names as the common real-world case, and the exact shape the bug (issue #7) made
+    /// invisible: before the fix, no read site in the CLI ever looked at
+    /// <c>pathItem.Parameters</c>, so <c>fixtures repair</c> created nothing for either operation,
+    /// <c>generate</c> exited 0 anyway, and the generated suite failed only at runtime with a
+    /// fixture-lookup error nowhere near the spec.
+    /// <para>
+    /// A golden-file comparison alone cannot catch this: the old, broken behaviour rendered
+    /// <i>some</i> text that compiled — it just built a request nobody ever supplied a real id
+    /// for. This test instead builds and runs the generated project against
+    /// <see cref="GoldenApiStub"/>, following <see cref="FixtureParameterReachesALiveRequestEndToEnd"/>'s
+    /// own pattern: <c>fixtures repair</c> must produce a real fixture file (not silently do
+    /// nothing) for <b>both</b> inheriting operations, filling each sentinel must actually let the
+    /// generated request through, and both <c>GetThing_Contract</c> and <c>DeleteThing_Contract</c>
+    /// must appear in the trx and pass — the decisive difference from the pre-fix behaviour, where
+    /// there would have been no fixture to fill at all and RequireFixture would have thrown before
+    /// either request was ever built.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task PathItemParameterReachesALiveRequestForEveryInheritingOperation()
+    {
+        File.Copy(
+            Path.Combine(AppContext.BaseDirectory, "Specs", "path-item-parameters.json"),
+            Path.Combine(_root, "spec.json"),
+            overwrite: true);
+
+        InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
+        UseProjectReferenceInsteadOfPackage();
+        PointAtStub();
+
+        // The decisive first assertion: fixtures repair must actually compose a fixture for both
+        // operations that inherit the path-item-level `id`. Before the fix, this call would still
+        // exit 0 but create nothing for either — the whole silence the bug report names.
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var getFixturePath = Path.Combine(_root, "fixtures", "getThing.json");
+        var deleteFixturePath = Path.Combine(_root, "fixtures", "deleteThing.json");
+        File.Exists(getFixturePath).ShouldBeTrue(
+        "`fixtures repair` should have composed a fixture for getThing's inherited path-item parameter");
+        File.Exists(deleteFixturePath).ShouldBeTrue(
+        "`fixtures repair` should have composed a fixture for deleteThing's inherited path-item parameter");
+
+        var getFixture = File.ReadAllText(getFixturePath);
+        getFixture.ShouldContain("\"TODO:id\"",
+        customMessage: "a required path parameter always gets a sentinel (decision 1), whether declared on the operation or inherited from the path item");
+        File.WriteAllText(getFixturePath, getFixture.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal));
+
+        var deleteFixture = File.ReadAllText(deleteFixturePath);
+        deleteFixture.ShouldContain("\"TODO:id\"",
+        customMessage: "a required path parameter always gets a sentinel (decision 1), whether declared on the operation or inherited from the path item");
+        File.WriteAllText(deleteFixturePath, deleteFixture.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal));
+
+        (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+
+        var generatedFile = Directory.GetFiles(_root, "ThingsTests.g.cs", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem("generate should have produced exactly one ThingsTests.g.cs — getThing and deleteThing share the \"Things\" tag");
+        var generatedText = File.ReadAllText(generatedFile);
+        generatedText.ShouldContain("GetThing_Contract",
+        customMessage: "the path-item-inheriting GET operation must actually be generated");
+        generatedText.ShouldContain("DeleteThing_Contract",
+        customMessage: "the path-item-inheriting DELETE operation must actually be generated");
+
+        var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
+        build.ExitCode.ShouldBe(0, $"generated project failed to build:{Environment.NewLine}{build.Output}");
+
+        var resultsDir = Path.Combine(_root, "TestResults");
+        var mstest = GeneratedSuiteCommand.For(
+            "mstest", _root, ProjectName, trxPath: "results.trx", resultsDirectory: resultsDir);
+        var test = await ProcessRunner.RunAsync(mstest.FileName, mstest.Arguments);
+
+        var trxPath = Directory.GetFiles(resultsDir, "results.trx", SearchOption.AllDirectories)
+            .ShouldHaveSingleItem($"expected exactly one results.trx under {resultsDir}:{Environment.NewLine}{test.Output}");
+
+        var trx = XDocument.Load(trxPath);
+        var results = trx.Descendants().Where(e => e.Name.LocalName == "UnitTestResult").ToList();
+
+        foreach (var name in new[] { "GetThing_Contract", "DeleteThing_Contract" })
+        {
+            var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
+            result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
+            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            $"{name} ran but did not pass — the path-item-inherited id likely never reached the live request:{Environment.NewLine}{test.Output}");
+        }
+
+        test.ExitCode.ShouldBe(0, test.Output);
+
+        // Closes the loop from the outside, the same way APublishedFixtureKeyReachesALiveRequest's
+        // ReceivedPaths assertion does: the exact id both operations were pointed at must have
+        // reached the stub over the wire, for the path only the path-item-level parameter names.
+        _stub.ReceivedPaths.ShouldContain("/things/42",
+        $"the path-item-inherited id never reached a live request. Paths actually served: {string.Join(", ", _stub.ReceivedPaths)}");
+    }
 }

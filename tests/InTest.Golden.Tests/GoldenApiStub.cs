@@ -154,6 +154,17 @@ internal sealed class GoldenApiStub : IDisposable
                     await HandleCreateItemAsync(context.Request, cancellationToken),
                 "DELETE" when path.StartsWith("/api/items/", StringComparison.Ordinal) =>
                     HandleDeleteItem(path),
+                // [effective-parameters]'s live wire proof (path-item-parameters plan, Task 3):
+                // GET and DELETE /things/{id} share one path-item-level `id` parameter, declared
+                // once on the path item rather than repeated on either operation — see
+                // EffectiveParameters' own doc for why that merge exists. Before it, no read site
+                // in the CLI saw a path-item parameter at all, so `fixtures repair` created
+                // nothing for either operation and this path was never reached with a real id.
+                // See GeneratedSuiteExecutionTests.PathItemParameterReachesALiveRequestForEveryInheritingOperation.
+                "GET" when path.StartsWith("/things/", StringComparison.Ordinal) =>
+                    HandleGetThing(path),
+                "DELETE" when path.StartsWith("/things/", StringComparison.Ordinal) =>
+                    HandleDeleteThing(path),
                 _ => path switch
                 {
                     "/health/ready" => HandleHealthCheck(),
@@ -345,6 +356,21 @@ internal sealed class GoldenApiStub : IDisposable
         _skusInUse.TryRemove(sku, out _);
         return (204, "");
     }
+
+    /// <summary>
+    /// Answers unconditionally, with the requested id echoed back into the body so the response
+    /// satisfies <c>Thing</c>'s <c>required: ["id"]</c> schema — same trust level as the
+    /// <c>/api/status/</c> catch-all above. The point of the test this exists for is whether the
+    /// generated request is built and sent with the right id at all (only possible once
+    /// <c>fixtures repair</c> actually composes a fixture for a path-item-level parameter), not
+    /// whether this stub validates it.
+    /// </summary>
+    private static (int, string) HandleGetThing(string path) =>
+        (200, $$"""{"id":"{{path["/things/".Length..]}}"}""");
+
+    /// <summary>Bodiless 204, mirroring <see cref="HandleDeleteItem"/>'s status but stateless — this
+    /// path's whole point is proving the id reaches the request, not exercising a store.</summary>
+    private static (int, string) HandleDeleteThing(string path) => (204, "");
 
     private static int FreePort()
     {
