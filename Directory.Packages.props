@@ -6,10 +6,10 @@
     <PackageVersion Include="NJsonSchema" Version="11.6.1" />
     <PackageVersion Include="Scriban" Version="7.2.6" />
     <PackageVersion Include="System.CommandLine" Version="2.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
     <PackageVersion Include="MSTest.TestFramework" Version="4.3.3" />
     <PackageVersion Include="MSTest.TestAdapter" Version="4.3.3" />
     <PackageVersion Include="MSTest.Analyzers" Version="4.3.3" />
@@ -29,13 +29,13 @@
   <!-- samples/ only. These are fixtures for the acceptance run and the round-trip corpus;
        nothing here is in the dependency closure of InTest.Cli or InTest.Runtime. -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.12" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageVersion Include="NSwag.AspNetCore" Version="14.7.1" />
     <PackageVersion Include="NSwag.MSBuild" Version="14.7.1" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
     <!-- Duende requires a paid licence for PRODUCTION use only; development, testing and
          personal projects are free. This is a test fixture and is never in the closure of
          a shipped InTest package. See samples/README.md. -->
