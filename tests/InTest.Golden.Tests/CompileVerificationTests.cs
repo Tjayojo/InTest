@@ -198,7 +198,7 @@ public class CompileVerificationTests
         // the auth-guard calls only exist because orders.json declares a required path parameter
         // and a secured operation with scopes — hostile-text.json's four plain parameterless
         // GETs can never produce either.
-        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"), TestContext.CancellationToken);
         generated.ShouldContain("FixtureParameter(\"getOrderById\", \"id\")",
         customMessage: "orders.json's required path parameter is missing from the generated source — did CreateProject run against the wrong spec?");
         generated.ShouldContain("RequireMultipleIdentities();",
@@ -269,7 +269,7 @@ public class CompileVerificationTests
 
         (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
 
-        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "WidgetsTests.g.cs"));
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "WidgetsTests.g.cs"), TestContext.CancellationToken);
 
         // One assertion per hostile operation in the spec, each pinned to the exact escaped
         // text TemplateRenderer must have produced — not merely "a backslash appears somewhere".
@@ -318,7 +318,7 @@ public class CompileVerificationTests
 
         (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
 
-        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "WidgetsTests.g.cs"));
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "WidgetsTests.g.cs"), TestContext.CancellationToken);
 
         // Identical needles to GeneratedProjectWithHostileSpecTextCompiles above: TestCasePlan
         // computes every *_literal field once, before TemplateRenderer picks a template — Task 7
@@ -378,12 +378,12 @@ public class CompileVerificationTests
     {
         var root = CreateProject("orders.json");
 
-        File.WriteAllText(Path.Combine(root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
-                                                                             "framework": "mstest" },
-                                                                "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(root, "intest.json"), """
+                                                                        { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                                       "framework": "mstest" },
+                                                                          "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                                                                        """, TestContext.CancellationToken);
 
         // orders.json's other operation, listOrders (GET /orders, no path parameter, no query
         // parameter, no request body), qualifies for the Kiota convention on its own — the fake
@@ -395,28 +395,28 @@ public class CompileVerificationTests
         // client section would — the point of this test is proving a self-closing override
         // compiles, not proving convention derivation withholds correctly (already covered by
         // ClientCallPlannerTests and TestPlanBuilderTests).
-        File.WriteAllText(Path.Combine(root, "client-map.json"), """
-                                                                  { "overrides": {
-                                                                      "getOrderById": "GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)",
-                                                                      "listOrders": "ListOrdersAsync(cancellationToken: TestContext.CancellationToken)"
-                                                                  } }
-                                                                  """);
+        await File.WriteAllTextAsync(Path.Combine(root, "client-map.json"), """
+                                                                            { "overrides": {
+                                                                                "getOrderById": "GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)",
+                                                                                "listOrders": "ListOrdersAsync(cancellationToken: TestContext.CancellationToken)"
+                                                                            } }
+                                                                            """, TestContext.CancellationToken);
 
-        File.WriteAllText(Path.Combine(root, "FakeOrdersApiClient.cs"), """
-                                                                         namespace Orders.ApiClient;
+        await File.WriteAllTextAsync(Path.Combine(root, "FakeOrdersApiClient.cs"), """
+                                                                                   namespace Orders.ApiClient;
 
-                                                                         // Stands in for a real Kiota/NSwag-generated client — only the two call
-                                                                         // shapes client-map.json's overrides above name need to exist for this
-                                                                         // test's project to compile.
-                                                                         public sealed class OrdersApiClient
-                                                                         {
-                                                                             public Task<object?> GetOrderByIdAsync(string id, CancellationToken cancellationToken = default)
-                                                                                 => throw new NotImplementedException();
+                                                                                   // Stands in for a real Kiota/NSwag-generated client — only the two call
+                                                                                   // shapes client-map.json's overrides above name need to exist for this
+                                                                                   // test's project to compile.
+                                                                                   public sealed class OrdersApiClient
+                                                                                   {
+                                                                                       public Task<object?> GetOrderByIdAsync(string id, CancellationToken cancellationToken = default)
+                                                                                           => throw new NotImplementedException();
 
-                                                                             public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
-                                                                                 => throw new NotImplementedException();
-                                                                         }
-                                                                         """);
+                                                                                       public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
+                                                                                           => throw new NotImplementedException();
+                                                                                   }
+                                                                                   """, TestContext.CancellationToken);
 
         (await FixturesRepairCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
 
@@ -426,7 +426,7 @@ public class CompileVerificationTests
         // discipline GeneratedProjectWithHostileSpecTextCompiles's own comment argues for): the
         // override must actually have reached the renderer, substituted, and closed its own
         // argument list — not merely "the project happened to build".
-        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"), TestContext.CancellationToken);
         generated.ShouldContain(
         "await ApiClient<Orders.ApiClient.OrdersApiClient>().GetOrderByIdAsync(FixtureParameter(\"getOrderById\", \"id\"), cancellationToken: TestContext.CancellationToken);",
         customMessage: "the self-closing override did not reach the renderer substituted and unmodified — did the cancellation-token append fire a second time?");
@@ -499,57 +499,57 @@ public class CompileVerificationTests
         // -> Integer) declared second, while the path template itself orders customerId before
         // orderId. listOrders is kept as the second, no-path-parameter operation — see this
         // method's own doc comment for why.
-        File.WriteAllText(Path.Combine(root, "orders.json"), """
-                                                              {
-                                                                "openapi": "3.0.3",
-                                                                "info": { "title": "Orders", "version": "1.0" },
-                                                                "paths": {
-                                                                  "/orders": {
-                                                                    "get": {
-                                                                      "operationId": "listOrders",
-                                                                      "tags": ["Orders"],
-                                                                      "responses": { "200": { "description": "ok", "content": { "application/json": {
-                                                                        "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } }
-                                                                    }
-                                                                  },
-                                                                  "/customers/{customerId}/orders/{orderId}": {
-                                                                    "get": {
-                                                                      "operationId": "getCustomerOrder",
-                                                                      "tags": ["Orders"],
-                                                                      "parameters": [
-                                                                        { "name": "orderId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-                                                                        { "name": "customerId", "in": "path", "required": true, "schema": { "type": "integer" } }
-                                                                      ],
-                                                                      "responses": {
-                                                                        "200": { "description": "ok", "content": { "application/json": {
-                                                                          "schema": { "$ref": "#/components/schemas/Order" } } } },
-                                                                        "404": { "description": "not found" }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                },
-                                                                "components": {
-                                                                  "schemas": {
-                                                                    "Order": {
-                                                                      "type": "object",
-                                                                      "required": ["id", "quantity"],
-                                                                      "properties": {
-                                                                        "id": { "type": "string" },
-                                                                        "quantity": { "type": "integer", "minimum": 1 },
-                                                                        "notes": { "type": "string", "nullable": true }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                }
-                                                              }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(root, "orders.json"), """
+                                                                        {
+                                                                          "openapi": "3.0.3",
+                                                                          "info": { "title": "Orders", "version": "1.0" },
+                                                                          "paths": {
+                                                                            "/orders": {
+                                                                              "get": {
+                                                                                "operationId": "listOrders",
+                                                                                "tags": ["Orders"],
+                                                                                "responses": { "200": { "description": "ok", "content": { "application/json": {
+                                                                                  "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } } }
+                                                                              }
+                                                                            },
+                                                                            "/customers/{customerId}/orders/{orderId}": {
+                                                                              "get": {
+                                                                                "operationId": "getCustomerOrder",
+                                                                                "tags": ["Orders"],
+                                                                                "parameters": [
+                                                                                  { "name": "orderId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+                                                                                  { "name": "customerId", "in": "path", "required": true, "schema": { "type": "integer" } }
+                                                                                ],
+                                                                                "responses": {
+                                                                                  "200": { "description": "ok", "content": { "application/json": {
+                                                                                    "schema": { "$ref": "#/components/schemas/Order" } } } },
+                                                                                  "404": { "description": "not found" }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          },
+                                                                          "components": {
+                                                                            "schemas": {
+                                                                              "Order": {
+                                                                                "type": "object",
+                                                                                "required": ["id", "quantity"],
+                                                                                "properties": {
+                                                                                  "id": { "type": "string" },
+                                                                                  "quantity": { "type": "integer", "minimum": 1 },
+                                                                                  "notes": { "type": "string", "nullable": true }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                        """, TestContext.CancellationToken);
 
-        File.WriteAllText(Path.Combine(root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
-                                                                             "framework": "mstest" },
-                                                                "client": { "kind": "nswag", "typeName": "Orders.NSwagClient.OrdersClient" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(root, "intest.json"), """
+                                                                        { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                                       "framework": "mstest" },
+                                                                          "client": { "kind": "nswag", "typeName": "Orders.NSwagClient.OrdersClient" } }
+                                                                        """, TestContext.CancellationToken);
 
         // Written in real NSwag declared-order (measured, see BuildNSwagConvention's own doc
         // comment): orderId (Guid) before customerId (int), matching the spec's own parameters
@@ -561,21 +561,21 @@ public class CompileVerificationTests
         // argument order. The token-carrying/non-token-carrying overload pair on
         // GetCustomerOrderAsync preserves the cancellationToken-by-name overload-targeting coverage
         // the original single-parameter version of this test already had.
-        File.WriteAllText(Path.Combine(root, "FakeNSwagOrdersClient.cs"), """
-                                                                           namespace Orders.NSwagClient;
+        await File.WriteAllTextAsync(Path.Combine(root, "FakeNSwagOrdersClient.cs"), """
+                                                                                     namespace Orders.NSwagClient;
 
-                                                                           public sealed class OrdersClient
-                                                                           {
-                                                                               public Task<object?> GetCustomerOrderAsync(System.Guid orderId, int customerId)
-                                                                                   => throw new NotImplementedException();
+                                                                                     public sealed class OrdersClient
+                                                                                     {
+                                                                                         public Task<object?> GetCustomerOrderAsync(System.Guid orderId, int customerId)
+                                                                                             => throw new NotImplementedException();
 
-                                                                               public Task<object?> GetCustomerOrderAsync(System.Guid orderId, int customerId, CancellationToken cancellationToken)
-                                                                                   => throw new NotImplementedException();
+                                                                                         public Task<object?> GetCustomerOrderAsync(System.Guid orderId, int customerId, CancellationToken cancellationToken)
+                                                                                             => throw new NotImplementedException();
 
-                                                                               public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
-                                                                                   => throw new NotImplementedException();
-                                                                           }
-                                                                           """);
+                                                                                         public Task<object?> ListOrdersAsync(CancellationToken cancellationToken = default)
+                                                                                             => throw new NotImplementedException();
+                                                                                     }
+                                                                                     """, TestContext.CancellationToken);
 
         (await FixturesRepairCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
 
@@ -586,7 +586,7 @@ public class CompileVerificationTests
         // have been derived in the spec's declared parameter order — orderId before customerId,
         // each with its own .Parse conversion — and reached the renderer, not merely "the project
         // happened to build".
-        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"), TestContext.CancellationToken);
         generated.ShouldContain(
         "await ApiClient<Orders.NSwagClient.OrdersClient>().GetCustomerOrderAsync(Guid.Parse(FixtureParameter(\"getCustomerOrder\", \"orderId\")), int.Parse(FixtureParameter(\"getCustomerOrder\", \"customerId\")), cancellationToken: TestContext.CancellationToken);",
         customMessage: "the NSwag convention-derived call did not reach the renderer in the spec's declared parameter order — a regression back to path-template order would either produce this wrong text or fail to compile against the fake client's (Guid, int) signature");
@@ -654,95 +654,95 @@ public class CompileVerificationTests
         // with a two-operation variant: getOrderById's id has no format (bare int32) and
         // getAccountById's id is format: int64, same as this file's own Guid variant above
         // overwrites orders.json for its own kind.
-        File.WriteAllText(Path.Combine(root, "orders.json"), """
-                                                              {
-                                                                "openapi": "3.0.3",
-                                                                "info": { "title": "Orders", "version": "1.0" },
-                                                                "paths": {
-                                                                  "/orders/{id}": {
-                                                                    "get": {
-                                                                      "operationId": "getOrderById",
-                                                                      "tags": ["Orders"],
-                                                                      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
-                                                                      "responses": {
-                                                                        "200": { "description": "ok", "content": { "application/json": {
-                                                                          "schema": { "$ref": "#/components/schemas/Order" } } } },
-                                                                        "404": { "description": "not found" }
-                                                                      }
-                                                                    }
-                                                                  },
-                                                                  "/accounts/{id}": {
-                                                                    "get": {
-                                                                      "operationId": "getAccountById",
-                                                                      "tags": ["Orders"],
-                                                                      "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "format": "int64" } }],
-                                                                      "responses": {
-                                                                        "200": { "description": "ok", "content": { "application/json": {
-                                                                          "schema": { "$ref": "#/components/schemas/Order" } } } },
-                                                                        "404": { "description": "not found" }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                },
-                                                                "components": {
-                                                                  "schemas": {
-                                                                    "Order": {
-                                                                      "type": "object",
-                                                                      "required": ["id", "quantity"],
-                                                                      "properties": {
-                                                                        "id": { "type": "string" },
-                                                                        "quantity": { "type": "integer", "minimum": 1 },
-                                                                        "notes": { "type": "string", "nullable": true }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                }
-                                                              }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(root, "orders.json"), """
+                                                                        {
+                                                                          "openapi": "3.0.3",
+                                                                          "info": { "title": "Orders", "version": "1.0" },
+                                                                          "paths": {
+                                                                            "/orders/{id}": {
+                                                                              "get": {
+                                                                                "operationId": "getOrderById",
+                                                                                "tags": ["Orders"],
+                                                                                "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+                                                                                "responses": {
+                                                                                  "200": { "description": "ok", "content": { "application/json": {
+                                                                                    "schema": { "$ref": "#/components/schemas/Order" } } } },
+                                                                                  "404": { "description": "not found" }
+                                                                                }
+                                                                              }
+                                                                            },
+                                                                            "/accounts/{id}": {
+                                                                              "get": {
+                                                                                "operationId": "getAccountById",
+                                                                                "tags": ["Orders"],
+                                                                                "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "format": "int64" } }],
+                                                                                "responses": {
+                                                                                  "200": { "description": "ok", "content": { "application/json": {
+                                                                                    "schema": { "$ref": "#/components/schemas/Order" } } } },
+                                                                                  "404": { "description": "not found" }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          },
+                                                                          "components": {
+                                                                            "schemas": {
+                                                                              "Order": {
+                                                                                "type": "object",
+                                                                                "required": ["id", "quantity"],
+                                                                                "properties": {
+                                                                                  "id": { "type": "string" },
+                                                                                  "quantity": { "type": "integer", "minimum": 1 },
+                                                                                  "notes": { "type": "string", "nullable": true }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                        """, TestContext.CancellationToken);
 
-        File.WriteAllText(Path.Combine(root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
-                                                                             "framework": "mstest" },
-                                                                "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(root, "intest.json"), """
+                                                                        { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                          "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "InTest.Runtime.ApiTestBase",
+                                                                                       "framework": "mstest" },
+                                                                          "client": { "kind": "kiota", "typeName": "Orders.ApiClient.OrdersApiClient" } }
+                                                                        """, TestContext.CancellationToken);
 
         // A builder-chain fake, not a flat method -- see this test's own doc comment for why. Only
         // the two indexer shapes ClientCallPlanner.BuildKiotaConvention derives for this spec's two
         // operations need to exist for this test's project to compile: Orders[int] and
         // Accounts[long] directly on the client type -- no Api property, since neither path below
         // has a literal "api" segment (this test's own doc comment).
-        File.WriteAllText(Path.Combine(root, "FakeOrdersApiClient.cs"), """
-                                                                         namespace Orders.ApiClient;
+        await File.WriteAllTextAsync(Path.Combine(root, "FakeOrdersApiClient.cs"), """
+                                                                                   namespace Orders.ApiClient;
 
-                                                                         public sealed class OrdersApiClient
-                                                                         {
-                                                                             public OrdersRequestBuilder Orders { get; } = new();
-                                                                             public AccountsRequestBuilder Accounts { get; } = new();
-                                                                         }
+                                                                                   public sealed class OrdersApiClient
+                                                                                   {
+                                                                                       public OrdersRequestBuilder Orders { get; } = new();
+                                                                                       public AccountsRequestBuilder Accounts { get; } = new();
+                                                                                   }
 
-                                                                         public sealed class OrdersRequestBuilder
-                                                                         {
-                                                                             public OrdersItemRequestBuilder this[int id] => new();
-                                                                         }
+                                                                                   public sealed class OrdersRequestBuilder
+                                                                                   {
+                                                                                       public OrdersItemRequestBuilder this[int id] => new();
+                                                                                   }
 
-                                                                         public sealed class OrdersItemRequestBuilder
-                                                                         {
-                                                                             public Task<object?> GetAsync(CancellationToken cancellationToken = default)
-                                                                                 => throw new NotImplementedException();
-                                                                         }
+                                                                                   public sealed class OrdersItemRequestBuilder
+                                                                                   {
+                                                                                       public Task<object?> GetAsync(CancellationToken cancellationToken = default)
+                                                                                           => throw new NotImplementedException();
+                                                                                   }
 
-                                                                         public sealed class AccountsRequestBuilder
-                                                                         {
-                                                                             public AccountsItemRequestBuilder this[long id] => new();
-                                                                         }
+                                                                                   public sealed class AccountsRequestBuilder
+                                                                                   {
+                                                                                       public AccountsItemRequestBuilder this[long id] => new();
+                                                                                   }
 
-                                                                         public sealed class AccountsItemRequestBuilder
-                                                                         {
-                                                                             public Task<object?> GetAsync(CancellationToken cancellationToken = default)
-                                                                                 => throw new NotImplementedException();
-                                                                         }
-                                                                         """);
+                                                                                   public sealed class AccountsItemRequestBuilder
+                                                                                   {
+                                                                                       public Task<object?> GetAsync(CancellationToken cancellationToken = default)
+                                                                                           => throw new NotImplementedException();
+                                                                                   }
+                                                                                   """, TestContext.CancellationToken);
 
         (await FixturesRepairCommand.RunAsync(root, CancellationToken.None)).ShouldBe(0);
 
@@ -752,7 +752,7 @@ public class CompileVerificationTests
         // discipline every other test in this file follows): both conversions must actually have
         // been derived, substituted, and reached the renderer -- not merely "the project happened
         // to build".
-        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"));
+        var generated = await File.ReadAllTextAsync(Path.Combine(root, "Generated", "OrdersTests.g.cs"), TestContext.CancellationToken);
         generated.ShouldContain(
         "await ApiClient<Orders.ApiClient.OrdersApiClient>().Orders[int.Parse(FixtureParameter(\"getOrderById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);",
         customMessage: "the Kiota-derived call for the Integer-kind path parameter did not reach the renderer with its int.Parse conversion applied");
@@ -778,12 +778,14 @@ public class CompileVerificationTests
         // shipped into the assembly, which is the regression this test pins.
         var root = CreateProject("orders.json");
 
-        File.WriteAllText(Path.Combine(root, "intest.json"), """
-                                                             { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                               "project": { "rootNamespace": "Orders.ApiTests; public class Injected { static Injected() { System.Console.WriteLine(\"x\"); } } //", "testBaseClass": "InTest.Runtime.ApiTestBase" } }
-                                                             """);
+        await File.WriteAllTextAsync(Path.Combine(root, "intest.json"), """
+                                                                        { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                          "project": { "rootNamespace": "Orders.ApiTests; public class Injected { static Injected() { System.Console.WriteLine(\"x\"); } } //", "testBaseClass": "InTest.Runtime.ApiTestBase" } }
+                                                                        """, TestContext.CancellationToken);
 
         (await GenerateCommand.RunAsync(root, CancellationToken.None)).ShouldBe(2);
         Directory.Exists(Path.Combine(root, "Generated")).ShouldBeFalse();
     }
+
+    public TestContext TestContext { get; set; }
 }

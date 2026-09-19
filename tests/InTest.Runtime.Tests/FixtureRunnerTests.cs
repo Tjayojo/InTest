@@ -419,7 +419,7 @@ public class FixtureRunnerTests
     {
         var order = new List<string>();
         using var cts = new CancellationTokenSource();
-        cts.Cancel();
+        await cts.CancelAsync();
 
         await Should.ThrowAsync<OperationCanceledException>(() => FixtureRunner.RunAsync(
             [new SeedsCustomerFixture(order)], new FixtureContext(), "local", new TestSupport.RecordingDiagnostics(), cts.Token));

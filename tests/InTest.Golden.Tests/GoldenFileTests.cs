@@ -74,13 +74,13 @@ public class GoldenFileTests
         if (Environment.GetEnvironmentVariable("INTEST_UPDATE_GOLDEN") == "1")
         {
             var sourcePath = SourceExpectedPath(expectedFileName);
-            await File.WriteAllTextAsync(sourcePath, actual);
+            await File.WriteAllTextAsync(sourcePath, actual, TestContext.CancellationToken);
             Assert.Inconclusive(
                 $"Golden file updated at {sourcePath}. Review the diff, then rebuild and "
                 + "re-run without INTEST_UPDATE_GOLDEN to verify.");
         }
 
-        actual.ShouldBe(await File.ReadAllTextAsync(ExpectedPath(expectedFileName)));
+        actual.ShouldBe(await File.ReadAllTextAsync(ExpectedPath(expectedFileName), TestContext.CancellationToken));
     }
 
     [TestMethod]
@@ -104,7 +104,7 @@ public class GoldenFileTests
     [TestMethod]
     public async Task EveryCaseIsCategorizedContract()
     {
-        var spec = await SpecLoader.LoadFromFileAsync(SpecPath("orders.json"));
+        var spec = await SpecLoader.LoadFromFileAsync(SpecPath("orders.json"), TestContext.CancellationToken);
         var plan = TestPlanBuilder.Build(spec.Document);
         var cases = plan.Classes.SelectMany(c => c.Cases).ToList();
 
@@ -113,4 +113,6 @@ public class GoldenFileTests
             "against it rather than a synthetic single-role plan.");
         cases.ShouldAllBe(c => c.Category == "Contract");
     }
+
+    public TestContext TestContext { get; set; }
 }

@@ -110,15 +110,15 @@ public class MSBuildEvaluationTests
     public async Task MsBuildResolvesTheSpecItemToTheLiteralPathNotTheGlobDecoy()
     {
         Directory.CreateDirectory(Path.Combine(_root, "specs"));
-        File.WriteAllText(Path.Combine(_root, "specs", "orders.json"), "{}"); // the real spec
-        File.WriteAllText(Path.Combine(_root, "specs", "ordersX.json"), "{}"); // what an unescaped '?' would glob-match instead
+        await File.WriteAllTextAsync(Path.Combine(_root, "specs", "orders.json"), "{}", TestContext.CancellationToken); // the real spec
+        await File.WriteAllTextAsync(Path.Combine(_root, "specs", "ordersX.json"), "{}", TestContext.CancellationToken); // what an unescaped '?' would glob-match instead
 
         InitCommand.Run(_root, "Orders.ApiTests", "specs/orders?.json").ShouldBe(0);
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
 
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         "</Project>",
         """
           <ItemGroup>
@@ -126,7 +126,7 @@ public class MSBuildEvaluationTests
           </ItemGroup>
         </Project>
         """,
-        StringComparison.Ordinal));
+        StringComparison.Ordinal), TestContext.CancellationToken);
 
         var (exitCode, output) = await ProcessRunner.RunAsync(
         "dotnet", $"msbuild \"{csprojPath}\" -getItem:InTestSpecCheck");
@@ -145,4 +145,6 @@ public class MSBuildEvaluationTests
                        "glob-match specs/ordersX.json, the decoy on disk an unescaped '?' would have " +
                        "silently resolved to instead — the exact defect MSBuildPropertyValue exists to prevent");
     }
+
+    public TestContext TestContext { get; set; }
 }

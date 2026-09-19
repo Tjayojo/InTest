@@ -145,7 +145,7 @@ public class CliExitCodeTests
     public async Task CrashInACommandWithNoCatchOfItsOwnExitsToolError()
     {
         var file = Path.Combine(Path.GetTempPath(), "intest-crash-" + Guid.NewGuid().ToString("N")[..8]);
-        await File.WriteAllTextAsync(file, "not a directory");
+        await File.WriteAllTextAsync(file, "not a directory", TestContext.CancellationToken);
         try
         {
             var (exitCode, output) = await RunCliAsync(
@@ -262,10 +262,10 @@ public class CliExitCodeTests
             exitCode.ShouldBe(ExitCode.Ok, output);
             output.ShouldContain("Initialised");
 
-            File.ReadAllText(Path.Combine(root, "intest.json"))
+            (await File.ReadAllTextAsync(Path.Combine(root, "intest.json"), TestContext.CancellationToken))
                 .ShouldContain("https://example.com/openapi.json",
                     customMessage: "the URL is the source, and is what intest.json records");
-            File.ReadAllText(Path.Combine(root, "Orders.ApiTests.csproj"))
+            (await File.ReadAllTextAsync(Path.Combine(root, "Orders.ApiTests.csproj"), TestContext.CancellationToken))
                 .ShouldContain("<InTestSpecSource>spec.json</InTestSpecSource>",
                     customMessage: "MSBuild cannot copy from https:// — the build points at the snapshot");
         }
@@ -300,7 +300,7 @@ public class CliExitCodeTests
               "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
                 "responses": { "200": { "description": "ok" } } } } }
             }
-            """);
+            """, TestContext.CancellationToken);
 
             var init = await RunCliAsync(
                 $"init --project \"{root}\" --name Orders.ApiTests --spec orders.json");
@@ -318,7 +318,7 @@ public class CliExitCodeTests
             // it only needs *some* real difference, to prove --check's own exit-1 branch (not
             // just its exit-0 branch) survives the trip through Program.cs.
             var classFile = Path.Combine(root, "Generated", "OrdersTests.g.cs");
-            await File.AppendAllTextAsync(classFile, "// hand-edited, no longer matches a fresh render\n");
+            await File.AppendAllTextAsync(classFile, "// hand-edited, no longer matches a fresh render\n", TestContext.CancellationToken);
 
             var driftedCheck = await RunCliAsync($"generate --project \"{root}\" --check");
             driftedCheck.ExitCode.ShouldBe(ExitCode.WorkOutstanding,
@@ -359,7 +359,7 @@ public class CliExitCodeTests
               "paths": { "/orders/{id}": { "get": { "operationId": "getOrderById", "tags": ["Orders"],
                 "responses": { "200": { "description": "ok" } } } } }
             }
-            """);
+            """, TestContext.CancellationToken);
 
             var init = await RunCliAsync($"init --project \"{root}\" --name Orders.ApiTests --spec orders.json");
             init.ExitCode.ShouldBe(ExitCode.Ok, init.Output);
@@ -378,4 +378,6 @@ public class CliExitCodeTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    public TestContext TestContext { get; set; }
 }

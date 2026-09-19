@@ -466,7 +466,7 @@ public static class InTestRun
                 "State this run created may still be present and can break a later run.";
 
             diagnostics.Note(message);
-            Console.Error.WriteLine(message);
+            await Console.Error.WriteLineAsync(message);
         }
     }
 

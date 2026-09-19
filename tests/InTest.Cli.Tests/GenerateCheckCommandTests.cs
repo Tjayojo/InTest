@@ -224,9 +224,9 @@ public class GenerateCheckCommandTests
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var path = Path.Combine(_root, "Generated", "OrdersTests.g.cs");
-        var originalBytes = File.ReadAllBytes(path);
+        var originalBytes = await File.ReadAllBytesAsync(path);
         var bom = new byte[] { 0xEF, 0xBB, 0xBF };
-        File.WriteAllBytes(path, bom.Concat(originalBytes).ToArray());
+        await File.WriteAllBytesAsync(path, bom.Concat(originalBytes).ToArray());
 
         var (exitCode, report) = await CheckAsync(_root);
 
@@ -248,8 +248,8 @@ public class GenerateCheckCommandTests
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
 
         var path = Path.Combine(_root, "Generated", "OrdersTests.g.cs");
-        var originalText = File.ReadAllText(path);
-        File.WriteAllText(path, originalText, Encoding.Unicode);
+        var originalText = await File.ReadAllTextAsync(path);
+        await File.WriteAllTextAsync(path, originalText, Encoding.Unicode);
 
         var (exitCode, report) = await CheckAsync(_root);
 
@@ -387,7 +387,7 @@ public class GenerateCheckCommandTests
 
         var nestedDir = Path.Combine(_root, "Generated", "nested");
         Directory.CreateDirectory(nestedDir);
-        File.WriteAllText(Path.Combine(nestedDir, "stray.g.cs"), "// stray");
+        await File.WriteAllTextAsync(Path.Combine(nestedDir, "stray.g.cs"), "// stray");
 
         var (exitCode, report) = await CheckAsync(_root);
 
@@ -464,7 +464,7 @@ public class GenerateCheckCommandTests
         (await GenerateAsync(_root)).ShouldBe(ExitCode.Ok);
         var before = SnapshotOwnedFiles();
 
-        File.WriteAllText(Path.Combine(_root, "intest-check-scratch.tmp"), "stray");
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest-check-scratch.tmp"), "stray");
 
         Should.Throw<ShouldAssertException>(() => AssertOwnedFilesUntouched(before));
     }
@@ -502,7 +502,7 @@ public class GenerateCheckCommandTests
     [TestMethod]
     public async Task ReturnsToolErrorForMalformedConfig()
     {
-        File.WriteAllText(Path.Combine(_root, "intest.json"), "{ not json");
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), "{ not json");
 
         (await GenerateAsync(_root, check: true)).ShouldBe(ExitCode.ToolError);
     }

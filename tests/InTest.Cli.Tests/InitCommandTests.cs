@@ -131,7 +131,7 @@ public class InitCommandTests
     public async Task GitattributesSurvivesAnAutocrlfInputCheckout()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
-        File.WriteAllText(Path.Combine(_root, "orders.json"), SpecNeedingNoFixture);
+        await File.WriteAllTextAsync(Path.Combine(_root, "orders.json"), SpecNeedingNoFixture);
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(ExitCode.Ok);
 
         // `generate` alone never writes fixtures/ (only `fixtures repair` does), so write a base
@@ -142,8 +142,8 @@ public class InitCommandTests
         // case for pinning, not the weakest, so this round trip must exercise
         // fixtures/**/*.json's recursive match, not just the non-recursive fixtures/*.json case.
         Directory.CreateDirectory(Path.Combine(_root, "fixtures", "qa"));
-        File.WriteAllText(Path.Combine(_root, "fixtures", "sample.json"), "{\r\n  \"sample\": true\r\n}\r\n");
-        File.WriteAllText(Path.Combine(_root, "fixtures", "qa", "sample.json"), "{\r\n  \"sample\": false\r\n}\r\n");
+        await File.WriteAllTextAsync(Path.Combine(_root, "fixtures", "sample.json"), "{\r\n  \"sample\": true\r\n}\r\n");
+        await File.WriteAllTextAsync(Path.Combine(_root, "fixtures", "qa", "sample.json"), "{\r\n  \"sample\": false\r\n}\r\n");
 
         var tracked = new[]
         {
@@ -179,7 +179,7 @@ public class InitCommandTests
 
             foreach (var file in tracked)
             {
-                AssertByteIdenticalAcrossCheckout(file, beforeCheckout[file], File.ReadAllBytes(Path.Combine(clone, file)));
+                AssertByteIdenticalAcrossCheckout(file, beforeCheckout[file], await File.ReadAllBytesAsync(Path.Combine(clone, file)));
             }
         }
         finally

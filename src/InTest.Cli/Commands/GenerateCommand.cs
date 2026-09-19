@@ -175,7 +175,7 @@ public static class GenerateCommand
             if (!CommandArguments.TryRequireValue(
                     projectRoot, "--project", CommandArguments.ProjectRule, out var projectReason))
             {
-                Console.Error.WriteLine(projectReason);
+                await Console.Error.WriteLineAsync(projectReason);
                 return ExitCode.ToolError;
             }
 
@@ -197,7 +197,7 @@ public static class GenerateCommand
             var frameworkMismatch = DetectFrameworkMismatch(projectRoot, config.Framework);
             if (frameworkMismatch is not null)
             {
-                Console.Error.WriteLine(frameworkMismatch);
+                await Console.Error.WriteLineAsync(frameworkMismatch);
                 return ExitCode.ToolError;
             }
 
@@ -264,9 +264,9 @@ public static class GenerateCommand
             {
                 foreach (var message in drift)
                 {
-                    report.WriteLine(message);
+                    await report.WriteLineAsync(message);
                 }
-                report.WriteLine("Run 'intest fixtures repair' to create or update the fixture(s) listed above.");
+                await report.WriteLineAsync("Run 'intest fixtures repair' to create or update the fixture(s) listed above.");
                 return ExitCode.WorkOutstanding;
             }
 
@@ -306,17 +306,17 @@ public static class GenerateCommand
         }
         catch (ConfigLoadException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
         catch (SpecLoadException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
         catch (ClientCallMapFormatException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
     }
@@ -542,10 +542,10 @@ public static class GenerateCommand
                 // put there. Routing it through SpecLoadException instead would report exit 2
                 // and tell CI the tool broke, when what actually happened is that a human has
                 // not run `generate` yet.
-                report.WriteLine($"{SpecSnapshot.FileName} is missing.");
-                report.WriteLine(
-                    $"spec.source is a URL, so {SpecSnapshot.FileName} is the committed snapshot " +
-                    "--check compares against. Run 'intest generate' to fetch it, and commit the result.");
+                await report.WriteLineAsync($"{SpecSnapshot.FileName} is missing.");
+                await report.WriteLineAsync(
+                $"spec.source is a URL, so {SpecSnapshot.FileName} is the committed snapshot " +
+                "--check compares against. Run 'intest generate' to fetch it, and commit the result.");
                 return new ResolvedSpec(null, ExitCode.WorkOutstanding);
             }
 
@@ -790,13 +790,13 @@ public static class GenerateCommand
         {
             foreach (var difference in differences.OrderBy(d => d, StringComparer.Ordinal))
             {
-                report.WriteLine(difference);
+                await report.WriteLineAsync(difference);
             }
-            report.WriteLine("Run 'intest generate' to update.");
+            await report.WriteLineAsync("Run 'intest generate' to update.");
             return ExitCode.WorkOutstanding;
         }
 
-        report.WriteLine("Generated/ and coverage-report.json match a fresh render.");
+        await report.WriteLineAsync("Generated/ and coverage-report.json match a fresh render.");
         return ExitCode.Ok;
     }
 
