@@ -154,9 +154,9 @@ public class GenerateCommandTests
     public async Task IsDeterministic()
     {
         await RunAsync();
-        var first = File.ReadAllText(Path.Combine(_root, "Generated", "OrdersTests.g.cs"));
+        var first = await File.ReadAllTextAsync(Path.Combine(_root, "Generated", "OrdersTests.g.cs"));
         await RunAsync();
-        File.ReadAllText(Path.Combine(_root, "Generated", "OrdersTests.g.cs")).ShouldBe(first);
+        (await File.ReadAllTextAsync(Path.Combine(_root, "Generated", "OrdersTests.g.cs"))).ShouldBe(first);
     }
 
     [TestMethod]
@@ -169,10 +169,10 @@ public class GenerateCommandTests
     [TestMethod]
     public async Task ReturnsToolErrorForAnInvalidRootNamespaceAndWritesNothing()
     {
-        File.WriteAllText(Path.Combine(_root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "My Project", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), """
+                                                                         { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                           "project": { "rootNamespace": "My Project", "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                                         """);
 
         var originalError = Console.Error;
         var capturedError = new StringWriter();
@@ -195,10 +195,10 @@ public class GenerateCommandTests
     [TestMethod]
     public async Task ReturnsToolErrorForAnInvalidTestBaseClassAndWritesNothing()
     {
-        File.WriteAllText(Path.Combine(_root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), """
+                                                                         { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.class" } }
+                                                                         """);
 
         var originalError = Console.Error;
         var capturedError = new StringWriter();
@@ -221,10 +221,10 @@ public class GenerateCommandTests
     [TestMethod]
     public async Task ReturnsToolErrorWhenRootNamespaceIsJsonNull()
     {
-        File.WriteAllText(Path.Combine(_root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), """
+                                                                         { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                           "project": { "rootNamespace": null, "testBaseClass": "Orders.ApiTests.OrdersTestBase" } }
+                                                                         """);
 
         (await RunAsync()).ShouldBe(2);
         Directory.Exists(Path.Combine(_root, "Generated")).ShouldBeFalse();
@@ -282,7 +282,7 @@ public class GenerateCommandTests
         // `notes.withheld` array is already guarded by other tests, but this console line is the
         // only thing a developer sees without opening that artefact, and CoverageNote's entire
         // point is that a withheld case must not be a silent omission.
-        File.WriteAllText(Path.Combine(_root, "orders.json"), SpecWithANotedOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "orders.json"), SpecWithANotedOperation);
 
         var original = Console.Out;
         var captured = new StringWriter();

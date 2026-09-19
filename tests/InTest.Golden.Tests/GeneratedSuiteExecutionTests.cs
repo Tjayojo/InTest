@@ -605,7 +605,7 @@ public class GeneratedSuiteExecutionTests
 
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        File.ReadAllText(generatedFile).ShouldContain("public partial class StatusTests",
+        (await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken)).ShouldContain("public partial class StatusTests",
         customMessage: "GetStatus_ClientRouted's own partial-class extension needs a partial StatusTests.g.cs to extend");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -625,7 +625,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_ClientRouted", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_ClientRouted did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        result.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"GetStatus_ClientRouted must fail on the schema violation — if this passed, raw-bytes " +
         $"validation did not survive the client's own deserialization, and the whole feature is " +
         $"worthless:{Environment.NewLine}{test.Output}");
@@ -696,7 +696,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_ClientRouted", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_ClientRouted did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        result.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatus_ClientRouted should pass against a schema-conforming body, and (per its own " +
         $"source) only reaches its ShouldNotBeNull/ShouldBe(\"ok\") result assertions once the " +
         $"contract assertion above them already passed — a failure here could be either " +
@@ -753,7 +753,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_ClientRouted", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_ClientRouted did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        result.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"GetStatus_ClientRouted should fail against a 500 response:{Environment.NewLine}{test.Output}");
 
         var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
@@ -814,13 +814,13 @@ public class GeneratedSuiteExecutionTests
         // opt-in flag — no EnableClientCaptureInSpecPaths patch step exists in this test at all,
         // unlike the three ClientRouted* tests above.
         var specPathsPath = Path.Combine(_root, "Generated", "spec-paths.json");
-        File.ReadAllText(specPathsPath).ShouldContain("\"clientCaptureEnabled\": true",
+        (await File.ReadAllTextAsync(specPathsPath, TestContext.CancellationToken)).ShouldContain("\"clientCaptureEnabled\": true",
         customMessage: "generate should have written clientCaptureEnabled itself once a client " +
                        "config resolved a call for getStatus's Success case");
 
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        var generatedText = File.ReadAllText(generatedFile);
+        var generatedText = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
         customMessage: "GetStatus_Contract itself should be the client-routed case — there is only one Success case for getStatus to collide with");
         generatedText.ShouldContain("Api.Status.GetAsync(cancellationToken: TestContext.CancellationToken)");
@@ -847,7 +847,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        result.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"GetStatus_Contract must fail on the schema violation — if this passed, the generated " +
         $"client-routed case did not preserve raw-bytes validation:{Environment.NewLine}{test.Output}");
 
@@ -916,7 +916,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        result.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatus_Contract should pass against a schema-conforming body:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -974,7 +974,7 @@ public class GeneratedSuiteExecutionTests
         // read as a passing trx for the wrong reason.
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        var generatedText = await File.ReadAllTextAsync(generatedFile);
+        var generatedText = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
         customMessage: "the client-routed case this test exists to prove must actually be generated");
         generatedText.ShouldContain("TestContext.Current.CancellationToken",
@@ -998,7 +998,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        result.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatus_Contract should pass against a schema-conforming body:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -1044,7 +1044,7 @@ public class GeneratedSuiteExecutionTests
         // same discipline every other live-wire test in this file uses.
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        var generatedText = await File.ReadAllTextAsync(generatedFile);
+        var generatedText = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
         customMessage: "the client-routed case this test exists to prove must actually be generated");
         generatedText.ShouldContain("TestContext.CurrentContext.CancellationToken",
@@ -1069,7 +1069,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        result.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatus_Contract should pass against a schema-conforming body:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -1122,7 +1122,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        result.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"GetStatus_Contract should fail against a 500 response:{Environment.NewLine}{test.Output}");
 
         var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
@@ -1170,11 +1170,11 @@ public class GeneratedSuiteExecutionTests
         // getStatus would otherwise qualify for the plain Kiota convention (Api.Status.GetAsync)
         // the way every other test in this file relies on — this override exists purely to route
         // it through GetStatusThenThrowAsync instead, the one call shape this test needs.
-        File.WriteAllText(Path.Combine(_root, "client-map.json"), """
-                                                                   { "overrides": {
-                                                                       "getStatus": "GetStatusThenThrowAsync(cancellationToken: TestContext.CancellationToken)"
-                                                                   } }
-                                                                   """);
+        await File.WriteAllTextAsync(Path.Combine(_root, "client-map.json"), """
+                                                                             { "overrides": {
+                                                                                 "getStatus": "GetStatusThenThrowAsync(cancellationToken: TestContext.CancellationToken)"
+                                                                             } }
+                                                                             """, TestContext.CancellationToken);
 
         RegisterFakeOrdersApiClient();
 
@@ -1185,7 +1185,7 @@ public class GeneratedSuiteExecutionTests
         // must have actually reached the renderer, not merely "the project happened to build".
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        File.ReadAllText(generatedFile).ShouldContain(
+        (await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken)).ShouldContain(
         "await ApiClient<Stub.ApiTests.FakeOrdersApiClient>().GetStatusThenThrowAsync(cancellationToken: TestContext.CancellationToken);",
         customMessage: "the client-map.json override for getStatus did not reach the renderer");
 
@@ -1211,7 +1211,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        result.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatus_Contract should still pass — the swallowed exception must be reported, not " +
         $"fail the test:{Environment.NewLine}{test.Output}");
 
@@ -1271,7 +1271,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        result.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"GetStatus_Contract should fail on the throwing handler's own exception, propagated " +
         $"unchanged, not pass or report a mere warning:{Environment.NewLine}{test.Output}");
 
@@ -1301,7 +1301,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedBodilessSuccessCaseAssertsStatusOnlyAndPasses()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1314,7 +1314,7 @@ public class GeneratedSuiteExecutionTests
 
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        var generatedText = File.ReadAllText(generatedFile);
+        var generatedText = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
 
         generatedText.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
         customMessage: "[stage-3b]: a schema-less client-routed case must still route through the " +
@@ -1343,7 +1343,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("Ping_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"Ping_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        result.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"Ping_Contract should pass against a genuine 204 response, routed through the client:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -1366,7 +1366,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedBodilessSuccessCaseFailsOnAStatusMismatch()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithBodilessClientRoutedOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1396,7 +1396,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("Ping_Contract", StringComparison.Ordinal));
 
         result.ShouldNotBeNull($"Ping_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        result!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        result.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"Ping_Contract should fail against a 200 response when 204 was declared:{Environment.NewLine}{test.Output}");
 
         var failureText = result.Descendants().Where(e => e.Name.LocalName == "Message")
@@ -1447,7 +1447,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedClientRoutedSuccessCaseWithAUuidPathParameterCompilesAgainstTheTypedIndexer()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithPathParameter, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1460,7 +1460,7 @@ public class GeneratedSuiteExecutionTests
 
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        var generatedText = File.ReadAllText(generatedFile);
+        var generatedText = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
 
         generatedText.ShouldContain(
         "Api.Status[Guid.Parse(FixtureParameter(\"getStatusById\", \"id\"))].GetAsync(cancellationToken: TestContext.CancellationToken);",
@@ -1532,7 +1532,7 @@ public class GeneratedSuiteExecutionTests
             .SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains("GetStatus_Contract", StringComparison.Ordinal));
 
         statusResult.ShouldNotBeNull($"GetStatus_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        statusResult!.Attribute("outcome")?.Value.ShouldBe("Failed",
+        statusResult.Attribute("outcome")?.Value.ShouldBe("Failed",
         $"GetStatus_Contract should fail on the throwing handler's own exception, not pass or be skipped:{Environment.NewLine}{test.Output}");
 
         // The actual failure, not just "some" failure: the throwing handler's own message must
@@ -1575,7 +1575,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task FixtureParameterReachesALiveRequestEndToEnd()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithPathParameter, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1593,23 +1593,23 @@ public class GeneratedSuiteExecutionTests
         // it directly, rather than only inferring it later from a shorter trx.
         var generatedFile = Directory.GetFiles(_root, "StatusTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one StatusTests.g.cs");
-        File.ReadAllText(generatedFile).ShouldContain("GetStatusById_Contract",
+        (await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken)).ShouldContain("GetStatusById_Contract",
         customMessage: "the operation this test exists to prove must actually be generated");
 
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
         File.Exists(fixturePath).ShouldBeTrue("`fixtures repair` should have composed one fixture for the required path parameter");
-        var beforeReplace = File.ReadAllText(fixturePath);
+        var beforeReplace = await File.ReadAllTextAsync(fixturePath, TestContext.CancellationToken);
         beforeReplace.ShouldContain("\"TODO:id\"", customMessage: "a required path parameter always gets a sentinel (decision 1)");
 
         // The step a human adopter performs by hand: fill in the sentinel with a value the
         // service actually accepts.
-        File.WriteAllText(fixturePath, beforeReplace.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(fixturePath, beforeReplace.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal), TestContext.CancellationToken);
 
         // Guard against the first failure mode directly, rather than only inferring it from the
         // live request's outcome below: re-reads the file from disk (not the in-memory string
         // just written) so a no-op caused by the wrong path, the wrong key, or writing to the
         // wrong file is caught here rather than only by RequireFixture further down.
-        File.ReadAllText(fixturePath).ShouldNotContain("TODO:id",
+        (await File.ReadAllTextAsync(fixturePath, TestContext.CancellationToken)).ShouldNotContain("TODO:id",
         customMessage: "the sentinel replacement must actually take effect on disk");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -1636,7 +1636,7 @@ public class GeneratedSuiteExecutionTests
         // check above were somehow fooled).
         statusByIdResult.ShouldNotBeNull(
         $"GetStatusById_Contract did not appear in the trx at all — the suite ran one test short and nothing noticed:{Environment.NewLine}{test.Output}");
-        statusByIdResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        statusByIdResult.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatusById_Contract ran but did not pass — the fixture value likely never reached the live request:{Environment.NewLine}{test.Output}");
 
         test.ExitCode.ShouldBe(0, test.Output);
@@ -1678,7 +1678,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task APublishedFixtureKeyReachesALiveRequest()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithPathParameter, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1692,13 +1692,13 @@ public class GeneratedSuiteExecutionTests
         // key already in hand.
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
         File.Exists(fixturePath).ShouldBeTrue("`fixtures repair` should have composed one fixture for the required path parameter");
-        var beforeReplace = File.ReadAllText(fixturePath);
+        var beforeReplace = await File.ReadAllTextAsync(fixturePath, TestContext.CancellationToken);
         beforeReplace.ShouldContain("\"TODO:id\"", customMessage: "a required path parameter always gets a sentinel (decision 1)");
-        File.WriteAllText(fixturePath, beforeReplace.Replace("\"TODO:id\"", "\"{{fixture:seededId}}\"", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(fixturePath, beforeReplace.Replace("\"TODO:id\"", "\"{{fixture:seededId}}\"", StringComparison.Ordinal), TestContext.CancellationToken);
 
         // Register a fake assembly fixture the way an adopter would: a class implementing
         // IAssemblyFixture, added to the project, and wired into TestStartup.cs's Register hook.
-        File.WriteAllText(Path.Combine(_root, "SeedIdFixture.cs"), GoldenFixtureSources.SeedIdFixture);
+        await File.WriteAllTextAsync(Path.Combine(_root, "SeedIdFixture.cs"), GoldenFixtureSources.SeedIdFixture, TestContext.CancellationToken);
         RegisterFixture("SeedIdFixture");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -1719,7 +1719,7 @@ public class GeneratedSuiteExecutionTests
 
         statusByIdResult.ShouldNotBeNull(
         $"GetStatusById_Contract did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        statusByIdResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        statusByIdResult.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetStatusById_Contract ran but did not pass — a published fixture key likely never reached " +
         $"TokenResolver:{Environment.NewLine}{test.Output}");
 
@@ -1761,7 +1761,7 @@ public class GeneratedSuiteExecutionTests
         (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
-        File.WriteAllText(Path.Combine(_root, "SkippedFixture.cs"), GoldenFixtureSources.SkippedFixture);
+        await File.WriteAllTextAsync(Path.Combine(_root, "SkippedFixture.cs"), GoldenFixtureSources.SkippedFixture, TestContext.CancellationToken);
         RegisterFixture("SkippedFixture");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -1805,7 +1805,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task ValidationReportWithAProblemSurfacesOnAPassingRun()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithPathParameter, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1815,7 +1815,7 @@ public class GeneratedSuiteExecutionTests
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
-        File.ReadAllText(fixturePath).ShouldContain("\"TODO:id\"",
+        (await File.ReadAllTextAsync(fixturePath, TestContext.CancellationToken)).ShouldContain("\"TODO:id\"",
         customMessage: "left unresolved on purpose — this test needs a genuine, standing validation problem");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -1865,7 +1865,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task XunitValidationReportWithAProblemSurfacesOnAPassingRun()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithPathParameter, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json", framework: "xunit").ShouldBe(0);
         UseXunitProjectReferenceInsteadOfPackage();
@@ -1875,7 +1875,7 @@ public class GeneratedSuiteExecutionTests
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
-        File.ReadAllText(fixturePath).ShouldContain("\"TODO:id\"",
+        (await File.ReadAllTextAsync(fixturePath, TestContext.CancellationToken)).ShouldContain("\"TODO:id\"",
         customMessage: "left unresolved on purpose — this test needs a genuine, standing validation problem");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -1924,7 +1924,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task NunitValidationReportWithAProblemSurfacesOnAPassingRun()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithPathParameter);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithPathParameter, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json", framework: "nunit").ShouldBe(0);
         UseNunitProjectReferenceInsteadOfPackage();
@@ -1934,7 +1934,7 @@ public class GeneratedSuiteExecutionTests
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         var fixturePath = Path.Combine(_root, "fixtures", "getStatusById.json");
-        File.ReadAllText(fixturePath).ShouldContain("\"TODO:id\"",
+        (await File.ReadAllTextAsync(fixturePath, TestContext.CancellationToken)).ShouldContain("\"TODO:id\"",
         customMessage: "left unresolved on purpose — this test needs a genuine, standing validation problem");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -1971,7 +1971,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task DeclaredErrorCaseReceivesARealNotFoundOverTheWire()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithDeclaredNotFound);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithDeclaredNotFound, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -1984,7 +1984,7 @@ public class GeneratedSuiteExecutionTests
         // the same way FixtureParameterReachesALiveRequestEndToEnd guards its own operation.
         var generatedFile = Directory.GetFiles(_root, "WidgetsTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one WidgetsTests.g.cs");
-        var generated = File.ReadAllText(generatedFile);
+        var generated = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generated.ShouldContain("GetWidgetById_NotFound",
         customMessage: "the declared-error case this test exists to prove must actually be generated");
         generated.ShouldContain("Guid.NewGuid().ToString()",
@@ -2049,7 +2049,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task AuthCasesReceiveRealStatusesOverTheWireAndSuccessCasesStillPass()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -2063,7 +2063,7 @@ public class GeneratedSuiteExecutionTests
         // DeclaredErrorCaseReceivesARealNotFoundOverTheWire guards its own operation.
         var generatedFile = Directory.GetFiles(_root, "SecureTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one SecureTests.g.cs");
-        var generated = File.ReadAllText(generatedFile);
+        var generated = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generated.ShouldContain("GetSecureResource_Unauthorized",
         customMessage: "the no-token 401 case this test exists to prove must actually be generated");
         generated.ShouldContain("GetSecureResource_Forbidden",
@@ -2097,7 +2097,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe(expectedOutcome,
+            result.Attribute("outcome")?.Value.ShouldBe(expectedOutcome,
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2162,7 +2162,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task GeneratedMixedIdiomClassRunsTheClientRoutedSuccessCaseAlongsideItsRawHttpAuthSiblings()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithSecuredOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -2178,7 +2178,7 @@ public class GeneratedSuiteExecutionTests
         // Success case routed through the typed client, its two auth siblings still raw HTTP.
         var generatedFile = Directory.GetFiles(_root, "SecureTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one SecureTests.g.cs");
-        var generated = File.ReadAllText(generatedFile);
+        var generated = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
 
         generated.ShouldContain("ApiClient<Stub.ApiTests.FakeOrdersApiClient>()",
         customMessage: "GetSecureResource_Contract should be the client-routed case now that a client section is configured");
@@ -2197,7 +2197,7 @@ public class GeneratedSuiteExecutionTests
         // show up here as a second "ApiClient<" occurrence, which neither auth case's own rendered
         // body (a bare HttpRequestMessage/Client.SendAsync pair, per mstest-class.scriban's
         // raw-HTTP branch) ever contains today.
-        var apiClientOccurrences = generated.Split("ApiClient<", StringSplitOptions.None).Length - 1;
+        var apiClientOccurrences = generated.Split("ApiClient<").Length - 1;
         apiClientOccurrences.ShouldBe(1,
         $"expected exactly one client-routed case (GetSecureResource_Contract) in this class, found " +
         $"{apiClientOccurrences} occurrences of \"ApiClient<\":{Environment.NewLine}{generated}");
@@ -2228,7 +2228,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2290,7 +2290,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task AForbiddenCaseTheSecondaryIdentityIsAuthorizedForSkipsRatherThanFails()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -2304,7 +2304,7 @@ public class GeneratedSuiteExecutionTests
         // — the same pattern every other live-wire test in this file uses.
         var generatedFile = Directory.GetFiles(_root, "ScopedSecureTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one ScopedSecureTests.g.cs");
-        var generated = File.ReadAllText(generatedFile);
+        var generated = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generated.ShouldContain("GetScopedSecureResource_Forbidden",
         customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
         generated.ShouldContain("RequireSecondaryIdentityLacks(\"orders.write\");",
@@ -2344,7 +2344,7 @@ public class GeneratedSuiteExecutionTests
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResource_Forbidden", StringComparison.Ordinal));
         forbiddenResult.ShouldNotBeNull(
         $"GetScopedSecureResource_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        forbiddenResult!.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
+        forbiddenResult.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
         $"GetScopedSecureResource_Forbidden should have been skipped by RequireSecondaryIdentityLacks " +
         $"— the secondary identity holds the scope this operation requires, so it cannot produce a real " +
         $"403:{Environment.NewLine}{test.Output}");
@@ -2355,7 +2355,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2368,7 +2368,7 @@ public class GeneratedSuiteExecutionTests
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResourceRequiringDelete_Forbidden", StringComparison.Ordinal));
         runningForbiddenResult.ShouldNotBeNull(
         $"GetScopedSecureResourceRequiringDelete_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        runningForbiddenResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        runningForbiddenResult.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetScopedSecureResourceRequiringDelete_Forbidden should have run — the secondary identity does " +
         $"not hold \"orders.delete\", so RequireSecondaryIdentityLacks must not skip it, and it must " +
         $"receive a real 403:{Environment.NewLine}{test.Output}");
@@ -2377,7 +2377,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2434,7 +2434,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task XunitForbiddenCaseTheSecondaryIdentityIsAuthorizedForSkipsRatherThanFails()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json", framework: "xunit").ShouldBe(0);
         UseXunitProjectReferenceInsteadOfPackage();
@@ -2446,7 +2446,7 @@ public class GeneratedSuiteExecutionTests
 
         var generatedFile = Directory.GetFiles(_root, "ScopedSecureTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one ScopedSecureTests.g.cs");
-        var generated = File.ReadAllText(generatedFile);
+        var generated = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generated.ShouldContain("GetScopedSecureResource_Forbidden",
         customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
         generated.ShouldContain("RequireSecondaryIdentityLacks(\"orders.write\");",
@@ -2480,7 +2480,7 @@ public class GeneratedSuiteExecutionTests
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResource_Forbidden", StringComparison.Ordinal));
         skippedResult.ShouldNotBeNull(
         $"GetScopedSecureResource_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        skippedResult!.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
+        skippedResult.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
         $"GetScopedSecureResource_Forbidden should have been skipped by Assert.Skip via " +
         $"RequireSecondaryIdentityLacks — the secondary identity holds the scope this operation " +
         $"requires, so it cannot produce a real 403:{Environment.NewLine}{test.Output}");
@@ -2498,7 +2498,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2510,7 +2510,7 @@ public class GeneratedSuiteExecutionTests
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResourceRequiringDelete_Forbidden", StringComparison.Ordinal));
         runningForbiddenResult.ShouldNotBeNull(
         $"GetScopedSecureResourceRequiringDelete_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        runningForbiddenResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        runningForbiddenResult.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetScopedSecureResourceRequiringDelete_Forbidden should have run — the secondary identity " +
         $"does not hold \"orders.delete\", so the guard must not skip it, and it must receive a real " +
         $"403:{Environment.NewLine}{test.Output}");
@@ -2519,7 +2519,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2559,7 +2559,7 @@ public class GeneratedSuiteExecutionTests
     [TestMethod]
     public async Task NunitForbiddenCaseTheSecondaryIdentityIsAuthorizedForSkipsRatherThanFails()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithScopedSecuredOperation, TestContext.CancellationToken);
 
         InitCommand.Run(_root, ProjectName, "spec.json", framework: "nunit").ShouldBe(0);
         UseNunitProjectReferenceInsteadOfPackage();
@@ -2571,7 +2571,7 @@ public class GeneratedSuiteExecutionTests
 
         var generatedFile = Directory.GetFiles(_root, "ScopedSecureTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one ScopedSecureTests.g.cs");
-        var generated = File.ReadAllText(generatedFile);
+        var generated = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generated.ShouldContain("GetScopedSecureResource_Forbidden",
         customMessage: "the wrong-scope 403 case this test exists to prove must actually be generated");
         generated.ShouldContain("RequireSecondaryIdentityLacks(\"orders.write\");",
@@ -2605,7 +2605,7 @@ public class GeneratedSuiteExecutionTests
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResource_Forbidden", StringComparison.Ordinal));
         skippedResult.ShouldNotBeNull(
         $"GetScopedSecureResource_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        skippedResult!.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
+        skippedResult.Attribute("outcome")?.Value.ShouldBe("NotExecuted",
         $"GetScopedSecureResource_Forbidden should have been skipped by Assert.Ignore via " +
         $"RequireSecondaryIdentityLacks — the secondary identity holds the scope this operation " +
         $"requires, so it cannot produce a real 403:{Environment.NewLine}{test.Output}");
@@ -2622,7 +2622,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2630,7 +2630,7 @@ public class GeneratedSuiteExecutionTests
             (e.Attribute("testName")?.Value ?? "").Contains("GetScopedSecureResourceRequiringDelete_Forbidden", StringComparison.Ordinal));
         runningForbiddenResult.ShouldNotBeNull(
         $"GetScopedSecureResourceRequiringDelete_Forbidden did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-        runningForbiddenResult!.Attribute("outcome")?.Value.ShouldBe("Passed",
+        runningForbiddenResult.Attribute("outcome")?.Value.ShouldBe("Passed",
         $"GetScopedSecureResourceRequiringDelete_Forbidden should have run — the secondary identity " +
         $"does not hold \"orders.delete\", so the guard must not skip it, and it must receive a real " +
         $"403:{Environment.NewLine}{test.Output}");
@@ -2639,7 +2639,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} did not receive its expected real status over the wire:{Environment.NewLine}{test.Output}");
         }
 
@@ -2745,7 +2745,7 @@ public class GeneratedSuiteExecutionTests
     /// </summary>
     private async Task ScaffoldGenerateAndBuildWithSeedingFixture()
     {
-        File.WriteAllText(Path.Combine(_root, "spec.json"), SpecWithItemsLifecycle);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), SpecWithItemsLifecycle);
 
         InitCommand.Run(_root, ProjectName, "spec.json").ShouldBe(0);
         UseProjectReferenceInsteadOfPackage();
@@ -2755,20 +2755,20 @@ public class GeneratedSuiteExecutionTests
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         var createFixturePath = Path.Combine(_root, "fixtures", "createItem.json");
-        var createFixture = File.ReadAllText(createFixturePath);
+        var createFixture = await File.ReadAllTextAsync(createFixturePath);
         createFixture.ShouldContain("\"TODO:sku\"",
         customMessage: "a required body property always gets a sentinel (decision 1)");
-        File.WriteAllText(createFixturePath,
+        await File.WriteAllTextAsync(createFixturePath,
         createFixture.Replace("\"TODO:sku\"", "\"{{fixture:newItem.sku}}\"", StringComparison.Ordinal));
 
         var deleteFixturePath = Path.Combine(_root, "fixtures", "deleteItem.json");
-        var deleteFixture = File.ReadAllText(deleteFixturePath);
+        var deleteFixture = await File.ReadAllTextAsync(deleteFixturePath);
         deleteFixture.ShouldContain("\"TODO:id\"",
         customMessage: "a required path parameter always gets a sentinel (decision 1)");
-        File.WriteAllText(deleteFixturePath,
+        await File.WriteAllTextAsync(deleteFixturePath,
         deleteFixture.Replace("\"TODO:id\"", "\"{{fixture:seededItem.id}}\"", StringComparison.Ordinal));
 
-        File.WriteAllText(Path.Combine(_root, "RepeatableSeedFixture.cs"), GoldenFixtureSources.RepeatableSeedFixture);
+        await File.WriteAllTextAsync(Path.Combine(_root, "RepeatableSeedFixture.cs"), GoldenFixtureSources.RepeatableSeedFixture);
         RegisterFixture("RepeatableSeedFixture");
 
         var build = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
@@ -2802,7 +2802,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"[{label}] {name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"[{label}] {name} ran but did not pass:{Environment.NewLine}{test.Output}");
         }
 
@@ -3281,21 +3281,21 @@ public class GeneratedSuiteExecutionTests
         File.Exists(deleteFixturePath).ShouldBeTrue(
         "`fixtures repair` should have composed a fixture for deleteThing's inherited path-item parameter");
 
-        var getFixture = File.ReadAllText(getFixturePath);
+        var getFixture = await File.ReadAllTextAsync(getFixturePath, TestContext.CancellationToken);
         getFixture.ShouldContain("\"TODO:id\"",
         customMessage: "a required path parameter always gets a sentinel (decision 1), whether declared on the operation or inherited from the path item");
-        File.WriteAllText(getFixturePath, getFixture.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(getFixturePath, getFixture.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal), TestContext.CancellationToken);
 
-        var deleteFixture = File.ReadAllText(deleteFixturePath);
+        var deleteFixture = await File.ReadAllTextAsync(deleteFixturePath, TestContext.CancellationToken);
         deleteFixture.ShouldContain("\"TODO:id\"",
         customMessage: "a required path parameter always gets a sentinel (decision 1), whether declared on the operation or inherited from the path item");
-        File.WriteAllText(deleteFixturePath, deleteFixture.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal));
+        await File.WriteAllTextAsync(deleteFixturePath, deleteFixture.Replace("\"TODO:id\"", "\"42\"", StringComparison.Ordinal), TestContext.CancellationToken);
 
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         var generatedFile = Directory.GetFiles(_root, "ThingsTests.g.cs", SearchOption.AllDirectories)
             .ShouldHaveSingleItem("generate should have produced exactly one ThingsTests.g.cs — getThing and deleteThing share the \"Things\" tag");
-        var generatedText = File.ReadAllText(generatedFile);
+        var generatedText = await File.ReadAllTextAsync(generatedFile, TestContext.CancellationToken);
         generatedText.ShouldContain("GetThing_Contract",
         customMessage: "the path-item-inheriting GET operation must actually be generated");
         generatedText.ShouldContain("DeleteThing_Contract",
@@ -3319,7 +3319,7 @@ public class GeneratedSuiteExecutionTests
         {
             var result = results.SingleOrDefault(e => (e.Attribute("testName")?.Value ?? "").Contains(name, StringComparison.Ordinal));
             result.ShouldNotBeNull($"{name} did not appear in the trx at all:{Environment.NewLine}{test.Output}");
-            result!.Attribute("outcome")?.Value.ShouldBe("Passed",
+            result.Attribute("outcome")?.Value.ShouldBe("Passed",
             $"{name} ran but did not pass — the path-item-inherited id likely never reached the live request:{Environment.NewLine}{test.Output}");
         }
 
@@ -3331,4 +3331,6 @@ public class GeneratedSuiteExecutionTests
         _stub.ReceivedPaths.ShouldContain("/things/42",
         $"the path-item-inherited id never reached a live request. Paths actually served: {string.Join(", ", _stub.ReceivedPaths)}");
     }
+
+    public TestContext TestContext { get; set; }
 }

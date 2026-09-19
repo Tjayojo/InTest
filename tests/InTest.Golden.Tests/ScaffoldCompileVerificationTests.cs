@@ -53,7 +53,7 @@ public class ScaffoldCompileVerificationTests
         var runtimeProject = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.MSTest", "InTest.Runtime.MSTest.csproj"));
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
 
         // The needle must track CliVersion.Current, not a hardcoded "0.1.0": before
         // docs/superpowers/plans/2026-08-23-trunk-based-versioning.md's Task 2, InitCommand's
@@ -75,17 +75,17 @@ public class ScaffoldCompileVerificationTests
         "update this test's needle alongside whatever changed, or the ProjectReference swap below " +
         "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
 
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         needle,
         $"""<ProjectReference Include="{runtimeProject}" />""",
-        StringComparison.Ordinal));
+        StringComparison.Ordinal), TestContext.CancellationToken);
 
         // The csproj copies Generated/spec-schemas.json and Generated/spec-paths.json to the
         // output directory — this test never runs `generate`, so they must exist for the build
         // to have anything to copy from.
         Directory.CreateDirectory(Path.Combine(_root, "Generated"));
-        File.WriteAllText(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}");
-        File.WriteAllText(Path.Combine(_root, "Generated", "spec-paths.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_root, "Generated", "spec-paths.json"), "{}", TestContext.CancellationToken);
 
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
 
@@ -125,7 +125,7 @@ public class ScaffoldCompileVerificationTests
         var runtimeProject = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.xUnit", "InTest.Runtime.xUnit.csproj"));
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
 
         // Same discipline as ScaffoldStillBuildsWithNoTokenProviderRegistered's own needle above,
         // and the same reason: a hardcoded "0.1.0" would have matched by coincidence (InTest.Cli's
@@ -139,17 +139,17 @@ public class ScaffoldCompileVerificationTests
         "update this test's needle alongside whatever changed, or the ProjectReference swap below " +
         "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
 
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         needle,
         $"""<ProjectReference Include="{runtimeProject}" />""",
-        StringComparison.Ordinal));
+        StringComparison.Ordinal), TestContext.CancellationToken);
 
         // Same reason as the MSTest scaffold above: this test never runs `generate`, so the two
         // files the csproj copies to the output directory must exist for the build to have
         // anything to copy from.
         Directory.CreateDirectory(Path.Combine(_root, "Generated"));
-        File.WriteAllText(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}");
-        File.WriteAllText(Path.Combine(_root, "Generated", "spec-paths.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_root, "Generated", "spec-paths.json"), "{}", TestContext.CancellationToken);
 
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
 
@@ -185,7 +185,7 @@ public class ScaffoldCompileVerificationTests
         var runtimeProject = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "InTest.Runtime.NUnit", "InTest.Runtime.NUnit.csproj"));
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath, TestContext.CancellationToken);
 
         // Same discipline as the MSTest and xUnit scaffolds' own needles above, and the same
         // reason: a hardcoded "0.1.0" would have matched by coincidence rather than by
@@ -199,21 +199,23 @@ public class ScaffoldCompileVerificationTests
         "update this test's needle alongside whatever changed, or the ProjectReference swap below " +
         "silently no-ops and this test fails downstream with a confusing NU1101 instead.");
 
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         needle,
         $"""<ProjectReference Include="{runtimeProject}" />""",
-        StringComparison.Ordinal));
+        StringComparison.Ordinal), TestContext.CancellationToken);
 
         // Same reason as the MSTest and xUnit scaffolds above: this test never runs `generate`, so
         // the two files the csproj copies to the output directory must exist for the build to have
         // anything to copy from.
         Directory.CreateDirectory(Path.Combine(_root, "Generated"));
-        File.WriteAllText(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}");
-        File.WriteAllText(Path.Combine(_root, "Generated", "spec-paths.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Generated", "spec-schemas.json"), "{}", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_root, "Generated", "spec-paths.json"), "{}", TestContext.CancellationToken);
 
         var (exitCode, output) = await ProcessRunner.RunAsync("dotnet", $"build \"{_root}\" --nologo -v q");
 
         exitCode.ShouldBe(0,
         $"a fresh NUnit scaffold with no ITestTokenProvider registered must still build:{Environment.NewLine}{output}");
     }
+
+    public TestContext TestContext { get; set; }
 }

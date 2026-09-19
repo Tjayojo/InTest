@@ -32,7 +32,7 @@ public static class FixturesRepairCommand
             if (!CommandArguments.TryRequireValue(
                     projectRoot, "--project", CommandArguments.ProjectRule, out var projectReason))
             {
-                Console.Error.WriteLine(projectReason);
+                await Console.Error.WriteLineAsync(projectReason);
                 return ExitCode.ToolError;
             }
 
@@ -140,7 +140,7 @@ public static class FixturesRepairCommand
                     // the schema may be deliberate, and silent deletion is how that intent is lost.
                     foreach (var name in drift.StaleProperties)
                     {
-                        report.WriteLine(
+                        await report.WriteLineAsync(
                         $"{testCase.OperationKey}: '{name}' is no longer in schema (kept — remove by hand if it was not intentional).");
                     }
 
@@ -157,11 +157,11 @@ public static class FixturesRepairCommand
                     // must still happen. The run as a whole still reports a tool error (below),
                     // since the malformed fixture itself is unresolved.
                     failed++;
-                    report.WriteLine($"{testCase.OperationKey}: {ex.Message}");
+                    await report.WriteLineAsync($"{testCase.OperationKey}: {ex.Message}");
                 }
             }
 
-            report.WriteLine(created + updated == 0
+            await report.WriteLineAsync(created + updated == 0
                 ? "Nothing to repair."
                 : $"Created {created} fixture(s), updated {updated} fixture(s).");
 
@@ -169,17 +169,17 @@ public static class FixturesRepairCommand
         }
         catch (ConfigLoadException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
         catch (SpecLoadException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
         catch (FixtureFormatException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
     }

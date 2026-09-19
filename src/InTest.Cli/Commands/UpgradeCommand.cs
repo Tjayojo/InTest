@@ -158,7 +158,7 @@ public static class UpgradeCommand
         // config that then looks perfectly fine to every later command.
         if (CliVersion.Current == CliVersion.FallbackVersion)
         {
-            Console.Error.WriteLine(NoVersionMetadataMessage(CliVersion.FallbackVersion));
+            await Console.Error.WriteLineAsync(NoVersionMetadataMessage(CliVersion.FallbackVersion));
             return ExitCode.ToolError;
         }
 
@@ -181,13 +181,13 @@ public static class UpgradeCommand
         }
         catch (IOException ex)
         {
-            Console.Error.WriteLine($"{ConfigLoader.FileName} at '{intestJsonPath}' could not be read: {ex.Message}");
+            await Console.Error.WriteLineAsync($"{ConfigLoader.FileName} at '{intestJsonPath}' could not be read: {ex.Message}");
             return ExitCode.ToolError;
         }
 
         if (!File.Exists(dotnetToolsPath))
         {
-            Console.Error.WriteLine(
+            await Console.Error.WriteLineAsync(
             $"No .config/dotnet-tools.json found at '{dotnetToolsPath}'. `intest upgrade` " +
             "pins the tool version there and cannot proceed without it — `intest init` " +
             "scaffolds one for a brand-new project; for an existing one, create it by hand:" +
@@ -202,13 +202,13 @@ public static class UpgradeCommand
         }
         catch (IOException ex)
         {
-            Console.Error.WriteLine($".config/dotnet-tools.json at '{dotnetToolsPath}' could not be read: {ex.Message}");
+            await Console.Error.WriteLineAsync($".config/dotnet-tools.json at '{dotnetToolsPath}' could not be read: {ex.Message}");
             return ExitCode.ToolError;
         }
 
         if (!TrySetDotnetToolsVersion(dotnetToolsBytes, newVersion, out var newDotnetToolsBytes, out var reason))
         {
-            Console.Error.WriteLine($".config/dotnet-tools.json at '{dotnetToolsPath}' {reason}");
+            await Console.Error.WriteLineAsync($".config/dotnet-tools.json at '{dotnetToolsPath}' {reason}");
             return ExitCode.ToolError;
         }
 
@@ -258,7 +258,7 @@ public static class UpgradeCommand
             scaffoldedGitattributes = true;
         }
 
-        report.WriteLine(
+        await report.WriteLineAsync(
         $"Upgraded intest.json and .config/dotnet-tools.json to intest {newVersion}." +
         (scaffoldedGitattributes
             ? " Also scaffolded .gitattributes, which this project did not have yet — see " +
@@ -272,7 +272,7 @@ public static class UpgradeCommand
         var runtimeReferenceNote = DetectRuntimeReferenceMismatch(projectRoot, newVersion);
         if (runtimeReferenceNote is not null)
         {
-            report.WriteLine(runtimeReferenceNote);
+            await report.WriteLineAsync(runtimeReferenceNote);
         }
 
         return ExitCode.Ok;

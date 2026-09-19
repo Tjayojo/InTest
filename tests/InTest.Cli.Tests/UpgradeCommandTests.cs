@@ -182,14 +182,14 @@ public class UpgradeCommandTests
     public async Task PreservesUnusualFormattingKeyOrderAndUnknownKeysInIntestJson()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
-        File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
+        await File.WriteAllTextAsync(Path.Combine(_root, "orders.json"), Spec);
 
         var handWritten =
             "{\"project\":{\"rootNamespace\":\"Orders.ApiTests\",\"testBaseClass\":\"Orders.ApiTests.OrdersTestBase\"," +
             "\"framework\":\"mstest\"}," +
             "\"intestVersion\":\"0.0.1\",\"schemaVersion\":1,\"spec\":{\"source\":\"orders.json\"}," +
             "\"somethingFromALaterRelease\":{\"nested\":true,\"intestVersion\":\"pinned-by-a-later-release\"}}";
-        File.WriteAllText(Path.Combine(_root, "intest.json"), handWritten);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), handWritten);
 
         var expectedAfter = handWritten.Replace(
         "\"intestVersion\":\"0.0.1\"", $"\"intestVersion\":\"{CliVersion.Current}\"");
@@ -212,12 +212,12 @@ public class UpgradeCommandTests
     public async Task InsertsIntestVersionWhenAbsent()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
-        File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
-        File.WriteAllText(Path.Combine(_root, "intest.json"), """
-                                                              { "schemaVersion": 1,
-                                                                "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase", "framework": "mstest" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(_root, "orders.json"), Spec);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), """
+                                                                         { "schemaVersion": 1,
+                                                                           "spec": { "source": "orders.json" },
+                                                                           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase", "framework": "mstest" } }
+                                                                         """);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
@@ -244,8 +244,8 @@ public class UpgradeCommandTests
     public async Task InsertsIntestVersionUsingTheConfigsOwnCrlfLineEnding()
     {
         InitCommand.Run(_root, "Orders.ApiTests", "orders.json").ShouldBe(ExitCode.Ok);
-        File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
-        File.WriteAllText(Path.Combine(_root, "intest.json"),
+        await File.WriteAllTextAsync(Path.Combine(_root, "orders.json"), Spec);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"),
         "{\r\n  \"schemaVersion\": 1,\r\n  \"spec\": { \"source\": \"orders.json\" },\r\n  " +
         "\"project\": { \"rootNamespace\": \"Orders.ApiTests\", " +
         "\"testBaseClass\": \"Orders.ApiTests.OrdersTestBase\", \"framework\": \"mstest\" }\r\n}");
@@ -395,8 +395,8 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var intestJsonPath = Path.Combine(_root, "intest.json");
-        var before = File.ReadAllText(intestJsonPath);
-        File.WriteAllText(intestJsonPath, before.Replace(
+        var before = await File.ReadAllTextAsync(intestJsonPath);
+        await File.WriteAllTextAsync(intestJsonPath, before.Replace(
         "\"schemaVersion\": 1,", "\"schemaVersion\": 1, // pinned"));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
@@ -413,13 +413,13 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var intestJsonPath = Path.Combine(_root, "intest.json");
-        var before = File.ReadAllText(intestJsonPath);
-        File.WriteAllText(intestJsonPath, before.Replace(
+        var before = await File.ReadAllTextAsync(intestJsonPath);
+        await File.WriteAllTextAsync(intestJsonPath, before.Replace(
         "\"project\": {", "\"project\": { \"unused\": true,"));
         // Malform it further into a genuine trailing comma before the closing brace.
-        var malformed = File.ReadAllText(intestJsonPath).TrimEnd();
+        var malformed = (await File.ReadAllTextAsync(intestJsonPath)).TrimEnd();
         malformed = malformed[..^1] + ", }";
-        File.WriteAllText(intestJsonPath, malformed);
+        await File.WriteAllTextAsync(intestJsonPath, malformed);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
     }
@@ -463,7 +463,7 @@ public class UpgradeCommandTests
     public async Task ForwardsToolErrorFromRegenerationWithoutWritingAnything()
     {
         InitProject(Spec);
-        File.WriteAllText(Path.Combine(_root, "intest.json"), "{ not json");
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), "{ not json");
         var dotnetToolsBefore = ReadDotnetTools();
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
@@ -478,16 +478,16 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
-        File.WriteAllText(dotnetToolsPath, $$"""
-                                             {
-                                               "version": 1,
-                                               "isRoot": true,
-                                               "tools": {
-                                                 "some-other-tool": { "version": "3.4.5", "commands": ["other"] },
-                                                 "intest.cli": { "version": "0.0.1", "commands": ["intest"] }
-                                               }
-                                             }
-                                             """);
+        await File.WriteAllTextAsync(dotnetToolsPath, $$"""
+                                                        {
+                                                          "version": 1,
+                                                          "isRoot": true,
+                                                          "tools": {
+                                                            "some-other-tool": { "version": "3.4.5", "commands": ["other"] },
+                                                            "intest.cli": { "version": "0.0.1", "commands": ["intest"] }
+                                                          }
+                                                        }
+                                                        """);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
@@ -524,19 +524,19 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
-        File.WriteAllText(dotnetToolsPath, """
-                                           {
-                                             "version": 1,
-                                             "isRoot": true,
-                                             "tools": {
-                                               "intest.cli": {
-                                                 "commands": ["intest"],
-                                                 "metadata": { "notes": "pinned deliberately" },
-                                                 "version": "0.0.1"
-                                               }
-                                             }
-                                           }
-                                           """);
+        await File.WriteAllTextAsync(dotnetToolsPath, """
+                                                      {
+                                                        "version": 1,
+                                                        "isRoot": true,
+                                                        "tools": {
+                                                          "intest.cli": {
+                                                            "commands": ["intest"],
+                                                            "metadata": { "notes": "pinned deliberately" },
+                                                            "version": "0.0.1"
+                                                          }
+                                                        }
+                                                      }
+                                                      """);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
@@ -567,7 +567,7 @@ public class UpgradeCommandTests
                        "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } }
                      }
                      """;
-        File.WriteAllText(dotnetToolsPath, before);
+        await File.WriteAllTextAsync(dotnetToolsPath, before);
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
 
@@ -603,9 +603,9 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
-        File.WriteAllText(dotnetToolsPath, """
-                                           { "version": 1, "isRoot": true, "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } } }
-                                           """);
+        await File.WriteAllTextAsync(dotnetToolsPath, """
+                                                      { "version": 1, "isRoot": true, "tools": { "some-other-tool": { "version": "3.4.5", "commands": ["other"] } } }
+                                                      """);
         var intestJsonBefore = ReadIntestJson();
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.ToolError);
@@ -625,9 +625,9 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var dotnetToolsPath = Path.Combine(_root, ".config", "dotnet-tools.json");
-        File.WriteAllText(dotnetToolsPath, """
-                                           { "version": 1, "isRoot": true, "tools": { "intest.cli": { "commands": ["intest"] } } }
-                                           """);
+        await File.WriteAllTextAsync(dotnetToolsPath, """
+                                                      { "version": 1, "isRoot": true, "tools": { "intest.cli": { "commands": ["intest"] } } }
+                                                      """);
         var intestJsonBefore = ReadIntestJson();
 
         var (exitCode, error) = await UpgradeCapturingErrorAsync(_root);
@@ -685,7 +685,7 @@ public class UpgradeCommandTests
 
         exitCode.ShouldBe(ExitCode.Ok);
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue();
-        File.ReadAllText(Path.Combine(_root, ".gitattributes")).ShouldContain("Generated/** text eol=crlf", Case.Sensitive);
+        (await File.ReadAllTextAsync(Path.Combine(_root, ".gitattributes"))).ShouldContain("Generated/** text eol=crlf", Case.Sensitive);
         report.ShouldContain(".gitattributes", Case.Sensitive,
         customMessage: "the report must say a team-owned file was created, not just the two configs");
     }
@@ -695,13 +695,13 @@ public class UpgradeCommandTests
     {
         InitProject(Spec);
         var gitattributesPath = Path.Combine(_root, ".gitattributes");
-        File.WriteAllText(gitattributesPath, "# adopter customised this file\n*.custom text eol=lf\n");
-        var before = File.ReadAllText(gitattributesPath);
+        await File.WriteAllTextAsync(gitattributesPath, "# adopter customised this file\n*.custom text eol=lf\n");
+        var before = await File.ReadAllTextAsync(gitattributesPath);
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
 
         exitCode.ShouldBe(ExitCode.Ok);
-        File.ReadAllText(gitattributesPath).ShouldBe(before);
+        (await File.ReadAllTextAsync(gitattributesPath)).ShouldBe(before);
         report.ShouldNotContain(".gitattributes",
         customMessage: "an already-present .gitattributes was not created by this run, so the " +
                        "report must not claim it was");
@@ -736,16 +736,16 @@ public class UpgradeCommandTests
             "Orders.ApiTests.csproj",
         };
         var before = teamOwned.ToDictionary(f => f, f => File.ReadAllText(Path.Combine(_root, f)));
-        var fixtureBefore = File.ReadAllText(Path.Combine(_root, "fixtures", "createProduct.json"));
+        var fixtureBefore = await File.ReadAllTextAsync(Path.Combine(_root, "fixtures", "createProduct.json"));
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeFalse();
 
         (await UpgradeAsync(_root)).ShouldBe(ExitCode.Ok);
 
         foreach (var (file, content) in before)
         {
-            File.ReadAllText(Path.Combine(_root, file)).ShouldBe(content, customMessage: $"{file} must be untouched by upgrade");
+            (await File.ReadAllTextAsync(Path.Combine(_root, file))).ShouldBe(content, customMessage: $"{file} must be untouched by upgrade");
         }
-        File.ReadAllText(Path.Combine(_root, "fixtures", "createProduct.json")).ShouldBe(fixtureBefore,
+        (await File.ReadAllTextAsync(Path.Combine(_root, "fixtures", "createProduct.json"))).ShouldBe(fixtureBefore,
         customMessage: "fixtures/ is never touched by upgrade, with no exception");
         // The one named, decided exception: .gitattributes goes from absent to present.
         File.Exists(Path.Combine(_root, ".gitattributes")).ShouldBeTrue(
@@ -769,13 +769,13 @@ public class UpgradeCommandTests
         InitProject(Spec);
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath);
         var scaffolded = $"Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\"";
         csprojText.ShouldContain(scaffolded, Case.Sensitive,
         customMessage: "init is expected to scaffold InTest.Runtime.MSTest at the running tool's own version");
 
         var stalePrereleaseVersion = CliVersion.Current + "-preview.7";
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         scaffolded, $"Include=\"InTest.Runtime.MSTest\" Version=\"{stalePrereleaseVersion}\""));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
@@ -789,7 +789,7 @@ public class UpgradeCommandTests
 
         // Read only: upgrade must not rewrite the .csproj, even though it just told the adopter
         // exactly what to change there by hand.
-        File.ReadAllText(csprojPath).ShouldContain(
+        (await File.ReadAllTextAsync(csprojPath)).ShouldContain(
         $"Include=\"InTest.Runtime.MSTest\" Version=\"{stalePrereleaseVersion}\"", Case.Sensitive,
         customMessage: "upgrade must never rewrite the .csproj — see [prerelease-reference-migration]");
     }
@@ -806,10 +806,10 @@ public class UpgradeCommandTests
         InitProject(Spec);
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath);
         var scaffolded = $"<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\" />";
         csprojText.ShouldContain(scaffolded, Case.Sensitive);
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         scaffolded, "<PackageReference Include=\"InTest.Runtime.MSTest\" />"));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
@@ -837,10 +837,10 @@ public class UpgradeCommandTests
         InitProject(Spec);
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath);
         var scaffolded = $"<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\" />";
         csprojText.ShouldContain(scaffolded, Case.Sensitive);
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         scaffolded, $"<PackageReference Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\" />"));
 
         var (exitCode, report) = await UpgradeCapturingReportAsync(_root);
@@ -855,7 +855,7 @@ public class UpgradeCommandTests
                        "may go looking for a source-level migration that does not exist");
 
         // Read only, matching [prerelease-reference-migration]'s existing contract.
-        File.ReadAllText(csprojPath).ShouldContain(
+        (await File.ReadAllTextAsync(csprojPath)).ShouldContain(
         "Include=\"InTest.Runtime\" Version=", Case.Sensitive,
         customMessage: "upgrade must never rewrite the .csproj, even for the id migration");
     }
@@ -873,10 +873,10 @@ public class UpgradeCommandTests
         InitProject(Spec);
 
         var csprojPath = Path.Combine(_root, "Orders.ApiTests.csproj");
-        var csprojText = File.ReadAllText(csprojPath);
+        var csprojText = await File.ReadAllTextAsync(csprojPath);
         var scaffolded = $"<PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{CliVersion.Current}\" />";
         csprojText.ShouldContain(scaffolded, Case.Sensitive);
-        File.WriteAllText(csprojPath, csprojText.Replace(
+        await File.WriteAllTextAsync(csprojPath, csprojText.Replace(
         scaffolded,
         scaffolded + Environment.NewLine +
         $"    <PackageReference Include=\"InTest.Runtime\" Version=\"{CliVersion.Current}\" />"));

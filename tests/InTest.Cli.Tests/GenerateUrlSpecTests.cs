@@ -142,7 +142,7 @@ public class GenerateUrlSpecTests
 
         await RunAsync(transport);
 
-        var snapshot = File.ReadAllText(SnapshotPath);
+        var snapshot = await File.ReadAllTextAsync(SnapshotPath);
         snapshot.ShouldNotBe(Spec, "a verbatim copy of a minified body has no reviewable diff");
         snapshot.ShouldBe(SpecSnapshot.Reprint(Spec), "the snapshot is exactly what Reprint produces");
         snapshot.Replace("\r\n", string.Empty).ShouldNotContain("\n");
@@ -232,14 +232,14 @@ public class GenerateUrlSpecTests
     {
         using var ok = new StubTransport(Spec);
         await RunAsync(ok);
-        var before = File.ReadAllBytes(SnapshotPath);
+        var before = await File.ReadAllBytesAsync(SnapshotPath);
 
         using var failing = new StubTransport("nope", HttpStatusCode.ServiceUnavailable);
         var (exitCode, error) = await RunCapturingErrorAsync(failing);
 
         exitCode.ShouldBe(ExitCode.ToolError);
         error.ShouldContain("503");
-        File.ReadAllBytes(SnapshotPath).ShouldBe(before,
+        (await File.ReadAllBytesAsync(SnapshotPath)).ShouldBe(before,
         "a stale snapshot silently standing in for a refresh is the quiet-green failure " +
         "\"Fail loudly\" exists to reject");
     }
@@ -253,13 +253,13 @@ public class GenerateUrlSpecTests
     {
         using var ok = new StubTransport(Spec);
         await RunAsync(ok);
-        var before = File.ReadAllBytes(SnapshotPath);
+        var before = await File.ReadAllBytesAsync(SnapshotPath);
 
         using var garbage = new StubTransport("{ this is not json");
         var (exitCode, _) = await RunCapturingErrorAsync(garbage);
 
         exitCode.ShouldBe(ExitCode.ToolError);
-        File.ReadAllBytes(SnapshotPath).ShouldBe(before);
+        (await File.ReadAllBytesAsync(SnapshotPath)).ShouldBe(before);
     }
 
     [TestMethod]
@@ -339,7 +339,7 @@ public class GenerateUrlSpecTests
         using var transport = new StubTransport(Spec);
         await RunAsync(transport);
 
-        var before = File.ReadAllBytes(SnapshotPath);
+        var before = await File.ReadAllBytesAsync(SnapshotPath);
         var snapshot = new FileInfo(SnapshotPath) { IsReadOnly = true };
         try
         {
@@ -349,7 +349,7 @@ public class GenerateUrlSpecTests
             error.ShouldNotContain("unexpected failure");
             error.ShouldContain("read-only",
             customMessage: "a refusal names the condition the adopter has to clear");
-            File.ReadAllBytes(SnapshotPath).ShouldBe(before,
+            (await File.ReadAllBytesAsync(SnapshotPath)).ShouldBe(before,
             "a refused write leaves the existing snapshot exactly as it was");
         }
         finally
@@ -463,12 +463,12 @@ public class GenerateUrlSpecTests
     [TestMethod]
     public async Task APathSourceNeverFetches()
     {
-        File.WriteAllText(Path.Combine(_root, "orders.json"), Spec);
-        File.WriteAllText(Path.Combine(_root, "intest.json"), """
-                                                              { "schemaVersion": 1, "spec": { "source": "orders.json" },
-                                                                "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
-                                                                             "framework": "mstest" } }
-                                                              """);
+        await File.WriteAllTextAsync(Path.Combine(_root, "orders.json"), Spec);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), """
+                                                                         { "schemaVersion": 1, "spec": { "source": "orders.json" },
+                                                                           "project": { "rootNamespace": "Orders.ApiTests", "testBaseClass": "Orders.ApiTests.OrdersTestBase",
+                                                                                        "framework": "mstest" } }
+                                                                         """);
 
         using var forbidden = new ForbiddenTransport();
         var (exitCode, report) = await RunAsync(forbidden);

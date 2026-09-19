@@ -48,7 +48,7 @@ public class FixturesRepairCommandTests
         (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         File.Exists(FixturePath).ShouldBeTrue();
-        FixtureDocument.Parse(File.ReadAllText(FixturePath)).Body!["sku"]!.GetValue<string>().ShouldBe("TODO:sku");
+        FixtureDocument.Parse(await File.ReadAllTextAsync(FixturePath)).Body!["sku"]!.GetValue<string>().ShouldBe("TODO:sku");
     }
 
     [TestMethod]
@@ -65,13 +65,13 @@ public class FixturesRepairCommandTests
     {
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
-        var document = FixtureDocument.Parse(File.ReadAllText(FixturePath));
+        var document = FixtureDocument.Parse(await File.ReadAllTextAsync(FixturePath));
         document.Body!["sku"] = "WGT-0001";
-        File.WriteAllText(FixturePath, document.ToJson());
+        await File.WriteAllTextAsync(FixturePath, document.ToJson());
 
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
-        FixtureDocument.Parse(File.ReadAllText(FixturePath)).Body!["sku"]!.GetValue<string>()
+        FixtureDocument.Parse(await File.ReadAllTextAsync(FixturePath)).Body!["sku"]!.GetValue<string>()
             .ShouldBe("WGT-0001", "repair adds what is absent; it never replaces what a human wrote");
     }
 
@@ -80,13 +80,13 @@ public class FixturesRepairCommandTests
     {
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
-        File.WriteAllText(Path.Combine(_root, "spec.json"), Spec.Replace(
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), Spec.Replace(
         """"required":["sku"],"properties":{"sku":{"type":"string"}}"""",
         """"required":["sku","name"],"properties":{"sku":{"type":"string"},"name":{"type":"string"}}""""));
 
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
-        FixtureDocument.Parse(File.ReadAllText(FixturePath)).Body!["name"]!.GetValue<string>().ShouldBe("TODO:name");
+        FixtureDocument.Parse(await File.ReadAllTextAsync(FixturePath)).Body!["name"]!.GetValue<string>().ShouldBe("TODO:name");
     }
 
     [TestMethod]
@@ -94,16 +94,16 @@ public class FixturesRepairCommandTests
     {
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
-        var document = FixtureDocument.Parse(File.ReadAllText(FixturePath));
+        var document = FixtureDocument.Parse(await File.ReadAllTextAsync(FixturePath));
         document.Body!["legacyRef"] = "kept-by-hand";
-        File.WriteAllText(FixturePath, document.ToJson());
+        await File.WriteAllTextAsync(FixturePath, document.ToJson());
 
         var report = new StringWriter();
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None, report);
 
         // §10 requires both halves: not deleted, and reported. Silent retention is how a
         // property nobody meant to keep survives three refactors.
-        FixtureDocument.Parse(File.ReadAllText(FixturePath)).Body!["legacyRef"].ShouldNotBeNull(
+        FixtureDocument.Parse(await File.ReadAllTextAsync(FixturePath)).Body!["legacyRef"].ShouldNotBeNull(
         "never silently deleted — it may be deliberate");
         report.ToString().ShouldContain("legacyRef", Case.Sensitive);
         report.ToString().ShouldContain("no longer in schema");
@@ -130,7 +130,7 @@ public class FixturesRepairCommandTests
                                    }
                                    """;
 
-        File.WriteAllText(Path.Combine(_root, "spec.json"), withSkipped);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), withSkipped);
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
         File.Exists(Path.Combine(_root, "fixtures", "createProduct.json")).ShouldBeTrue();
@@ -176,7 +176,7 @@ public class FixturesRepairCommandTests
                                            }
                                            """;
 
-        File.WriteAllText(Path.Combine(_root, "spec.json"), withNoFixtureNeeded);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), withNoFixtureNeeded);
         (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
 
         File.Exists(Path.Combine(_root, "fixtures", "createProduct.json")).ShouldBeTrue(
@@ -208,14 +208,14 @@ public class FixturesRepairCommandTests
                                      }
                                      """;
 
-        File.WriteAllText(Path.Combine(_root, "spec.json"), twoOperations);
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), twoOperations);
         await FixturesRepairCommand.RunAsync(_root, CancellationToken.None);
 
         var productPath = Path.Combine(_root, "fixtures", "createProduct.json");
         var widgetPath = Path.Combine(_root, "fixtures", "createWidget.json");
-        File.WriteAllText(productPath, "{ not valid json");
+        await File.WriteAllTextAsync(productPath, "{ not valid json");
 
-        File.WriteAllText(Path.Combine(_root, "spec.json"), twoOperations.Replace(
+        await File.WriteAllTextAsync(Path.Combine(_root, "spec.json"), twoOperations.Replace(
         """"required":["name"],"properties":{"name":{"type":"string"}}"""",
         """"required":["name","color"],"properties":{"name":{"type":"string"},"color":{"type":"string"}}""""));
 
@@ -224,7 +224,7 @@ public class FixturesRepairCommandTests
 
         exitCode.ShouldBe(ExitCode.ToolError,
         "a malformed committed fixture is a real tool error and must be reflected in the exit code");
-        FixtureDocument.Parse(File.ReadAllText(widgetPath)).Body!["color"]!.GetValue<string>()
+        FixtureDocument.Parse(await File.ReadAllTextAsync(widgetPath)).Body!["color"]!.GetValue<string>()
             .ShouldBe("TODO:color", "the unrelated, legitimate repair must still be applied");
         // The report should say which operation's fixture could not be read.
         report.ToString().ShouldContain("createProduct", Case.Sensitive);
@@ -256,7 +256,7 @@ public class FixturesRepairCommandTests
 
     private async Task<string> ExpectExplainedConfigErrorAsync(string json)
     {
-        File.WriteAllText(Path.Combine(_root, "intest.json"), json);
+        await File.WriteAllTextAsync(Path.Combine(_root, "intest.json"), json);
 
         var (exitCode, error) = await RunCapturingErrorAsync();
 
