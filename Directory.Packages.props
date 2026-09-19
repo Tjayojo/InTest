@@ -39,6 +39,6 @@
     <!-- Duende requires a paid licence for PRODUCTION use only; development, testing and
          personal projects are free. This is a test fixture and is never in the closure of
          a shipped InTest package. See samples/README.md. -->
-    <PackageVersion Include="Duende.IdentityServer" Version="8.0.6" />
+    <PackageVersion Include="Duende.IdentityServer" Version="8.0.7" />
   </ItemGroup>
 </Project>
