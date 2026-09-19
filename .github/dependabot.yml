@@ -67,6 +67,19 @@ updates:
     # this task named explicitly). Security-update PRs are exempt from this cap by Dependabot's own
     # design and are not throttled by it.
     open-pull-requests-limit: 5
+    ignore:
+      # Microsoft.Extensions.ApiDescription.Server is coupled to Swashbuckle.AspNetCore through
+      # the Microsoft.OpenApi version its build-time tool loads, and Dependabot cannot see that
+      # relationship — it bumped this package alone, CI stayed green because no job builds
+      # samples/, and `dotnet build InTest.sln` then failed locally on samples/Orders.Api. The
+      # measurement is recorded in Directory.Packages.props beside the pin.
+      #
+      # Scoped to 10.0.12 and above rather than the whole package: a patch below that line is
+      # still wanted, and a blanket ignore would also silence a security advisory, which is the
+      # one thing this file must never do. Remove this entry when Swashbuckle ships a stable
+      # release bringing Microsoft.OpenApi 2.12 or later.
+      - dependency-name: "Microsoft.Extensions.ApiDescription.Server"
+        versions: [">=10.0.12"]
     # "chore:" already appears in this repo's history for dependency-adjacent maintenance
     # (`5fccdb4 chore: ownership transfer cleanup ... package metadata`,
     # `546904b chore: solution skeleton with pinned dependencies`) — reusing it here follows the

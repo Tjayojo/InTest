@@ -207,6 +207,69 @@ jobs:
   # automated test in this repo's suites runs the generator against any of them --
   # InTest.Golden.Tests uses Specs/orders.json, Specs/hostile-text.json and inline string specs,
   # and touches samples/ nowhere. CliExitCodeTests.CheckFlagIsWiredThroughToGenerate already
+  # -------------------------------------------------------------------------------------------
+  # Compile the sample APIs. Nothing else in this workflow does.
+  #
+  # Added after a dependency bump reached main with every check green and then failed a local
+  # `dotnet build InTest.sln`: Dependabot raised Microsoft.Extensions.ApiDescription.Server to
+  # 10.0.12, whose build-time document generator requires Microsoft.OpenApi 2.12.0, while
+  # Swashbuckle.AspNetCore 10.2.3 resolves 2.7.5 into samples/Orders.Api. Every job above targets
+  # a specific tests/*.csproj or src/InTest.Cli, and `dogfood` reads the *committed*
+  # samples/**/*.json rather than building the APIs that produce them — so all four samples
+  # could stop compiling without a single check going red.
+  #
+  # Deliberately its own job rather than a solution build folded into `fast`: that job's own
+  # comment records skipping Golden.Tests and the samples as what keeps it fast, and that reasoning
+  # is still right. This runs in parallel instead of slowing the job that gates every PR.
+  #
+  # These are fixtures, not products, but they are the fixtures the committed OpenAPI documents are
+  # generated *from* — if they cannot build, the corpus every other job reads can no longer be
+  # regenerated, and it rots silently.
+  samples:
+    name: Build the sample APIs (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Identical pins and identical reasoning to the `fast` job above -- see those comments for
+      # how each SHA was resolved.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # [shallow-clone-is-a-defect]: MinVer needs full history, and
+          # Directory.Build.props' InTestEnsureNotShallowClone target fails the build loudly
+          # without it. See the `fast` job's copy of this comment for the full reasoning.
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      # Named individually rather than `dotnet build InTest.sln`, so a failure names the sample
+      # that broke instead of one line buried in a whole-solution log. Identity.Server is included:
+      # it has no OpenAPI document, so `dogfood` skips it, which makes this the only place it is
+      # compiled at all.
+      - name: Build samples/Catalog.Api
+        run: dotnet build samples/Catalog.Api/Catalog.Api.csproj
+
+      - name: Build samples/Orders.Api
+        run: dotnet build samples/Orders.Api/Orders.Api.csproj
+
+      - name: Build samples/Inventory.Api
+        run: dotnet build samples/Inventory.Api/Inventory.Api.csproj
+
+      - name: Build samples/Identity.Server
+        run: dotnet build samples/Identity.Server/Identity.Server.csproj
+
   # exercises init -> generate -> --check -> mutate -> --check through the real CLI, but on a
   # trivial inline spec -- what this job adds is coverage of the documents, not the flow. Rev 1 of
   # the plan justified this job differently ("catches a template change that leaves the committed
