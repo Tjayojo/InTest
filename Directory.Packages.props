@@ -30,7 +30,17 @@
        nothing here is in the dependency closure of InTest.Cli or InTest.Runtime. -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.12" />
+    <!-- Held at 10.0.11 deliberately: it is coupled to Swashbuckle.AspNetCore, and Dependabot
+         cannot see the coupling. The build-time document generator loads the sample API's own
+         assemblies to introspect it, so the Microsoft.OpenApi version its tool demands must match
+         the one Swashbuckle drags in transitively. Measured: 10.0.11's tool bundles and requires
+         Microsoft.OpenApi 2.7.5, exactly what Swashbuckle.AspNetCore 10.2.3 resolves; 10.0.12's
+         requires 2.12.0, and building samples/Orders.Api against it fails with "Could not load
+         file or assembly 'Microsoft.OpenApi, Version=2.12.0.0'". Raise this only together with a
+         Swashbuckle release bringing Microsoft.OpenApi 2.12 or later — 10.2.3 was still the
+         latest stable when this was pinned. The matching `ignore` in .github/dependabot.yml stops
+         the bot re-proposing it weekly, and the `samples` CI job is what would now catch it. -->
+    <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.11" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageVersion Include="NSwag.AspNetCore" Version="14.7.1" />
     <PackageVersion Include="NSwag.MSBuild" Version="14.7.1" />
