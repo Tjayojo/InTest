@@ -77,9 +77,9 @@ parameters live in `fixtures/`, which only `fixtures repair` writes to.
 Worth knowing before you start, because it surprises people.
 
 `intest fixtures repair` creates a fixture for every operation that needs a request body or a
-required path/query parameter. Where your spec provides an `example` or a `default`, that value
-is real. Where it does not, InTest emits an obvious `TODO:` placeholder — **and the test fails
-until a human replaces it.**
+path/query parameter. Request-body values come from your spec's `example` or `default` where it
+has them. Where it does not — and for every path parameter, whether the spec has one or not —
+InTest emits an obvious `TODO:` placeholder, **and the test fails until a human replaces it.**
 
 That is deliberate. The alternative is filling in plausible-looking junk (`"string"`, `0`),
 which a permissive endpoint accepts, so the suite passes while asserting nothing. A red test
@@ -88,16 +88,26 @@ gets fixed; a green test that proves nothing never does.
 In practice that means, on an API with lots of POSTs and few spec examples, your first run after
 `fixtures repair` is mostly red and there is real work to do.
 
-What still lands green on day one, with no hand-editing: every GET and DELETE contract test,
-every declared-error test (404s), and every no-token 401 test needs no request body, and any
-parameter the spec already gives an `example` or `default` for arrives filled. `fixtures repair`
-still creates a fixture **file** for every operation that has a parameter at all, whether or not
-that file ends up needing an edit.
+What still lands green on day one, with no hand-editing: every declared-error test (404s) and
+every auth test (401/403). Those use deliberately unmatchable values — a GUID that resolves to
+nothing, a token without the scope — so there is nothing for a human to supply.
+
+**A path parameter always arrives as a `TODO:` sentinel, even when the spec gives it an
+`example`.** So does a required query parameter. Only an *optional* query parameter is filled from
+`example` or `default`. That is deliberate rather than a gap: a spec's example `id` names a
+resource that almost certainly does not exist in your deployment, so filling it would produce a 404
+for the wrong reason — or, worse, a passing test against the wrong record. `fixtures repair`
+still creates a fixture **file** for every operation that needs one, whether or not that file ends
+up needing an edit.
 
 ## Learn more
 
 - **[Full walkthrough](docs/getting-started.md)** — from an existing API to a suite running as a
   post-deployment gate, including CI wiring and the things that bite.
+- **[Sizing an adoption](skills/intest-adoption-sizing/)** — an agent skill, and a standalone
+  script, that reads a spec and reports what adopting it will cost: tests generated, fixtures
+  needing hand-written values, whether auth tests will appear at all, and what will block
+  generation. Needs nothing installed.
 - **[Worked examples](examples/)** — the generated output of two sample APIs, Catalog and Orders,
   each committed under all three frameworks. Every one references its adapter package from
   nuget.org rather than this repository's source, and CI builds and `--check`s all six on every
