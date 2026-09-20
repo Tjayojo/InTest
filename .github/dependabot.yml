@@ -108,6 +108,22 @@ updates:
         patterns:
           - "MSTest.*"
 
+      # xunit.v3, xunit.v3.extensibility.core and xunit.v3.assert ship from one upstream release
+      # and move together, for the same reason the MSTest group above exists. Confirmed the way
+      # that group's own comment demands rather than assumed: all three .nuspec files in the local
+      # NuGet cache list <repository url="https://github.com/xunit/xunit">, and all three published
+      # 4.0.1 on the same release.
+      #
+      # Added after they drifted. Dependabot proposed xunit.v3 4.0.1 alone (#34) and the two
+      # satellites stayed at 4.0.0 — probably throttled by open-pull-requests-limit, which was
+      # sitting at exactly 5 that week. Nothing broke, because the adapter's pins are floors and
+      # NuGet resolved the graph to 4.0.1 anyway, but Directory.Packages.props then claimed a
+      # version that was not what restored — the kind of quiet disagreement between the recorded
+      # pin and reality this repository treats as a defect in its own right.
+      xunit:
+        patterns:
+          - "xunit.v3*"
+
       # Microsoft.OpenApi and Microsoft.OpenApi.YamlReader ship from the same upstream repository
       # and move together — confirmed, not assumed, by pulling both packages' .nuspec metadata
       # from the local NuGet cache: both list <repository url="https://github.com/Microsoft/
