@@ -531,8 +531,8 @@ public static class InitCommand
         var packageReferencesBlock = framework switch
         {
             "xunit" => $"""
-                   <PackageReference Include="xunit.v3" Version="4.0.0" />
-                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                   <PackageReference Include="xunit.v3" Version="4.0.1" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
                    <!-- The xUnit adapter depends on the neutral InTest.Runtime package (an ordinary
                         NuGet package dependency, at the adapter's own version) and brings it in
@@ -544,7 +544,7 @@ public static class InitCommand
             "nunit" => $"""
                    <PackageReference Include="NUnit" Version="4.6.1" />
                    <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
-                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
                    <!-- The NUnit adapter depends on the neutral InTest.Runtime package (an ordinary
                         NuGet package dependency, at the adapter's own version) and brings it in
@@ -556,10 +556,10 @@ public static class InitCommand
                    <PackageReference Include="InTest.Runtime.NUnit" Version="{CliVersion.Current}" />
               """,
             "mstest" => $"""
-                   <PackageReference Include="MSTest.TestFramework" Version="4.3.3" />
-                   <PackageReference Include="MSTest.TestAdapter" Version="4.3.3" />
-                   <PackageReference Include="MSTest.Analyzers" Version="4.3.3" />
-                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+                   <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
+                   <PackageReference Include="MSTest.TestAdapter" Version="4.4.1" />
+                   <PackageReference Include="MSTest.Analyzers" Version="4.4.1" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
                    <!-- The MSTest adapter depends on the neutral InTest.Runtime package (an ordinary
                         NuGet package dependency, at the adapter's own version) and brings it in
