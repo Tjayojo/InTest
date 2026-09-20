@@ -5,15 +5,15 @@
     <PackageVersion Include="Microsoft.OpenApi.YamlReader" Version="3.10.2" />
     <PackageVersion Include="NJsonSchema" Version="11.6.1" />
     <PackageVersion Include="Scriban" Version="7.4.0" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.11" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
-    <PackageVersion Include="MSTest.TestFramework" Version="4.3.3" />
-    <PackageVersion Include="MSTest.TestAdapter" Version="4.3.3" />
-    <PackageVersion Include="MSTest.Analyzers" Version="4.3.3" />
-    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="MSTest.TestFramework" Version="4.4.1" />
+    <PackageVersion Include="MSTest.TestAdapter" Version="4.4.1" />
+    <PackageVersion Include="MSTest.Analyzers" Version="4.4.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
     <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.0" />
     <PackageVersion Include="xunit.v3.assert" Version="4.0.0" />
     <!-- NUnit and NUnit3TestAdapter version independently: framework on 4.x, adapter on 6.x,
@@ -22,7 +22,7 @@
          each other. -->
     <PackageVersion Include="NUnit" Version="4.6.1" />
     <PackageVersion Include="NUnit3TestAdapter" Version="6.3.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
   </ItemGroup>
 
@@ -49,6 +49,6 @@
     <!-- Duende requires a paid licence for PRODUCTION use only; development, testing and
          personal projects are free. This is a test fixture and is never in the closure of
          a shipped InTest package. See samples/README.md. -->
-    <PackageVersion Include="Duende.IdentityServer" Version="8.0.7" />
+    <PackageVersion Include="Duende.IdentityServer" Version="8.0.8" />
   </ItemGroup>
 </Project>
