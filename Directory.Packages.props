@@ -14,7 +14,7 @@
     <PackageVersion Include="MSTest.TestAdapter" Version="4.4.1" />
     <PackageVersion Include="MSTest.Analyzers" Version="4.4.1" />
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
-    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.0" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.1" />
     <PackageVersion Include="xunit.v3.assert" Version="4.0.0" />
     <!-- NUnit and NUnit3TestAdapter version independently: framework on 4.x, adapter on 6.x,
          unlike the MSTest trio, which moves in lockstep. See [one-package] in the NUnit framework
