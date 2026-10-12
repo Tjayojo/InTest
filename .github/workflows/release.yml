@@ -218,7 +218,7 @@ jobs:
         # is handing artifacts to a push, and `dotnet nuget push` picks up a sibling .snupkg
         # automatically when both files sit in the same directory -- so both need to survive the
         # upload/download round trip intact, in one directory, together.
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: intest-release-packages
           path: |
