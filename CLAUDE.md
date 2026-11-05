@@ -79,9 +79,9 @@ INTEST_UPDATE_GOLDEN=1 dotnet test tests/InTest.Golden.Tests --filter "FullyQual
 `InTest.Golden.Tests` shells out to `dotnet build` and `dotnet test` on scaffolded temp projects
 and runs generated suites against an in-process HTTP stub. It is slow and it is the only suite
 that proves generated code both compiles *and* runs — do not skip it when changing the template,
-the renderer, or the scaffold. **Measured locally, 2026-08-31: ~7m37s
-warm at 71 cases — but it ran past 10m on the first run after the NUnit packages appeared, and both
-numbers are real.** The gap is the whole reason
+the renderer, or the scaffold. **Measured locally, 2026-11-05: ~6m1s and ~7m54s warm at 72 cases —
+two runs, same commit, same machine, nothing else running — and it ran past 10m on the first run
+after the NUnit packages appeared. All three numbers are real.** The spread is the whole reason
 this figure needs a qualifier rather than a value: the temp projects these tests scaffold each run a
 real `dotnet build`, so a cold NuGet cache and cold obj/bin pay full restore-and-compile cost on
 every one of them, while a warm repeat reuses all of it. Quote which one you measured, or the next
@@ -91,9 +91,12 @@ case shells out to a real `dotnet build` (some also `dotnet test`) on a freshly 
 project, so the suite's wall-clock time grows roughly linearly with the number of generated-code
 shapes under test — it has no fixed ceiling the way an in-process suite would. It has grown before:
 this doc quoted ~90–107s at one point, then ~3m9s–3m17s after that was corrected, then ~3m49s–3m50s, and now
-~4m13s after the xUnit framework pack, and now **~7m37s** after the NUnit pack added
+~4m13s after the xUnit framework pack, then ~7m37s after the NUnit pack added
 eight more cases (six shell-out cases plus a third golden expectation file per spec), each step
-tracking real cases added. Expect the
+tracking real cases added. The latest figures, **~6m1s and ~7m54s at 72 cases**, are the first to
+straddle the previous one rather than exceed it — and they are two runs of the same commit, so the
+~30% spread between them is noise, not growth. Do not read a single measurement as a trend; the
+case count is the only part of this that moves monotonically. Expect the
 next reader's own measurement to be higher still if more shapes have been added since — treat
 whatever figure is quoted here as a floor to size a timeout against, not a number to assert against.
 A tool's default command timeout (commonly ~2 minutes) cuts this off mid-flight, which reads as a
@@ -128,7 +131,10 @@ pwsh scripts/local-e2e-test.ps1
 ```
 
 CI (`.github/workflows/build-and-test.yml`, push to `main` and every pull request, matrixed
-`ubuntu-latest`/`windows-latest`) runs the commands above split across four jobs: `fast`
+`ubuntu-latest`/`windows-latest`) runs the commands above split across parallel jobs — `fast`,
+`golden`, `samples`, `dogfood` and `examples`, deliberately counted nowhere, the same lesson the
+workflow's own permissions comment records after saying "Neither job" at two and still saying it at
+four: `fast`
 (Architecture + Cli + Runtime; a prior measurement recorded ~33.5–35.5s cold-cache, but CI itself
 has since measured **~1m26s–1m46s** — trust the CI figure over the cold-cache one, since it is what
 actually gates a PR), `golden` (Golden alone, kept in its own parallel job so it cannot delay
@@ -151,8 +157,11 @@ locally with `pwsh scripts/ci/dogfood.ps1 -RepoRoot . -ScaffoldRoot <dir-outside
 -CliDll <path-to-built-InTest.Cli.dll>`; reproduce `examples` locally with
 `pwsh scripts/ci/examples.ps1 -RepoRoot .`. `scripts/ci/assert-trx-results.ps1` then checks each
 `.trx` actually reports executed tests for the right assembly, so a suite silently matching
-nothing cannot read as green. Every third-party action the workflow uses is pinned by commit
-SHA — see CONTRIBUTING.md's dependency policy.
+nothing cannot read as green — every suite, `InTest.Runtime.XUnit.Tests` included: it produces no
+`.trx` through `dotnet test`, so the workflow passes xunit.v3's own `-result-trx` instead, which
+that script reads unchanged. It used to be the one suite exempt, and the exemption mattered: the
+runner exits 0 printing "Total: 0" when it discovers nothing. Every third-party action the workflow
+uses is pinned by commit SHA — see CONTRIBUTING.md's dependency policy.
 
 ## Build configuration
 

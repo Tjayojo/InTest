@@ -47,6 +47,50 @@ public class SchemaBundleBuilderTests
         (await BuildAsync()).ShouldNotContain("#/components/schemas/");
     }
 
+    /// <summary>
+    /// <c>enum</c> and <c>pattern</c> are enforced at runtime, so rewriting a component path that
+    /// appears as schema <em>data</em> rather than as a <c>$ref</c> makes a contract test give the
+    /// wrong verdict: a response carrying the real literal is rejected, one carrying the rewritten
+    /// text is accepted. The whole-string <c>.Replace</c> this builder used to end with did
+    /// exactly that — measured, including on <c>description</c>.
+    /// </summary>
+    [TestMethod]
+    public async Task DoesNotRewriteAComponentPathThatIsSchemaContentRatherThanAReference()
+    {
+        const string spec = """
+                            {
+                              "openapi": "3.0.3",
+                              "info": { "title": "Orders", "version": "1.0" },
+                              "paths": {
+                                "/orders": { "get": { "operationId": "listOrders", "responses": { "200": { "description": "ok",
+                                  "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } } } } }
+                              },
+                              "components": { "schemas": {
+                                "Order": { "type": "object", "description": "See #/components/schemas/Legacy.", "properties": {
+                                  "kind": { "type": "string", "enum": ["#/components/schemas/Literal", "ok"] },
+                                  "pointer": { "type": "string", "pattern": "^#/components/schemas/.+$" },
+                                  "legacy": { "$ref": "#/components/schemas/Legacy" } } },
+                                "Legacy": { "type": "object" } } }
+                            }
+                            """;
+
+        var loaded = await SpecLoader.LoadFromTextAsync(spec);
+        var bundle = SchemaBundleBuilder.Build(loaded.Document, TestPlanBuilder.Build(loaded.Document));
+
+        using var doc = JsonDocument.Parse(bundle);
+        var order = doc.RootElement.GetProperty("definitions").GetProperty("Order");
+
+        order.GetProperty("properties").GetProperty("kind").GetProperty("enum")[0].GetString()
+            .ShouldBe("#/components/schemas/Literal");
+        order.GetProperty("properties").GetProperty("pointer").GetProperty("pattern").GetString()
+            .ShouldBe("^#/components/schemas/.+$");
+        order.GetProperty("description").GetString()
+            .ShouldBe("See #/components/schemas/Legacy.");
+
+        order.GetProperty("properties").GetProperty("legacy").GetProperty("$ref").GetString()
+            .ShouldBe("#/definitions/Legacy", "a real $ref must still be rewritten");
+    }
+
     [TestMethod]
     public async Task GivesInlineResponseSchemasASynthesizedKey()
     {

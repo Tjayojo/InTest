@@ -121,11 +121,7 @@ public static class FixturesRepairCommand
                     if (drift.MissingProperties.Count > 0)
                     {
                         var body = existing.Body as JsonObject ?? new JsonObject();
-                        var composedBody = (JsonObject)composed.Body!;
-                        foreach (var name in drift.MissingProperties)
-                        {
-                            body[name] = composedBody[name]?.DeepClone();
-                        }
+                        AddMissingProperties(body, (JsonObject)composed.Body!);
                         existing.Body = body;
                         changed = true;
                     }
@@ -181,6 +177,33 @@ public static class FixturesRepairCommand
         {
             await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
+        }
+    }
+
+    /// <summary>
+    /// Adds every property <paramref name="composed"/> has and <paramref name="existing"/> lacks,
+    /// at any depth, leaving every value a human already wrote untouched (§10).
+    /// <para>
+    /// Recursive rather than keyed off <c>FixtureDrift.MissingProperties</c>' dotted paths: a
+    /// property name may itself contain a dot, so re-walking the two objects is what keeps "which
+    /// property" unambiguous. Both sides descend only into objects, so this covers exactly what
+    /// <c>FixtureDrift</c> reports.
+    /// </para>
+    /// </summary>
+    private static void AddMissingProperties(JsonObject existing, JsonObject composed)
+    {
+        foreach (var (name, composedChild) in composed)
+        {
+            if (!existing.TryGetPropertyValue(name, out var existingChild))
+            {
+                existing[name] = composedChild?.DeepClone();
+                continue;
+            }
+
+            if (existingChild is JsonObject existingObject && composedChild is JsonObject composedObject)
+            {
+                AddMissingProperties(existingObject, composedObject);
+            }
         }
     }
 }

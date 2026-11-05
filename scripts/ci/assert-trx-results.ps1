@@ -18,8 +18,10 @@
     and the test project) for no safety this weaker check does not already provide. See the plan's
     Task 2 Step 3 note for the full argument.
 
-    Each caller (the "fast" job and the "golden" job in .github/workflows/build-and-test.yml) sets
-    `--logger "trx;LogFileName=<AssemblyName>.trx"` explicitly per project, so this script does not
+    Each caller (the "fast" job and the "golden" job in .github/workflows/build-and-test.yml) names
+    the result file explicitly per project — `--logger "trx;LogFileName=<AssemblyName>.trx"` under
+    `dotnet test`, or `-result-trx <path>` for InTest.Runtime.XUnit.Tests, which runs as a bare
+    executable and so has no `dotnet test` logger to configure — so this script does not
     need to guess a generated filename (dotnet test's default naming is timestamp-based and
     disambiguates collisions with a bracketed suffix — confirmed by direct experiment, not by
     reading the docs, while designing this check: `dotnet test InTest.sln --logger trx` on this

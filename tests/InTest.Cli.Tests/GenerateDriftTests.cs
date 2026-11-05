@@ -77,4 +77,23 @@ public class GenerateDriftTests
 
         (await GenerateCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
     }
+
+    /// <summary>
+    /// A hand-edited fixture is an adopter's own file, so it gets the curated message
+    /// <c>fixtures repair</c> already prints — not <c>Program</c>'s "unexpected failure" prefix,
+    /// which blames the tool. Measured escaping before the catch existed; asserted here on the
+    /// exception not escaping <c>RunAsync</c> at all, since the prefix itself lives in
+    /// <c>Program</c> and <c>CliExitCodeTests</c> owns that boundary from outside the process.
+    /// </summary>
+    [TestMethod]
+    public async Task RefusesAMalformedFixtureRatherThanLettingItEscapeAsACrash()
+    {
+        (await FixturesRepairCommand.RunAsync(_root, CancellationToken.None)).ShouldBe(0);
+        await File.WriteAllTextAsync(
+            Path.Combine(_root, "fixtures", "createProduct.json"), """{ "$meta": { oops """);
+
+        var exitCode = await GenerateCommand.RunAsync(_root, CancellationToken.None, new StringWriter());
+
+        exitCode.ShouldBe(2);
+    }
 }

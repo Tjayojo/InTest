@@ -319,6 +319,16 @@ public static class GenerateCommand
             await Console.Error.WriteLineAsync(ex.Message);
             return ExitCode.ToolError;
         }
+        // DetectFixtureDrift parses every committed fixture, so a hand-edited one reaches here.
+        // Without this clause it escaped to Program's crash floor as "intest: unexpected failure:
+        // FixtureFormatException", blaming the tool for the adopter's own file — measured, against
+        // the message `fixtures repair` already prints bare for the same fixture. Program's own
+        // comment already claims this type is caught per-command; this is the half that was missing.
+        catch (FixtureFormatException ex)
+        {
+            await Console.Error.WriteLineAsync(ex.Message);
+            return ExitCode.ToolError;
+        }
     }
 
     /// <summary>

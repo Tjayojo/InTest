@@ -46,6 +46,66 @@ public class ReadinessTests
         ex.Message.ShouldContain("503");
     }
 
+    /// <summary>
+    /// Never answers, so the probe is cancelled by <see cref="HttpClient.Timeout"/> and raises
+    /// <see cref="TaskCanceledException"/> rather than <see cref="HttpRequestException"/> — the
+    /// half-open-connection shape.
+    /// </summary>
+    private sealed class StallingHandler : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            Calls++;
+            await Task.Delay(TimeSpan.FromMinutes(5), ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    /// <summary>
+    /// In production <see cref="HttpClient"/>'s 100s default fires inside
+    /// <see cref="ReadinessOptions.TimeoutSeconds"/>' 120s window, so a stalled server used to
+    /// escape as a raw <see cref="TaskCanceledException"/> naming neither the probe path nor the
+    /// service. <see cref="StallingHandler.Calls"/> is asserted because the right exception type
+    /// alone would also pass if the clause gave up after one attempt.
+    /// </summary>
+    [TestMethod]
+    public async Task KeepsPollingAndReportsAReadinessTimeoutWhenEveryProbeStalls()
+    {
+        var handler = new StallingHandler();
+        using var client = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://h/api/"),
+            Timeout = TimeSpan.FromMilliseconds(200),
+        };
+        using var cts = TestSupport.TimeoutToken();
+
+        var ex = await Should.ThrowAsync<ReadinessTimeoutException>(
+            () => Readiness.WaitAsync(client, TestSupport.Options(consecutiveSuccesses: 2), cts.Token));
+
+        ex.Message.ShouldContain("did not become ready");
+        ex.Message.ShouldContain(nameof(TaskCanceledException),
+            customMessage: "the last outcome must name what actually happened to the probe");
+        handler.Calls.ShouldBeGreaterThan(1,
+            "a stalled probe is one failed attempt, not a reason to abandon the wait");
+    }
+
+    /// <summary>
+    /// The other side of that clause's filter. Without it, a Ctrl+C is absorbed as a probe failure
+    /// and reported as a readiness timeout — blaming a service for a keystroke.
+    /// </summary>
+    [TestMethod]
+    public async Task ACancelledTokenPropagatesRatherThanBeingTreatedAsAFailedProbe()
+    {
+        var handler = new StallingHandler();
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://h/api/") };
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => Readiness.WaitAsync(client, TestSupport.Options(consecutiveSuccesses: 2), cts.Token));
+    }
+
     [TestMethod]
     public async Task DisabledReadinessIssuesNoRequests()
     {

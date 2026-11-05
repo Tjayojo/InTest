@@ -820,6 +820,36 @@ public class UpgradeCommandTests
                        "produce silence, not a guess");
     }
 
+    /// <summary>
+    /// `init --framework` writes the xUnit and NUnit adapter ids, so a pattern naming MSTest alone
+    /// left those projects told nothing at all about a stale pin — measured against the same drift
+    /// MSTest reported. Driven through <c>DetectRuntimeReferenceMismatch</c> directly rather than a
+    /// full scaffold-and-upgrade per framework: the detector reads one <c>.csproj</c> and nothing
+    /// else, so a scaffold would add three `generate` runs and prove nothing more.
+    /// </summary>
+    [TestMethod]
+    [DataRow("InTest.Runtime.MSTest", DisplayName = "mstest")]
+    [DataRow("InTest.Runtime.xUnit", DisplayName = "xunit")]
+    [DataRow("InTest.Runtime.NUnit", DisplayName = "nunit")]
+    public async Task ReportsAStaleAdapterPinForEveryFrameworksAdapterNotOnlyMSTests(string adapterPackageId)
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "Orders.ApiTests.csproj"),
+        $"""
+         <Project Sdk="Microsoft.NET.Sdk">
+           <ItemGroup>
+             <PackageReference Include="{adapterPackageId}" Version="0.0.1-ancient" />
+           </ItemGroup>
+         </Project>
+         """);
+
+        var note = UpgradeCommand.DetectRuntimeReferenceMismatch(_root, CliVersion.Current);
+
+        note.ShouldNotBeNull();
+        note.ShouldContain(adapterPackageId, Case.Sensitive,
+        customMessage: "the note must name the reference the project actually has");
+        note.ShouldContain($"Version=\"0.0.1-ancient\" to Version=\"{CliVersion.Current}\"", Case.Sensitive);
+    }
+
     // ---- [runtime-adapter-split]: migrate the bare InTest.Runtime id, only when the adapter is
     // absent -------------------------------------------------------------------------------------
 

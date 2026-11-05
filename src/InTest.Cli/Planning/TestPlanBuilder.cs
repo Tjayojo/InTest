@@ -76,6 +76,24 @@ public static class TestPlanBuilder
                 // place it runs, not six.
                 var effectiveParameters = EffectiveParameters.Resolve(pathItem, operation);
 
+                // OpenAPI requires (name, in) to be unique per operation, and Microsoft.OpenApi
+                // reports no diagnostic when it is not — so an invalid document reaches here.
+                // Skipped rather than resolved first-wins: the duplicates can declare different
+                // schemas (measured: one `string`, one `integer` on the same `id`), and picking
+                // either means guessing which unmatchable value a declared-error case should send,
+                // which is the 404-vs-400 hazard TryPlanDeclaredNotFound's own branches exist to
+                // refuse. Before this, ResolvePathParameterKinds' ToDictionary threw straight
+                // through to Program's crash floor as "ArgumentException: An item with the same key
+                // has already been added. Key: id".
+                if (DuplicateParameter(effectiveParameters) is { } duplicate)
+                {
+                    skipped.Add(new SkippedOperation(key.Value,
+                    // Lowercased: the adopter wrote `in: path`, not the enum member's name.
+                    $"declares the parameter '{duplicate.Name}' more than once in '{duplicate.In}'".ToLowerInvariant() +
+                    "; OpenAPI requires each parameter to be unique by name and location"));
+                    continue;
+                }
+
                 // Delegated to the composer rather than reproduced here: it alone knows which
                 // parameters it actually emits a value for (an optional query parameter with an
                 // example or default still produces one), so it is the only place that can answer
@@ -809,6 +827,27 @@ public static class TestPlanBuilder
             .Where(p => p.In == ParameterLocation.Path)
             .Select(p => p.Name!)
             .ToList();
+
+    /// <summary>
+    /// The first (name, in) pair <paramref name="parameters"/> declares twice, or null. Ordinal on
+    /// the name, matching every other name comparison here; the location is part of the key
+    /// because <c>{id}</c> in the path and <c>id</c> in the query are two legitimate parameters,
+    /// which is the same rule <see cref="EffectiveParameters"/> merges by.
+    /// </summary>
+    private static (string? Name, ParameterLocation? In)? DuplicateParameter(
+        IReadOnlyList<IOpenApiParameter> parameters)
+    {
+        var seen = new HashSet<(string?, ParameterLocation?)>();
+        foreach (var parameter in parameters)
+        {
+            if (!seen.Add((parameter.Name, parameter.In)))
+            {
+                return (parameter.Name, parameter.In);
+            }
+        }
+
+        return null;
+    }
 
     private static IReadOnlyList<string> PathParameters(string path)
     {

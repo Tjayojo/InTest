@@ -45,9 +45,10 @@ public static class SchemaBundleBuilder
         // writes ends the same way — a single trailing CRLF — rather than leaving
         // spec-schemas.json as the one file in Generated/ without one. Pinned by
         // SchemaBundleBuilderTests.EndsWithASingleTrailingCarriageReturnLineFeed.
-        return bundle.ToJsonString(CommittedJsonOptions.Value)
-                     .Replace(ComponentPrefix, DefinitionPrefix, StringComparison.Ordinal)
-                     + "\r\n";
+        //
+        // No text replace here: Serialize rewrites component references per node instead — see
+        // RewriteComponentReferences for why.
+        return bundle.ToJsonString(CommittedJsonOptions.Value) + "\r\n";
     }
 
     private static IEnumerable<(string Key, IOpenApiSchema Schema)> InlineResponseSchemas(OpenApiDocument document, TestPlan plan)
@@ -95,7 +96,50 @@ public static class SchemaBundleBuilder
     {
         using var writer = new StringWriter();
         schema.SerializeAsV31(new OpenApiJsonWriter(writer));
-        return JsonNode.Parse(writer.ToString())
+        var node = JsonNode.Parse(writer.ToString())
                ?? throw new InvalidOperationException("Schema serialized to null JSON.");
+
+        RewriteComponentReferences(node);
+        return node;
+    }
+
+    /// <summary>
+    /// Points component references at <c>#/definitions/</c>, where this bundle stores schemas.
+    /// <para>
+    /// Walks the node tree rather than text-replacing the serialized bundle, which is what
+    /// <see cref="Build"/> used to do: a text replace cannot tell a reference from a schema's own
+    /// string content. Measured — an <c>enum</c> value and a <c>pattern</c> carrying the component
+    /// path as data were rewritten too, and both are enforced at runtime, so a conforming response
+    /// was rejected and a non-conforming one accepted.
+    /// </para>
+    /// </summary>
+    private static void RewriteComponentReferences(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                // Snapshotted: the assignment below invalidates a live enumerator over obj.
+                foreach (var (name, child) in obj.ToList())
+                {
+                    if (name == "$ref" &&
+                        child is JsonValue value &&
+                        value.TryGetValue<string>(out var reference) &&
+                        reference.StartsWith(ComponentPrefix, StringComparison.Ordinal))
+                    {
+                        obj[name] = DefinitionPrefix + reference[ComponentPrefix.Length..];
+                        continue;
+                    }
+
+                    RewriteComponentReferences(child);
+                }
+                break;
+
+            case JsonArray array:
+                foreach (var element in array)
+                {
+                    RewriteComponentReferences(element);
+                }
+                break;
+        }
     }
 }
