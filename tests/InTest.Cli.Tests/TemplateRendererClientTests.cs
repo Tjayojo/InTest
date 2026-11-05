@@ -140,8 +140,94 @@ public class TemplateRendererClientTests
             PathParameterKinds: [kind],
             ClientCallExpression: "Api.Orders[{id}].GetAsync")]);
 
-    private static string Render(TestClassPlan plan, string? clientTypeName = ClientTypeName)
-        => new TemplateRenderer("mstest").RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase", clientTypeName);
+    private static string Render(TestClassPlan plan, string? clientTypeName = ClientTypeName, string framework = "mstest")
+        => new TemplateRenderer(framework).RenderClass(plan, "Orders.ApiTests", "Orders.ApiTests.OrdersTestBase", clientTypeName);
+
+    /// <summary>
+    /// An NSwag-convention expression, taken from <see cref="ClientCallPlanner.BuildNSwagConvention"/>
+    /// itself rather than written out here. That matters: the planner and the renderer are the two
+    /// hops that disagreed about the cancellation token, so a hardcoded expression would test the
+    /// renderer's substitution while leaving the planner free to bake an accessor again — verified
+    /// by reintroducing the original defect, which a hardcoded version did not catch.
+    /// </summary>
+    private static TestClassPlan PlanWithNSwagClientCall() =>
+        PlanWithClientCall(clientCallExpression:
+        ClientCallPlanner.BuildNSwagConvention("/orders/{id}", "getOrderById", ["id"]));
+
+    /// <summary>
+    /// The accessor differs per framework and only this renderer knows which one applies. An NSwag
+    /// expression closes its own argument list, so the self-closing test splices it verbatim —
+    /// which is how the planner's old hardcoded <c>TestContext.CancellationToken</c> reached an
+    /// xUnit and an NUnit file unchanged (CS0120 in both), alongside the correct accessor on the
+    /// assertion line of the same file.
+    /// </summary>
+    [TestMethod]
+    [DataRow("mstest", "TestContext.CancellationToken", DisplayName = "mstest")]
+    [DataRow("xunit", "TestContext.Current.CancellationToken", DisplayName = "xunit")]
+    [DataRow("nunit", "TestContext.CurrentContext.CancellationToken", DisplayName = "nunit")]
+    public void ResolvesTheNSwagConventionsCancellationTokenPlaceholderToTheSelectedFrameworksAccessor(
+        string framework, string expectedAccessor)
+    {
+        var rendered = Render(PlanWithNSwagClientCall(), framework: framework);
+
+        rendered.ShouldContain(
+        $"GetOrderByIdAsync(FixtureParameter(\"getOrderById\", \"id\"), cancellationToken: {expectedAccessor});");
+        rendered.ShouldNotContain(ClientCallPlanner.CancellationTokenPlaceholder, Case.Sensitive);
+    }
+
+    /// <summary>
+    /// The general form of the defect the test above pins one instance of: a framework-specific
+    /// value produced at a site that never consulted the framework. Rendering all three and
+    /// asserting the output carries its own accessor and neither of the others catches any such
+    /// site, including ones that do not exist yet — which is the guarantee an enum was expected to
+    /// give and cannot, since a switch expression over one still needs a default arm under this
+    /// repo's <c>TreatWarningsAsErrors</c> (CS8524, measured).
+    /// <para>
+    /// The plan deliberately carries both a client-routed case (whose accessor is spliced into the
+    /// call) and a raw-HTTP case (whose accessor the template spells itself), so one pass covers
+    /// both routes.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    [DataRow("mstest", "TestContext.CancellationToken", DisplayName = "mstest")]
+    [DataRow("xunit", "TestContext.Current.CancellationToken", DisplayName = "xunit")]
+    [DataRow("nunit", "TestContext.CurrentContext.CancellationToken", DisplayName = "nunit")]
+    public void NoFrameworksRenderedOutputCarriesAnotherFrameworksCancellationTokenAccessor(
+        string framework, string ownAccessor)
+    {
+        string[] allAccessors =
+        [
+            "TestContext.CancellationToken",
+            "TestContext.Current.CancellationToken",
+            "TestContext.CurrentContext.CancellationToken",
+        ];
+
+        var rendered = Render(PlanWithNSwagClientCall(), framework: framework) +
+                       Render(PlanWithClientCallNoPathParameter(), framework: framework);
+
+        // Comment lines are excluded, and have to be: all three templates carry the same prose
+        // block naming MSTest's accessor ("ShouldMatchCapturedStatusAsync both call
+        // TestContext.CancellationToken"), so an unfiltered scan reports every xUnit and NUnit
+        // render as carrying MSTest's. What this test is about is emitted *code*.
+        var code = string.Join('\n', rendered
+            .Split('\n')
+            .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+        // The framework's own accessor is replaced first because the three overlap as substrings:
+        // "TestContext.CancellationToken" is not contained in the other two, but leaving xUnit's
+        // and NUnit's in place would make the loop below compare them against themselves.
+        var foreignOnly = code.Replace(ownAccessor, "<own>", StringComparison.Ordinal);
+
+        code.ShouldContain(ownAccessor, Case.Sensitive,
+        customMessage: "the scan is vacuous unless the framework's own accessor is actually emitted");
+
+        foreach (var foreign in allAccessors.Where(a => a != ownAccessor))
+        {
+            foreignOnly.ShouldNotContain(foreign, Case.Sensitive,
+            customMessage: $"{framework} output must not carry {foreign} — some site produced a " +
+                           "framework-specific value without consulting the selected framework");
+        }
+    }
 
     [TestMethod]
     public void CallsTheClientThroughApiClientOfTheConfiguredType()

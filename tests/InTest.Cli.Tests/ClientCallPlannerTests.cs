@@ -82,14 +82,14 @@ public class ClientCallPlannerTests
         // {PascalCase(operationId)}Async — no builder chain, no verb-derived naming: the
         // configured client type IS the receiver, so the method sits directly on it.
         ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById", ["id"])
-            .ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+            .ShouldBe("GetOrderByIdAsync({id}, cancellationToken: {cancellationToken})");
     }
 
     [TestMethod]
     public void DerivesTheExpressionForListCustomersWithNSwagAndNoPathParameter()
     {
         ClientCallPlanner.BuildNSwagConvention("/api/customers", "listCustomers", NoDeclaredPathParameters)
-            .ShouldBe("ListCustomersAsync(cancellationToken: TestContext.CancellationToken)");
+            .ShouldBe("ListCustomersAsync(cancellationToken: {cancellationToken})");
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ public class ClientCallPlannerTests
     {
         ClientCallPlanner.BuildNSwagConvention(
             "/api/customers/{customerId}/orders/{orderId}", "getCustomerOrder", ["orderId", "customerId"])
-            .ShouldBe("GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: TestContext.CancellationToken)");
+            .ShouldBe("GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: {cancellationToken})");
     }
 
     [TestMethod]
@@ -121,7 +121,7 @@ public class ClientCallPlannerTests
         // that is declared but not present in the path template. That name must not leak into the
         // argument list.
         ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "getOrderById", ["id", "unrelatedName"])
-            .ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+            .ShouldBe("GetOrderByIdAsync({id}, cancellationToken: {cancellationToken})");
     }
 
     [TestMethod]
@@ -140,7 +140,7 @@ public class ClientCallPlannerTests
         // Measured: unlike Kiota, NSwag's method name comes from operationId alone, never the
         // verb — DELETE and GET on the same operationId-less-of-verb-info shape derive identically.
         ClientCallPlanner.BuildNSwagConvention("/api/orders/{id}", "cancelOrder", ["id"])
-            .ShouldBe("CancelOrderAsync({id}, cancellationToken: TestContext.CancellationToken)");
+            .ShouldBe("CancelOrderAsync({id}, cancellationToken: {cancellationToken})");
     }
 
     // ---- Resolve: override wins outright, unconditionally ------------------------------------
@@ -274,7 +274,7 @@ public class ClientCallPlannerTests
             declaredPathParameterOrder: ["id"], hasQueryParameters: false, hasRequestBody: false,
             hasUntypablePathParameter: false, NoOverrides);
 
-        resolution.Expression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        resolution.Expression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: {cancellationToken})");
         resolution.UnresolvedReason.ShouldBeNull();
     }
 
@@ -294,7 +294,7 @@ public class ClientCallPlannerTests
             hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
 
         resolution.Expression.ShouldBe(
-            "GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: TestContext.CancellationToken)");
+            "GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: {cancellationToken})");
         resolution.UnresolvedReason.ShouldBeNull();
     }
 
@@ -585,7 +585,7 @@ public class ClientCallPlannerTests
             declaredPathParameterOrder: NoDeclaredPathParameters, hasQueryParameters: false,
             hasRequestBody: false, hasUntypablePathParameter: false, NoOverrides);
 
-        resolution.Expression.ShouldBe("PingApiAsync(cancellationToken: TestContext.CancellationToken)");
+        resolution.Expression.ShouldBe("PingApiAsync(cancellationToken: {cancellationToken})");
         resolution.UnresolvedReason.ShouldBeNull();
     }
 

@@ -12,6 +12,66 @@ goes in `Unreleased` and when it moves to a version heading.
 
 ### Fixed
 
+- **A generated xUnit or NUnit project with an NSwag client did not compile.** The NSwag calling
+  convention is a positional call, so the cancellation token has to be named inside the argument
+  list the planner builds rather than appended after it — and that text was the literal
+  `TestContext.CancellationToken`, which is MSTest's accessor. xUnit needs
+  `TestContext.Current.CancellationToken` and NUnit `TestContext.CurrentContext.CancellationToken`,
+  so the generated file carried MSTest's accessor on the client-call line and the correct one on
+  the assertion line, failing to build with CS0120. MSTest projects were unaffected, as were
+  Kiota clients under every framework. **Migration:** re-run `intest generate`; no hand edit is
+  needed and nothing outside `Generated/` changes.
+
+- **A newly required nested property produced no fixture drift.** The comparison behind
+  `generate`'s drift gate and `fixtures repair` looked only at a body's top-level property names.
+  A property added one level down — `customer.email` under an existing `customer` object — was
+  invisible to both: `generate` and `generate --check` exited **0** and `fixtures repair` reported
+  nothing to do, while the suite sent an incomplete body and the API answered 400, pointing the
+  reader at the API rather than the fixture. The same property added at the top level was caught.
+  Bodies are now compared at every depth, and `fixtures repair` inserts the sentinel at the right
+  depth without touching values a human already wrote. Arrays stay opaque, as before — a composed
+  array carries one skeleton element while a filled one carries however many the team wrote.
+  **Migration:** expect `generate` to exit **1** on a project that was green if your spec grew a
+  nested required property since the fixture was written. `fixtures repair` now adds a `TODO:`
+  sentinel for it, which fails until filled — the same trade as the path-item fix below: the test
+  was previously passing generation and failing against a live API instead.
+
+- **A stalled API crashed readiness instead of being waited out.** `Readiness.WaitAsync` treated
+  only `HttpRequestException` as a failed probe. A server that accepts the connection and never
+  answers — a half-open connection, a load balancer with nothing healthy behind it — makes
+  `HttpClient` raise `TaskCanceledException` at its own 100-second default, which fires *inside*
+  the 120-second window readiness is still waiting out. That escaped the loop and surfaced out of
+  the generated suite's assembly initializer as a raw timeout naming neither the probe path nor
+  the service — losing the one diagnosis readiness exists to give, in exactly the cold-start case
+  it exists for. A stalled probe is now one failed attempt; the readiness deadline stays the only
+  thing that ends the wait, and a genuine cancellation still propagates.
+
+- **Schema validation could reject a conforming response.** `Generated/spec-schemas.json` points
+  component references at `#/definitions/`, and that rewrite was a text replace over the whole
+  serialized bundle — so it could not tell a `$ref` from a schema's own string content. An `enum`
+  value or a `pattern` containing `#/components/schemas/…` was rewritten too, and both are
+  enforced at run time: a response carrying the real literal failed its contract test while one
+  carrying the rewritten text passed. `description` was rewritten as well, which was only
+  cosmetic. Only `$ref` values are rewritten now. **Migration:** `generate --check` will report a
+  difference in `spec-schemas.json` if your spec is affected; re-run `intest generate`.
+
+- **An invalid spec declaring a parameter twice crashed the tool.** OpenAPI requires each
+  parameter to be unique by `name` and `in`, and the reader InTest uses reports no diagnostic when
+  it is not, so the document reached planning and failed with a bare
+  `ArgumentException: An item with the same key has already been added`. The operation is now
+  skipped with a reason naming the parameter and its location, in `coverage-report.json` alongside
+  every other skip. Skipped rather than resolved first-wins deliberately: duplicate declarations
+  can carry different schemas, so choosing either is a guess about which unmatchable value a
+  declared-error case should send. **Migration:** such an operation now generates no tests and
+  `generate` exits **0** rather than **2** — fix the duplicate in the spec to get its tests back.
+
+- **`intest upgrade` only reported a stale runtime pin for MSTest projects.** The check that tells
+  you the project's adapter `PackageReference` has drifted from the running CLI matched
+  `InTest.Runtime.MSTest` alone, so an xUnit or NUnit project — scaffolded with
+  `InTest.Runtime.xUnit` or `InTest.Runtime.NUnit` since those packs shipped — was told nothing at
+  all and silently ended up with a CLI and a runtime package at different versions. All three
+  adapter ids are now matched, and the note names the reference the project actually has.
+
 - **Path parameters declared on the path item are no longer invisible**
   ([#7](https://github.com/Tjayojo/intest/issues/7)). OpenAPI 3.x lets a parameter be declared once
   on the path item and inherited by every operation beneath it — a common way to declare `id`

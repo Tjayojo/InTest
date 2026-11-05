@@ -79,6 +79,61 @@ public class TestPlanBuilderTests
         plan.Skipped.ShouldContain(s => s.OperationKey == "post_upload" && s.Reason.Contains("multipart/form-data"));
     }
 
+    /// <summary>
+    /// OpenAPI requires (name, in) to be unique and Microsoft.OpenApi reports no diagnostic when
+    /// it is not, so the invalid document reaches the planner. Before this it crashed out of
+    /// <c>ResolvePathParameterKinds</c>' <c>ToDictionary</c> as "ArgumentException: An item with
+    /// the same key has already been added. Key: id" — reaching <c>Program</c>'s crash floor and
+    /// blaming the tool for the spec. Skipped rather than resolved first-wins: the two
+    /// declarations carry different schemas here, so picking either is a guess about which
+    /// unmatchable value a declared-error case should send.
+    /// </summary>
+    [TestMethod]
+    public async Task SkipsAnOperationDeclaringTheSameParameterTwiceRatherThanCrashing()
+    {
+        var plan = await BuildAsync("""
+                                    {
+                                      "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                      "paths":{"/things/{id}":{"get":{
+                                        "operationId":"getThing",
+                                        "parameters":[
+                                          {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+                                          {"name":"id","in":"path","required":true,"schema":{"type":"integer"}}],
+                                        "responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"type":"object"}}}}}}}}
+                                    }
+                                    """);
+
+        plan.Classes.ShouldBeEmpty();
+        plan.Skipped.ShouldContain(s =>
+            s.OperationKey == "getThing" &&
+            s.Reason.Contains("'id'") &&
+            s.Reason.Contains("more than once in 'path'"));
+    }
+
+    /// <summary>
+    /// The uniqueness rule is (name, in), not name alone: the same name in two different locations
+    /// is two legitimate parameters, which is the rule <c>EffectiveParameters</c> already merges
+    /// by. A name-only check here would skip a valid operation.
+    /// </summary>
+    [TestMethod]
+    public async Task DoesNotSkipTheSameParameterNameDeclaredInTwoDifferentLocations()
+    {
+        var plan = await BuildAsync("""
+                                    {
+                                      "openapi":"3.0.3","info":{"title":"T","version":"1"},
+                                      "paths":{"/things/{id}":{"get":{
+                                        "operationId":"getThing",
+                                        "parameters":[
+                                          {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+                                          {"name":"id","in":"query","schema":{"type":"string"}}],
+                                        "responses":{"200":{"description":"ok","content":{"application/json":{"schema":{"type":"object"}}}}}}}}
+                                    }
+                                    """);
+
+        plan.Skipped.ShouldBeEmpty();
+        plan.Classes.SelectMany(c => c.Cases).ShouldContain(c => c.OperationKey == "getThing");
+    }
+
     [TestMethod]
     public async Task RecordsPathParameterNamesInOrder()
     {
@@ -1490,7 +1545,7 @@ public class TestPlanBuilderTests
         var plan = TestPlanBuilder.Build((await SpecLoader.LoadFromTextAsync(Spec)).Document, client);
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
 
-        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: {cancellationToken})");
         plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
     }
 
@@ -1690,7 +1745,7 @@ public class TestPlanBuilderTests
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getCustomerOrder");
 
         success.ClientCallExpression.ShouldBe(
-            "GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: TestContext.CancellationToken)");
+        "GetCustomerOrderAsync({orderId}, {customerId}, cancellationToken: {cancellationToken})");
         plan.Notes.ShouldNotContain(n => n.OperationKey == "getCustomerOrder");
     }
 
@@ -1922,7 +1977,7 @@ public class TestPlanBuilderTests
             (await SpecLoader.LoadFromTextAsync(SpecWithAUuidPathParameterDeclaredAtThePathItemLevel)).Document, client);
         var success = plan.Classes.SelectMany(c => c.Cases).Single(c => c.OperationKey == "getOrderById");
 
-        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: TestContext.CancellationToken)");
+        success.ClientCallExpression.ShouldBe("GetOrderByIdAsync({id}, cancellationToken: {cancellationToken})");
         plan.Notes.ShouldNotContain(n => n.OperationKey == "getOrderById");
     }
 

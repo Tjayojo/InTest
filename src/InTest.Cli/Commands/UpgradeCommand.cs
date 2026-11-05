@@ -373,7 +373,8 @@ public static class UpgradeCommand
             return DetectLegacyRuntimeReferenceMigration(csprojText, csprojFiles[0]);
         }
 
-        var current = matches[0].Groups[1].Value;
+        var adapterPackageId = matches[0].Groups[1].Value;
+        var current = matches[0].Groups[2].Value;
         if (current == runningVersion)
         {
             return null;
@@ -381,7 +382,7 @@ public static class UpgradeCommand
 
         var fileName = Path.GetFileName(csprojFiles[0]);
         return
-            $"NOTE: {fileName} pins <PackageReference Include=\"InTest.Runtime.MSTest\" Version=\"{current}\" />, " +
+            $"NOTE: {fileName} pins <PackageReference Include=\"{adapterPackageId}\" Version=\"{current}\" />, " +
             $"but the running intest is {runningVersion}. `intest upgrade` does not rewrite this " +
             "file (see [prerelease-reference-migration]) — change " +
             $"Version=\"{current}\" to Version=\"{runningVersion}\" by hand.";
@@ -423,9 +424,17 @@ public static class UpgradeCommand
     /// added <c>VersionOverride</c>, moved to central package management — simply will not match,
     /// which is by design: see that method's own doc comment for why a non-match means silence
     /// rather than a looser pattern reaching further into adopter-owned text.
+    /// <para>
+    /// All three adapter ids, captured, not MSTest alone. `init --framework` has written
+    /// <c>InTest.Runtime.xUnit</c> and <c>InTest.Runtime.NUnit</c> since those packs shipped, and
+    /// this pattern naming only MSTest meant an xUnit or NUnit project was told nothing at all
+    /// about a stale pin — measured against the same drift MSTest reports. The id is captured so
+    /// the note names the reference the project actually has.
+    /// </para>
     /// </summary>
     private static readonly Regex RuntimePackageReferencePattern =
-        new(@"<PackageReference\s+Include=""InTest\.Runtime\.MSTest""\s+Version=""([^""]+)""\s*/>", RegexOptions.Compiled);
+        new(@"<PackageReference\s+Include=""(InTest\.Runtime\.(?:MSTest|xUnit|NUnit))""\s+Version=""([^""]+)""\s*/>",
+        RegexOptions.Compiled);
 
     /// <summary>
     /// <b>[runtime-adapter-split]</b>: a scaffold written before the MSTest adapter existed pins

@@ -267,7 +267,22 @@ public static class ConfigLoader
     /// this same list backs; the two are kept in step by both reading from one array rather than
     /// by two independent lists agreeing by discipline.
     /// </summary>
-    private static readonly string[] SupportedFrameworks = ["mstest", "xunit", "nunit"];
+    /// <summary>
+    /// The accepted <c>project.framework</c> / <c>--framework</c> values, in the one place both
+    /// validators read them. <c>InitCommand.Run</c> previously spelled the same three literals out
+    /// as a chained <c>!=</c> comparison, so the two could accept different sets.
+    /// <para>
+    /// Deliberately still strings, not an enum: an enum would be the obvious way to make every
+    /// per-framework <c>switch</c> exhaustive, and it does not work here. A switch expression over
+    /// an enum with no default arm is CS8524 ("not exhaustive ... involving an unnamed enum value")
+    /// — measured against this repo's <c>TreatWarningsAsErrors</c>, where that is a build error —
+    /// so each switch keeps a default arm regardless and the compiler enforces nothing extra. What
+    /// catches a framework-specific value escaping its own switch is a test that renders all three
+    /// and asserts no output carries another's accessor; see
+    /// <c>TemplateRendererClientTests.NoFrameworksRenderedOutputCarriesAnotherFrameworksCancellationTokenAccessor</c>.
+    /// </para>
+    /// </summary>
+    internal static readonly string[] SupportedFrameworks = ["mstest", "xunit", "nunit"];
 
     /// <summary>
     /// Unlike <see cref="ReadOptionalIntestVersion"/>, <c>project.framework</c> is required — read

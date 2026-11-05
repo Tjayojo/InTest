@@ -67,6 +67,18 @@ public static class Readiness
                 lastOutcome = ex.GetType().Name;
                 consecutive = 0;
             }
+            // HttpClient.Timeout, which defaults to 100s and so fires inside this loop's own 120s
+            // default window. A stalled probe is one failed attempt, not a reason to abandon the
+            // wait — measured: WaitAsync escaped as a raw TaskCanceledException naming neither the
+            // probe path nor the service, losing the diagnosis this type exists to give.
+            //
+            // Filtered on the caller's token, not the type: a genuine Ctrl+C arrives the same way
+            // and must propagate rather than be retried.
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                lastOutcome = ex.GetType().Name;
+                consecutive = 0;
+            }
 
             if (interval > TimeSpan.Zero)
             {

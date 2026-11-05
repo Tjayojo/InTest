@@ -127,8 +127,16 @@ jobs:
       - name: Build InTest.Runtime.XUnit.Tests
         run: dotnet build tests/InTest.Runtime.XUnit.Tests/InTest.Runtime.XUnit.Tests.csproj
 
+      # `-result-trx` so this suite joins assert-trx-results.ps1's check below instead of being the
+      # one suite exempt from it. It was exempt because it produces no .trx through `dotnet test`,
+      # and that exemption was load-bearing in the wrong direction: measured, the runner exits 0 and
+      # prints "Total: 0" when it discovers nothing, so a regression that stopped discovering
+      # XunitDiagnosticsTests — the only test in here — left CI green with zero coverage of the
+      # xUnit adapter's internals. xunit.v3's own runner writes a VSTest .trx that the existing
+      # script reads unchanged (verified: it carries <Counters total=…> and a <TestMethod codeBase=…>
+      # naming this assembly, and a zero-test run fails the check).
       - name: Test InTest.Runtime.XUnit.Tests
-        run: dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll
+        run: dotnet tests/InTest.Runtime.XUnit.Tests/bin/Debug/net10.0/InTest.Runtime.XUnit.Tests.dll -result-trx ${{ github.workspace }}/TestResults/InTest.Runtime.XUnit.Tests.trx
 
       # InTest.Runtime.NUnit.Tests exists for the identical CS0433 reason as the xUnit suite above
       # (InTest.Runtime.MSTest, InTest.Runtime.xUnit and InTest.Runtime.NUnit all declare
@@ -143,9 +151,11 @@ jobs:
       - name: Assert the suites actually ran
         # Step 3 of the plan's Task 2: a green `dotnet test` step does not prove anything ran --
         # see the script's own header for the two source comments and the reasoning this points
-        # at. This is deliberately a separate step from the three above, after all of them, so a
-        # single missing/empty result cannot be masked by the other two succeeding.
-        run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Architecture.Tests, InTest.Cli.Tests, InTest.Runtime.Tests, InTest.Runtime.NUnit.Tests
+        # at. Deliberately its own step, after every suite above, so one missing or empty result
+        # cannot be masked by the others succeeding. Every suite this job runs is named here --
+        # phrased without a count on purpose, the way this workflow's own permissions comment is:
+        # the previous wording said "the three above" while there were five.
+        run: ./scripts/ci/assert-trx-results.ps1 -ResultsDirectory "${{ github.workspace }}/TestResults" -ExpectedAssembly InTest.Architecture.Tests, InTest.Cli.Tests, InTest.Runtime.Tests, InTest.Runtime.NUnit.Tests, InTest.Runtime.XUnit.Tests
 
   # `[fast-first]`: Golden is CLAUDE.md's "only suite that proves generated code both compiles
   # and runs" -- kept in its own parallel job, not folded into `fast` above, specifically so it

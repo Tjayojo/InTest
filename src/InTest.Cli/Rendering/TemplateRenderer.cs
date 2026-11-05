@@ -415,6 +415,13 @@ public sealed class TemplateRenderer
             expression = expression.Replace($"{{{name}}}", value, StringComparison.Ordinal);
         }
 
+        // The NSwag convention has to name the token inside its own argument list, so it emits a
+        // placeholder rather than the accessor; this is the one site that knows which accessor the
+        // selected framework uses. Resolved before the self-closing test below, which would
+        // otherwise leave it in the output verbatim — the defect this replaces.
+        expression = expression.Replace(
+            ClientCallPlanner.CancellationTokenPlaceholder, _cancellationTokenExpression, StringComparison.Ordinal);
+
         // A self-closing override (one that already spells its own argument list, e.g. a typed
         // body or a RequestConfiguration lambda — exactly what client-map.json's override map
         // exists to cover) is spliced verbatim; only a bare call chain gets the cancellation token

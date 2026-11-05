@@ -193,7 +193,7 @@ public static class InitCommand
         // InTest for now ship, so — unlike ConfigLoader.FrameworkRule before this pack — there is
         // no remaining roadmapped-but-unsupported framework to name as "not supported yet"; a
         // value outside this set is refused outright.
-        if (framework != "mstest" && framework != "xunit" && framework != "nunit")
+        if (!ConfigLoader.SupportedFrameworks.Contains(framework, StringComparer.Ordinal))
         {
             Console.Error.WriteLine(
             $"--framework '{framework}' is not supported. Pass mstest (default), xunit or nunit " +

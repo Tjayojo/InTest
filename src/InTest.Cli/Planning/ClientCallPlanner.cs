@@ -124,6 +124,25 @@ public static class ClientCallPlanner
     public readonly record struct Resolution(string? Expression, string? UnresolvedReason);
 
     /// <summary>
+    /// Stands in for the per-framework cancellation-token accessor inside a
+    /// <see cref="BuildNSwagConvention"/> expression, resolved by
+    /// <c>TemplateRenderer.BuildClientCallExpression</c> from the same
+    /// <c>_cancellationTokenExpression</c> the Kiota arm already appends.
+    /// <para>
+    /// This method used to emit the literal <c>TestContext.CancellationToken</c>: correct for
+    /// MSTest, CS0120 under xUnit and NUnit, whose accessors differ. It survived because the
+    /// renderer leaves a self-closing expression verbatim, so an xUnit project with an NSwag client
+    /// rendered both accessors in one file — measured.
+    /// </para>
+    /// <para>
+    /// Braced like a path-parameter placeholder so both substitutions read the same way. A path
+    /// parameter actually named <c>cancellationToken</c> would collide, but it already cannot
+    /// work — it would shadow NSwag's own parameter name — and the adopter's build says so.
+    /// </para>
+    /// </summary>
+    internal const string CancellationTokenPlaceholder = "{cancellationToken}";
+
+    /// <summary>
     /// Resolves one operation. <paramref name="hasQueryParameters"/> and
     /// <paramref name="hasRequestBody"/> are supplied by the caller rather than re-derived here —
     /// <see cref="TestPlanBuilder"/> already computes both from the same authorities
@@ -499,17 +518,18 @@ public static class ClientCallPlanner
     /// path-ordered by construction, and never reads a declared order at all.
     /// </para>
     /// <para>
-    /// The cancellation token is spliced in by name
-    /// (<c>cancellationToken: TestContext.CancellationToken</c>), not appended positionally or left
-    /// for the renderer to add — measured directly: NSwag emits the token-carrying overload as a
-    /// distinct sibling method (<c>GetOrderByIdAsync(Guid id)</c> alongside
-    /// <c>GetOrderByIdAsync(Guid id, CancellationToken cancellationToken)</c>), not one method with
-    /// an optional parameter, so naming the argument is what selects the right overload rather than
-    /// merely being stylistic. This is also why the returned expression always ends in a closing
-    /// <c>')'</c> — <c>TemplateRenderer.BuildClientCallExpression</c>'s own "already closes its own
-    /// argument list" check (the same one a self-closing <c>client-map.json</c> override relies on)
-    /// reads that as "do not append a second argument list", which is exactly correct here: this
-    /// method's own trailing <c>')'</c> is the call's real, final one, not an override's.
+    /// The cancellation token is spliced in by name, inside the argument list rather than appended
+    /// after it — measured: NSwag emits the token-carrying overload as a distinct sibling method
+    /// (<c>GetOrderByIdAsync(Guid id)</c> alongside
+    /// <c>GetOrderByIdAsync(Guid id, CancellationToken cancellationToken)</c>), so naming the
+    /// argument is what selects the right overload. That is also why the returned expression ends
+    /// in a closing <c>')'</c>: <c>TemplateRenderer.BuildClientCallExpression</c> reads that as "do
+    /// not append a second argument list", correctly — this trailing <c>')'</c> is the call's real,
+    /// final one.
+    /// </para>
+    /// <para>
+    /// Its <em>value</em> is <see cref="CancellationTokenPlaceholder"/>, not the accessor itself,
+    /// which differs per framework and is none of this planner's business.
     /// </para>
     /// </summary>
     public static string BuildNSwagConvention(
@@ -532,7 +552,7 @@ public static class ClientCallPlanner
             .Where(placeholders.Contains)
             .Select(name => $"{{{name}}}")
             .ToList();
-        arguments.Add("cancellationToken: TestContext.CancellationToken");
+        arguments.Add($"cancellationToken: {CancellationTokenPlaceholder}");
 
         return $"{methodName}({string.Join(", ", arguments)})";
     }
