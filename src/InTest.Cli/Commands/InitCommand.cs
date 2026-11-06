@@ -531,8 +531,8 @@ public static class InitCommand
         var packageReferencesBlock = framework switch
         {
             "xunit" => $"""
-                   <PackageReference Include="xunit.v3" Version="4.0.1" />
-                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+                   <PackageReference Include="xunit.v3" Version="4.0.2" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
                    <!-- The xUnit adapter depends on the neutral InTest.Runtime package (an ordinary
                         NuGet package dependency, at the adapter's own version) and brings it in
@@ -542,24 +542,24 @@ public static class InitCommand
                    <PackageReference Include="InTest.Runtime.xUnit" Version="{CliVersion.Current}" />
               """,
             "nunit" => $"""
-                   <PackageReference Include="NUnit" Version="4.6.1" />
-                   <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
-                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+                   <PackageReference Include="NUnit" Version="5.0.0" />
+                   <PackageReference Include="NUnit3TestAdapter" Version="6.3.1" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
                    <!-- The NUnit adapter depends on the neutral InTest.Runtime package (an ordinary
                         NuGet package dependency, at the adapter's own version) and brings it in
                         transitively, so only this one reference is scaffolded — both packages
                         declare types in namespace InTest.Runtime, so nothing downstream (the
                         template, testBaseClass) needs to know two packages are involved. NUnit and
-                        NUnit3TestAdapter version independently (4.x and 6.x) — unlike the MSTest trio
+                        NUnit3TestAdapter version independently (5.x and 6.x) — unlike the MSTest trio
                         above, they are not expected to move in lockstep. -->
                    <PackageReference Include="InTest.Runtime.NUnit" Version="{CliVersion.Current}" />
               """,
             "mstest" => $"""
-                   <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
-                   <PackageReference Include="MSTest.TestAdapter" Version="4.4.1" />
-                   <PackageReference Include="MSTest.Analyzers" Version="4.4.1" />
-                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+                   <PackageReference Include="MSTest.TestFramework" Version="4.5.2" />
+                   <PackageReference Include="MSTest.TestAdapter" Version="4.5.2" />
+                   <PackageReference Include="MSTest.Analyzers" Version="4.5.2" />
+                   <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
                    <PackageReference Include="Shouldly" Version="4.3.0" />
                    <!-- The MSTest adapter depends on the neutral InTest.Runtime package (an ordinary
                         NuGet package dependency, at the adapter's own version) and brings it in
