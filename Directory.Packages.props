@@ -1,35 +1,40 @@
 <Project>
   <ItemGroup>
     <PackageVersion Include="MinVer" Version="8.0.0" />
-    <PackageVersion Include="Microsoft.OpenApi" Version="3.10.2" />
+    <PackageVersion Include="Microsoft.OpenApi" Version="3.11.0" />
     <PackageVersion Include="Microsoft.OpenApi.YamlReader" Version="3.10.2" />
     <PackageVersion Include="NJsonSchema" Version="11.6.1" />
-    <PackageVersion Include="Scriban" Version="7.4.0" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
-    <PackageVersion Include="MSTest.TestFramework" Version="4.4.1" />
-    <PackageVersion Include="MSTest.TestAdapter" Version="4.4.1" />
-    <PackageVersion Include="MSTest.Analyzers" Version="4.4.1" />
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
-    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.1" />
-    <PackageVersion Include="xunit.v3.assert" Version="4.0.1" />
-    <!-- NUnit and NUnit3TestAdapter version independently: framework on 4.x, adapter on 6.x,
+    <PackageVersion Include="Scriban" Version="7.5.3" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.14" />
+    <PackageVersion Include="MSTest.TestFramework" Version="4.5.2" />
+    <PackageVersion Include="MSTest.TestAdapter" Version="4.5.2" />
+    <PackageVersion Include="MSTest.Analyzers" Version="4.5.2" />
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.2" />
+    <PackageVersion Include="xunit.v3.assert" Version="4.0.2" />
+    <!-- NUnit and NUnit3TestAdapter version independently: framework on 5.x, adapter on 6.x,
          unlike the MSTest trio, which moves in lockstep. See [one-package] in the NUnit framework
          pack plan: PackageVersionCouplingTests must check each against its own pin, not against
-         each other. -->
-    <PackageVersion Include="NUnit" Version="4.6.1" />
-    <PackageVersion Include="NUnit3TestAdapter" Version="6.3.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+         each other. NUnit crossed a major boundary here, 4.6.1 to 5.0.0, while the adapter moved
+         only 6.3.0 to 6.3.1 — that is this split working exactly as described, not a mismatch to
+         reconcile. Measured 2026-11-06: NUnit3TestAdapter 6.3.1 discovers and runs NUnit 5 tests,
+         and the generated nunit-class.scriban output still compiles and passes under it (the full
+         Golden suite, 72 cases). Worth re-measuring on the next NUnit major rather than assuming,
+         because the adapter's name pins it to a generation it has already outlived twice. -->
+    <PackageVersion Include="NUnit" Version="5.0.0" />
+    <PackageVersion Include="NUnit3TestAdapter" Version="6.3.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
   </ItemGroup>
 
   <!-- samples/ only. These are fixtures for the acceptance run and the round-trip corpus;
        nothing here is in the dependency closure of InTest.Cli or InTest.Runtime. -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.14" />
     <!-- Held at 10.0.11 deliberately: it is coupled to Swashbuckle.AspNetCore, and Dependabot
          cannot see the coupling. The build-time document generator loads the sample API's own
          assemblies to introspect it, so the Microsoft.OpenApi version its tool demands must match
@@ -39,16 +44,30 @@
          file or assembly 'Microsoft.OpenApi, Version=2.12.0.0'". Raise this only together with a
          Swashbuckle release bringing Microsoft.OpenApi 2.12 or later — 10.2.3 was still the
          latest stable when this was pinned. The matching `ignore` in .github/dependabot.yml stops
-         the bot re-proposing it weekly, and the `samples` CI job is what would now catch it. -->
+         the bot re-proposing it weekly, and the `samples` CI job is what would now catch it.
+
+         Re-measured 2026-11-06, because this pin was broken a second time and cost another
+         debugging session. Swashbuckle 10.3.1, the latest stable now, still resolves
+         Microsoft.OpenApi 2.7.5, so the lift condition remains unmet and the pin stands; a bump
+         of this package to 10.0.14 fails samples/Orders.Api identically, now demanding 2.12.2.0.
+         Two things make that failure read as worse than it is, and both wasted time here. It
+         produces fourteen `error` lines, but they are one `MSB3073` plus thirteen stack-trace
+         continuation lines from a single tool invocation exiting 11 — one fault, not fourteen —
+         and not one of them is a CS error, because nothing is wrong with the C#. Grep the first
+         line, not the count.
+
+         Note also how it got in: the `ignore` above is scoped `>=10.0.12`, so Dependabot cannot
+         have proposed this, which means some path the ignore does not cover can still reach this
+         line. If that recurs, the fix is upstream of this file, not another version here. -->
     <PackageVersion Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.11" />
-    <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.3.1" />
     <PackageVersion Include="NSwag.AspNetCore" Version="14.7.1" />
     <PackageVersion Include="NSwag.MSBuild" Version="14.7.1" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
     <!-- Duende requires a paid licence for PRODUCTION use only; development, testing and
          personal projects are free. This is a test fixture and is never in the closure of
          a shipped InTest package. See samples/README.md. -->
-    <PackageVersion Include="Duende.IdentityServer" Version="8.0.8" />
+    <PackageVersion Include="Duende.IdentityServer" Version="8.0.10" />
   </ItemGroup>
 </Project>

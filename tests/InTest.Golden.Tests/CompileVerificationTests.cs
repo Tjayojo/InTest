@@ -90,8 +90,8 @@ public class CompileVerificationTests
                                                                                       <OutputType>Exe</OutputType>
                                                                                     </PropertyGroup>
                                                                                     <ItemGroup>
-                                                                                      <PackageReference Include="xunit.v3" Version="4.0.1" />
-                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+                                                                                      <PackageReference Include="xunit.v3" Version="4.0.2" />
+                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
                                                                                       <ProjectReference Include="{xunitRuntimeProject}" />
                                                                                     </ItemGroup>
                                                                                   </Project>
@@ -119,9 +119,9 @@ public class CompileVerificationTests
                                                                                       <IsPackable>false</IsPackable>
                                                                                     </PropertyGroup>
                                                                                     <ItemGroup>
-                                                                                      <PackageReference Include="NUnit" Version="4.6.1" />
-                                                                                      <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
-                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+                                                                                      <PackageReference Include="NUnit" Version="5.0.0" />
+                                                                                      <PackageReference Include="NUnit3TestAdapter" Version="6.3.1" />
+                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
                                                                                       <ProjectReference Include="{nunitRuntimeProject}" />
                                                                                     </ItemGroup>
                                                                                   </Project>
@@ -147,9 +147,9 @@ public class CompileVerificationTests
                                                                                       <IsPackable>false</IsPackable>
                                                                                     </PropertyGroup>
                                                                                     <ItemGroup>
-                                                                                      <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
-                                                                                      <PackageReference Include="MSTest.TestAdapter" Version="4.4.1" />
-                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+                                                                                      <PackageReference Include="MSTest.TestFramework" Version="4.5.2" />
+                                                                                      <PackageReference Include="MSTest.TestAdapter" Version="4.5.2" />
+                                                                                      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
                                                                                       <ProjectReference Include="{runtimeProject}" />
                                                                                     </ItemGroup>
                                                                                   </Project>
